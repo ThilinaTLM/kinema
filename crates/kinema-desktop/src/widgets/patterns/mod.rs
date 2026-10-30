@@ -14,6 +14,7 @@ mod menu_item;
 mod resource_view;
 mod section;
 mod skeleton;
+mod stream_row;
 
 pub use badge::{Badge, BadgeTone};
 pub use card::Card;
@@ -26,6 +27,7 @@ pub(crate) use resource_view::ResourceView;
 pub use resource_view::{StateView, ViewSelection, ViewState, select_view};
 pub use section::Section;
 pub use skeleton::{Skeleton, SkeletonShape, SkeletonText};
+pub use stream_row::{HEALTHY_SEEDERS, StreamRow};
 
 use std::time::Duration;
 

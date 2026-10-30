@@ -291,8 +291,8 @@ retain contrast-safe local scrims/opaque surfaces and neutral failure fallbacks.
 ### 2.3 Typography
 
 Bundle **Inter** (OFL 1.1; Regular 400, Medium 500, SemiBold 600, Bold 700) as the
-UI family and **JetBrains Mono** (OFL 1.1; Regular) for release names, file names,
-paths, hashes and byte sizes inside stream/file lists. Register them at startup
+UI family and **JetBrains Mono** (OFL 1.1; Regular) for file names, paths and
+hashes. Stream release names use the UI face. Register them at startup
 through GPUI's text system; ship license texts and credit them in About. Reasons:
 identical metrics on Windows/macOS/Linux, excellent small-size legibility,
 tabular figures (`tnum`) for ratings, sizes and runtimes, and a neutral modern
@@ -308,7 +308,7 @@ font only if bundled registration fails (log once, no user-visible error).
 | `type.body.strong` | 13 / 18 | 600 | Row titles, button labels |
 | `type.small` | 12 / 16 | 400–500 | Facts, metadata rows, menu shortcuts |
 | `type.caption` | 11 / 14 | 600 | Chips (rating, SERIES, quality), counters |
-| `type.mono` | 12 / 16 | 400 | Release/file names, sizes in stream lists |
+| `type.mono` | 12 / 16 | 400 | File names, paths, hashes |
 
 Use tabular numbers for every numeric fact. Uppercase only for `SERIES` and
 quality chips (`2160P`, `HDR`). Never shrink text to fit fixed geometry; wrap,
@@ -650,60 +650,57 @@ This approved provider revision is in progress, not live-provider verification.
 
 ### 4.6 Streams page
 
-Reached from Play (movie) or an episode card (series). Same route as Detail:
-Esc / Back / toolbar arrow return to the detail page, which keeps its scroll
-position, season and focus (the episode card is refocused).
+Approved revision: [streams-revision-2026-10.html](streams-revision-2026-10.html)
+(supersedes the earlier Streams sections of the UI revision). Reached from Play
+(movie) or an episode card (series). Same route as Detail: Esc / Back / toolbar
+arrow return to the detail page, which keeps its scroll position, season and focus.
 
 ```text
-│ [← Back]                                                                     │
-│ [poster] The Quiet Orbit                                                     │
-│          S01E02 · The Signal                    (episodes only)              │
-│ Streams  12                                     [Torrentio ▾] [⟳]            │
-│ [All │ 4K │ 1080p │ 720p]                                                    │
-│ 1080p HDR  4.2 GiB · 412 seeders · Torrentio                                 │
-│ HEVC       Quiet.Orbit.1080p.WEB…                                            │
+│ backdrop fading into the canvas (MediaHero, as Detail)                       │
+│ ┌──────┐ CHOOSE A STREAM                                                     │
+│ │POSTER│ North Harbor                                       (type.display)   │
+│ │104 px│ [▭ S01E02] The Signal [2024]                                        │
+│ └──────┘ [Torrentio 5│Peerflix 1] [All 5│4K 1│1080p 3] │ [⌕ Filter] [Sort ▾] [⚡] [⟳] │
+│ Streams 5 of 5                       remembered note │ ┌ inspector ───────┐ │
+│ ▌[4K ] Release name (2 lines)        3.9 GiB  ↑412    │ │ badges, name     │ │
+│  [HDR] DTS-HD 5.1 · Torrentio  [⚡ AllDebrid]          │ │ Size│Seeders│Audio│ │
+│  [1080p] …                                            │ │ accounts, file   │ │
+│                                                       │ ├──────────────────┤ │
+│                                                       │ │ Play with [RD│AD]│ │
+│                                                       │ │ [▶ Play        ] │ │
 ```
 
-- At frame width ≥ 1040 px the page has two panes: a fixed sidebar (27 %, 300–400 px:
-  Back, small poster, title / `SxxExx`, a *Streams controls* panel, then chips and
-  overview) and the stream list filling the rest. Narrower windows stack the same
-  pieces in one column. Release names wrap to two lines before truncating.
-- Streams controls panel (`widgets/choice_card.rs`): heading + "N streams" count
-  (or "N of M" when filtered) + labelled Refresh button; **Provider** radio-style
-  `ChoiceCard`s (Torrentio / Peerflix, selected card shows its status line) that
-  switch through the same indexer `Select` state/event as before; **Quality**
-  `ChoiceChip`s with per-quality counts (only buckets present).
-- Roomier rows than the old side panel; stream-row styling, badges and the row
-  context menu (Play… · Show details · Copy release name) are unchanged.
-- Loading, empty, error (with retry) and "hidden by provider limit" states are
-  kept; quality tabs show only buckets present.
-- Click / Enter on a stream opens the Play sheet (§4.7). Episode packs never use
-  largest/positional file guesses. No automatic watched/progress/auto-next claims; the approved manual Library
-   tracking extension is source implemented with scoped validation, not automatic
-   playback behavior.
+- **Header:** `MediaHero` with eyebrow, 104 px poster (80 px narrow), episode
+  marker badge + name, fact chips. Filters sit in the hero action row as 32 px
+  glass controls: provider and quality `Segmented` with counts, `SearchField`,
+  sort `Select` (icon + "Sort" prefix), "In my account" `ActionButton` toggle
+  (only with a debrid token) and Refresh.
+- **List:** `StreamRow` pattern — `QualityTile`, release name in the regular UI
+  face (2 lines), `TagList` (codec, audio, languages, tracker) and presence
+  badges, right-aligned size and seeders. No table header and no resting fill;
+  selection is accent tint plus a 2 px leading marker.
+- **Inspector** (frame ≥ 1040 px, 340–400 px, sticky): badges, cleaned name,
+  origin, three `StatTile`s, debrid account presence (presence only, never
+  cache/readiness), file-name disclosure, then the play footer.
+- **Narrow** (< 1040 px): the inspector is replaced by a floating play dock with
+  the selected release and the same play footer.
+- Single click selects; double-click, Enter, the row menu or the footer's Play
+  start playback. Remembered provider/quality/sort/account filter, loading,
+  empty, error (with retry) and provider-limit states are unchanged.
 
-### 4.7 Play sheet (modal, 560 wide)
+### 4.7 Inline play session (no modal)
 
-```text
-┌──────────────────────────────────────────────────────────┐
-│ Play · The Quiet Orbit                                   │
-│ Quiet.Orbit.1080p.WEB…  ·  via Real-Debrid               │
-├──────────────────────────────────────────────────────────┤
-│ Preparing with Real-Debrid…               ▬▬▬▬▬▬──────   │  then "Starting playback…"
-│ ⚠ Couldn't identify the file in this torrent — try       │  (non-unique selection)
-│   another stream.                                        │
-│ Opens in mpv                                  [Cancel]   │
-└──────────────────────────────────────────────────────────┘
-```
-
-There is no file picker. When preparation finishes with `FileSelection::Unique(i)`
-the sheet submits `PlayFile` for `prepared.files[i]` immediately; any other
-selection shows `FileSelection::error_message()` and the sheet offers Close.
-Missing debrid credentials show a notice with "Open Settings…" to that account.
-On launch the sheet closes and the transfers indicator pulses once (static in
-reduce). Failures keep the sheet open with the reason. The player is chosen in
-Settings (shown read-only here). Players receive local server URLs only, launched
-as executable + argument list.
+The former Play sheet is a non-modal `PlaySession` rendered in the inspector
+footer (or dock): "Preparing with Real-Debrid…" → "Starting playback in
+<player>" steps with an indeterminate bar and Cancel; failures show a notice
+with Try again / Dismiss; missing credentials show Open Settings / Dismiss; the
+cache-limit failure links to Storage settings. Playback start, Cancel, Dismiss,
+leaving the page, or playing another row drop the session and cancel its owned
+work. A row being prepared shows a "Preparing…" badge; selecting another row
+shows a one-line "Preparing another stream" banner. There is no file picker:
+`FileSelection::Unique(i)` plays `prepared.files[i]` immediately; anything else
+shows `FileSelection::error_message()`. Players receive local server URLs only,
+launched as executable + argument list.
 
 ### 4.8 Settings window (single instance, ~860 × 600)
 

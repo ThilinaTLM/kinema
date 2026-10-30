@@ -47,7 +47,8 @@ fn account_invalidation_clears_the_preparation() {
     use gpui::{AppContext, TestAppContext};
     let mut cx = TestAppContext::single();
     let coordinator = cx.new(|cx| super::AppCoordinator::fixture(vec![], None, cx));
-    let sheet = cx.new(|cx| super::PlaySheet::fixture(coordinator.clone(), "play-live-ready", cx));
+    let session =
+        cx.new(|cx| super::PlaySession::fixture(coordinator.clone(), "play-live-ready", cx));
     coordinator.update(&mut cx, |_, cx| {
         cx.emit(super::CoordinatorEvent::App(crate::app::AppEvent {
             generation: 0,
@@ -55,15 +56,15 @@ fn account_invalidation_clears_the_preparation() {
         }))
     });
     cx.run_until_parked();
-    sheet.update(&mut cx, |sheet, _| {
-        assert!(sheet.preparation.is_none());
-        assert!(sheet.pending.is_none());
-        assert!(sheet.missing);
+    session.update(&mut cx, |session, _| {
+        assert!(session.preparation.is_none());
+        assert!(session.pending.is_none());
+        assert!(session.missing);
     });
 }
 #[cfg(feature = "ui-probe-test")]
 mod switch {
-    use super::super::{AppCoordinator, AppOutcome, CoordinatorEvent, PlaySheet};
+    use super::super::{AppCoordinator, AppOutcome, CoordinatorEvent, PlaySession};
     use crate::app::{AppEvent, CredentialState};
     use gpui::{AppContext, Entity, TestAppContext};
 
@@ -77,9 +78,10 @@ mod switch {
             outcome: AppOutcome::Invalidated { released: vec![] },
         }
     }
-    fn switching(cx: &mut TestAppContext) -> (Entity<AppCoordinator>, Entity<PlaySheet>) {
+    fn switching(cx: &mut TestAppContext) -> (Entity<AppCoordinator>, Entity<PlaySession>) {
         let coordinator = cx.new(|cx| AppCoordinator::fixture(vec![], None, cx));
-        let sheet = cx.new(|cx| PlaySheet::fixture(coordinator.clone(), "play-live-switching", cx));
+        let sheet =
+            cx.new(|cx| PlaySession::fixture(coordinator.clone(), "play-live-switching", cx));
         (coordinator, sheet)
     }
 
@@ -139,7 +141,7 @@ mod switch {
 
 #[cfg(feature = "ui-probe-test")]
 mod events {
-    use super::super::{AppOutcome, CoordinatorEvent, PlaySheet};
+    use super::super::{AppOutcome, CoordinatorEvent, PlaySession};
     use crate::{app::AppEvent, providers::PreparedTorrent, screens::coordinator::AppCoordinator};
     use gpui::{AppContext, TestAppContext};
     use kinema_core::{
@@ -175,7 +177,8 @@ mod events {
     fn run(selection: FileSelection) -> (Option<String>, Option<u64>) {
         let mut cx = TestAppContext::single();
         let coordinator = cx.new(|cx| AppCoordinator::fixture(vec![], None, cx));
-        let sheet = cx.new(|cx| PlaySheet::fixture(coordinator.clone(), "play-live-preparing", cx));
+        let session =
+            cx.new(|cx| PlaySession::fixture(coordinator.clone(), "play-live-preparing", cx));
         coordinator.update(&mut cx, |_, cx| {
             cx.emit(CoordinatorEvent::App(AppEvent {
                 generation: 100,
@@ -183,7 +186,7 @@ mod events {
             }))
         });
         cx.run_until_parked();
-        sheet.update(&mut cx, |s, _| (s.error.clone(), s.pending))
+        session.update(&mut cx, |s, _| (s.error.clone(), s.pending))
     }
 
     #[test]
@@ -210,4 +213,33 @@ mod events {
             Some("Application service unavailable or busy. Retry.")
         );
     }
+}
+
+#[cfg(feature = "ui-probe-test")]
+#[test]
+fn inline_phases_follow_the_workflow_state() {
+    use super::{PlayPhase, PlaySession};
+    use gpui::{AppContext, TestAppContext};
+    let mut cx = TestAppContext::single();
+    let coordinator = cx.new(|cx| super::AppCoordinator::fixture(vec![], None, cx));
+    let phase = |cx: &mut TestAppContext, scene: &str| {
+        let session = cx.new(|cx| PlaySession::fixture(coordinator.clone(), scene, cx));
+        session.read_with(cx, |s, _| (s.phase(), s.busy()))
+    };
+    assert_eq!(
+        phase(&mut cx, "play-live-preparing"),
+        (PlayPhase::Preparing, true)
+    );
+    assert_eq!(
+        phase(&mut cx, "play-live-ready"),
+        (PlayPhase::Starting, true)
+    );
+    assert!(matches!(
+        phase(&mut cx, "play-live-failure"),
+        (PlayPhase::Failed(_), false)
+    ));
+    assert!(matches!(
+        phase(&mut cx, "play-live-missing-creds"),
+        (PlayPhase::Blocked(_), false)
+    ));
 }

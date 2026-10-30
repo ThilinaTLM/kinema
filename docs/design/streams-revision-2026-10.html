@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kinema — Streams page redesign (2026-10)</title>
+<style>
+:root{
+  --canvas:#0B0C0E;--surface:#131418;--raised:#1B1D22;--overlay:#202228;
+  --line:rgba(255,255,255,.08);--line2:rgba(255,255,255,.14);--hair:#25282E;--lctl:#646A75;
+  --ctl:#24272D;--ctl-h:#2D3037;--ctl-p:#373B43;
+  --tx:#F2F3F5;--tx2:#B3B8C1;--tx3:#8C929D;
+  --accent:#FF7A45;--accent-h:#FF915F;--on-accent:#21130D;--accent-tx:#FF9B72;--accent-tint:rgba(255,122,69,.16);
+  --ok:#46C98A;--ok-w:rgba(70,201,138,.12);--warn:#F2A33A;--warn-w:rgba(242,163,58,.10);--err:#FF6B6B;--err-w:rgba(255,107,107,.10);
+  --info-w:rgba(179,184,193,.10);
+  --ph:#1B1D22;--shadow:rgba(0,0,0,.32);
+  --r4:4px;--r6:6px;--r8:8px;--r12:12px;--ease:cubic-bezier(.22,.8,.26,1);
+  --mono:"JetBrains Mono",ui-monospace,monospace;--ui:Inter,system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+button{font-family:inherit}
+body{margin:0;background:#050607;color:var(--tx);font:13px/18px var(--ui);font-variant-numeric:tabular-nums}
+.doc{padding:0 32px 64px}
+header.top{position:sticky;top:0;z-index:50;background:rgba(5,6,7,.94);border-bottom:1px solid var(--hair);padding:12px 32px;margin:0 -32px 24px;display:flex;gap:16px;align-items:center}
+header.top h1{font-size:15px;margin:0}
+header.top a{color:var(--tx2);text-decoration:none}
+h2.s{font-size:18px;margin:40px 0 4px}
+p.lead{color:var(--tx2);margin:0 0 16px;max-width:1100px}
+.notes{background:var(--raised);border:1px solid var(--line);border-radius:var(--r8);padding:12px 16px;margin:16px 0 0;color:var(--tx2);max-width:1200px}
+.notes b{color:var(--tx)}.notes li{margin:4px 0}
+code{color:var(--accent-tx);font-family:var(--mono);font-size:12px}
+svg.i{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+svg.i.sm{width:14px;height:14px}
+svg.i.xs{width:12px;height:12px}
+
+/* ===== Window ===== */
+.win{border:1px solid #2a2d33;border-radius:10px;overflow:hidden;background:var(--canvas);position:relative}
+.win .wt{height:28px;background:#16171b;color:var(--tx2);font-size:12px;display:grid;place-items:center;border-bottom:1px solid #000}
+.page{position:relative;height:860px;overflow:hidden}
+.page.narrow{height:760px}
+.backdrop{position:absolute;inset:0 0 auto 0;height:340px;background:
+  linear-gradient(180deg,rgba(11,12,14,0) 0%,rgba(11,12,14,.55) 55%,var(--canvas) 100%),
+  linear-gradient(90deg,rgba(11,12,14,.9) 0%,rgba(11,12,14,.35) 60%,rgba(11,12,14,.6) 100%),
+  radial-gradient(60% 120% at 75% 0%,#5a1414 0%,#2a0b0b 45%,transparent 75%),
+  radial-gradient(40% 90% at 20% 0%,#3a1010 0%,transparent 70%)}
+.tb{position:absolute;top:0;left:0;right:0;height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 40px;z-index:3}
+.ib{width:28px;height:28px;border-radius:var(--r6);display:grid;place-items:center;color:var(--tx2);background:transparent;border:0;cursor:pointer}
+.ib:hover{background:var(--ctl-h);color:var(--tx)}
+.glass{display:inline-flex;align-items:center;gap:2px;padding:2px;border-radius:var(--r8);background:rgba(19,20,24,.82);border:1px solid var(--line)}
+.glass .xf{display:inline-flex;gap:6px;align-items:center;padding:0 8px;color:var(--tx2);font-size:12px}
+.glass .dv{width:1px;height:16px;background:var(--hair);margin:0 2px}
+.frame{position:relative;z-index:2;padding:64px 40px 0;height:100%;display:flex;flex-direction:column;gap:20px}
+
+/* ===== Composite: StreamsHeader ===== */
+.sh{display:grid;grid-template-columns:104px minmax(0,1fr);gap:24px;align-items:end}
+.poster{aspect-ratio:2/3;border-radius:var(--r8);overflow:hidden;border:1px solid rgba(255,255,255,.06);box-shadow:0 4px 14px var(--shadow);
+  background:radial-gradient(50% 40% at 50% 38%,#d01818 0%,#6a0c0c 45%,#160606 100%)}
+.poster span{display:block;margin-top:110%;text-align:center;font:700 10px/12px var(--ui);color:#ff3b3b;letter-spacing:.06em}
+.eyebrow{font-size:11px;line-height:14px;font-weight:600;color:var(--tx3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px}
+.sh h1{font-size:30px;line-height:36px;font-weight:700;margin:0;letter-spacing:-.01em}
+.sh .ep{display:flex;gap:8px;align-items:center;margin:6px 0 16px;flex-wrap:wrap}
+.sh .ep .name{font-size:15px;line-height:20px;font-weight:600;color:var(--tx)}
+.chip{height:20px;padding:0 6px;border-radius:var(--r4);font-size:11px;font-weight:600;background:rgba(11,12,14,.72);color:var(--tx2);display:inline-flex;align-items:center;gap:4px}
+.chip.solid{background:var(--ctl)}
+
+/* ===== Composite: FilterBar (one row, no box) ===== */
+.fb{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.fb .vsep{width:1px;height:20px;background:var(--hair);margin:0 4px}
+/* Primitive: Segmented (+count) — the same control as the season switcher */
+.seg{display:inline-flex;padding:2px;border-radius:var(--r8);background:rgba(36,39,45,.85);border:1px solid var(--line);height:32px;align-items:stretch}
+.seg button{border:0;background:transparent;color:var(--tx2);font:600 12px/16px var(--ui);padding:0 10px;border-radius:var(--r6);cursor:pointer;display:inline-flex;gap:6px;align-items:center;transition:background 80ms linear,color 80ms}
+.seg button:hover{color:var(--tx);background:var(--ctl-h)}
+.seg button .n{font-weight:500;color:var(--tx3)}
+.seg button.on{background:var(--overlay);color:var(--accent-tx);box-shadow:0 2px 8px var(--shadow),inset 0 0 0 1px var(--line)}
+.seg button.on .n{color:var(--accent-tx);opacity:.75}
+/* Primitive: compact SearchField */
+.sf{height:32px;width:240px;display:inline-flex;gap:8px;align-items:center;padding:0 10px;border-radius:var(--r6);background:rgba(36,39,45,.85);border:1px solid var(--line);color:var(--tx3)}
+.sf kbd{margin-left:auto;font:500 11px var(--ui);color:var(--tx3);border:1px solid var(--line2);border-radius:var(--r4);padding:0 4px}
+/* Primitive: MenuButton (sort) */
+.mb{height:32px;display:inline-flex;gap:6px;align-items:center;padding:0 10px;border-radius:var(--r6);background:rgba(36,39,45,.85);border:1px solid var(--line);color:var(--tx);font-weight:600;font-size:12px;cursor:pointer}
+.mb .k{color:var(--tx3);font-weight:500}
+/* Primitive: ToggleChip (account-only) */
+.tc{height:32px;display:inline-flex;gap:6px;align-items:center;padding:0 10px;border-radius:var(--r6);background:rgba(36,39,45,.85);border:1px solid var(--line);color:var(--tx2);font-weight:600;font-size:12px;cursor:pointer}
+.tc.on{background:var(--accent-tint);border-color:rgba(255,122,69,.35);color:var(--accent-tx)}
+.ab{height:32px;display:inline-flex;align-items:center;gap:8px;padding:0 12px;border-radius:var(--r6);border:1px solid var(--line);background:var(--ctl);color:var(--tx);font-weight:600;cursor:pointer;font-size:13px}
+.ab.icon{width:32px;padding:0;justify-content:center;color:var(--tx2)}
+.ab.primary{background:var(--accent);color:var(--on-accent);border-color:transparent}
+.ab.primary:hover{background:var(--accent-h)}
+.ab.block{width:100%;justify-content:center;height:36px;font-size:14px}
+.ab.ghost{background:transparent;border-color:transparent;color:var(--tx2)}
+.ab.ghost:hover{background:var(--ctl-h);color:var(--tx)}
+
+/* ===== Body: list + inspector side by side ===== */
+.body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:24px}
+.list{min-height:0;overflow:auto;padding-bottom:24px}
+.lh{display:flex;align-items:baseline;gap:8px;margin:4px 0 10px}
+.lh h3{margin:0;font-size:15px;line-height:20px}
+.lh .n{color:var(--tx3);font-size:12px}
+.lh .note{margin-left:auto;color:var(--tx3);font-size:12px}
+
+/* Primitive: QualityTile */
+.qt{width:52px;height:40px;border-radius:var(--r6);background:var(--ctl);display:flex;flex-direction:column;align-items:center;justify-content:center;flex:none;gap:1px}
+.qt b{font:700 12px/14px var(--ui);color:var(--tx)}
+.qt i{font:600 9px/11px var(--ui);font-style:normal;letter-spacing:.06em;color:var(--tx3);text-transform:uppercase}
+.qt.uhd{background:var(--accent-tint)}.qt.uhd b{color:var(--accent-tx)}
+.qt i.hdr{color:#C9B3FF}
+
+/* Primitive: TagList (quiet inline tags, no boxes) */
+.tags{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:11px;line-height:14px;font-weight:600;color:var(--tx3);align-items:center}
+.tags .t{display:inline-flex;align-items:center;gap:4px}
+
+/* Primitive: AccountMark */
+.am{height:20px;padding:0 6px;border-radius:var(--r4);font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.am.ok{background:var(--ok-w);color:var(--ok)}
+.am.chk{background:var(--info-w);color:var(--tx3)}
+.am.unk{background:var(--info-w);color:var(--tx3)}
+.am.busy{background:var(--accent-tint);color:var(--accent-tx)}
+
+/* Composite: StreamRow */
+.sr{position:relative;display:grid;grid-template-columns:52px minmax(0,1fr) 84px 72px;gap:16px;align-items:center;padding:10px 14px;border-radius:var(--r8);cursor:pointer;transition:background 80ms linear}
+.sr + .sr{margin-top:2px}
+.sr:hover{background:var(--surface)}
+.sr.on{background:var(--accent-tint)}
+.sr.on::before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:2px;border-radius:2px;background:var(--accent)}
+.sr .rn{font:500 13px/18px var(--ui);color:var(--tx);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;margin-bottom:6px}
+.sr .num{text-align:right;font-size:13px;font-weight:500}
+.sr .num small{display:block;font-size:11px;line-height:14px;color:var(--tx3);font-weight:500}
+.sr .seed{display:inline-flex;align-items:center;gap:4px;color:var(--tx2)}
+.sr .seed.hot{color:var(--ok)}
+.sr .meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+
+/* ===== Composite: StreamInspector (right panel, sticky, owns playback) ===== */
+.insp{align-self:start;max-height:100%;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:var(--r12);box-shadow:0 2px 8px var(--shadow);overflow:hidden}
+.insp .sc{padding:20px;display:flex;flex-direction:column;gap:18px;overflow:auto}
+.insp .badges{display:flex;gap:6px;flex-wrap:wrap}
+.bdg{height:20px;padding:0 6px;border-radius:var(--r4);font-size:11px;font-weight:600;background:var(--ctl);color:var(--tx2);display:inline-flex;align-items:center}
+.bdg.acc{background:var(--accent-tint);color:var(--accent-tx)}
+.insp h4{margin:8px 0 4px;font:600 15px/20px var(--ui);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.insp .src{color:var(--tx3);font-size:12px}
+/* Primitive: StatTile */
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.st{background:var(--raised);border:1px solid var(--line);border-radius:var(--r8);padding:8px 10px}
+.st .l{font-size:11px;line-height:14px;font-weight:600;color:var(--tx3)}
+.st .v{font-size:15px;line-height:20px;font-weight:600;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st .v.ok{color:var(--ok)}
+.sect .l{font-size:11px;line-height:14px;font-weight:600;color:var(--tx3);margin-bottom:6px;display:flex;justify-content:space-between}
+.acct{display:flex;justify-content:space-between;align-items:center;height:28px}
+.hint{font-size:11px;line-height:14px;color:var(--tx3)}
+.disc{display:flex;align-items:center;gap:6px;color:var(--tx2);font-weight:600;font-size:12px;cursor:pointer;height:28px}
+.file{font:400 11px/15px var(--mono);color:var(--tx2);background:var(--raised);border-radius:var(--r6);padding:8px 10px;word-break:break-all}
+/* PlayFooter: pinned bottom section; the old Play sheet lives here now */
+.pf{border-top:1px solid var(--hair);padding:16px 20px 20px;display:flex;flex-direction:column;gap:12px;background:linear-gradient(180deg,rgba(27,29,34,.5),rgba(19,20,24,0))}
+.pf .row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.pf .lab{font-size:11px;font-weight:600;color:var(--tx3)}
+.pf .seg{height:28px}.pf .seg button{padding:0 8px}
+.pf .cap{font-size:11px;line-height:14px;color:var(--tx3);display:flex;justify-content:space-between}
+.prog{height:4px;border-radius:2px;background:var(--ctl);overflow:hidden;position:relative}
+.prog i{position:absolute;top:0;bottom:0;width:35%;background:var(--accent);border-radius:2px;animation:ind 1.4s var(--ease) infinite}
+@keyframes ind{0%{left:-35%}100%{left:100%}}
+.steps{display:flex;flex-direction:column;gap:6px}
+.step{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--tx3)}
+.step.done{color:var(--tx2)}.step.now{color:var(--tx);font-weight:600}
+.step .dot{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--lctl);display:grid;place-items:center;flex:none}
+.step.done .dot{border-color:var(--ok);color:var(--ok)}
+.step.now .dot{border-color:var(--accent);border-top-color:transparent;animation:spin .9s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.ntc{display:flex;gap:10px;padding:10px 12px;border-radius:var(--r8);font-size:12px;line-height:16px;color:var(--tx2)}
+.ntc b{display:block;color:var(--tx);font-size:12px}
+.ntc.err{background:var(--err-w);border:1px solid rgba(255,107,107,.25)}.ntc.err svg{color:var(--err)}
+.ntc.warn{background:var(--warn-w);border:1px solid rgba(242,163,58,.25)}.ntc.warn svg{color:var(--warn)}
+.resume-sub{font-size:12px;color:var(--tx3);text-align:center}
+
+/* ===== Narrow: PlayDock ===== */
+.narrow .body{grid-template-columns:minmax(0,1fr)}
+.narrow .list{padding-bottom:96px}
+.dock{position:absolute;left:20px;right:20px;bottom:16px;z-index:5;background:var(--overlay);border:1px solid var(--line);border-radius:var(--r12);box-shadow:0 12px 36px var(--shadow);padding:10px 12px 10px 14px;display:grid;grid-template-columns:52px minmax(0,1fr) auto auto;gap:14px;align-items:center}
+.dock .rn{font:600 13px/18px var(--ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dock .sub{font-size:11px;color:var(--tx3);margin-top:2px;display:flex;gap:8px}
+
+/* ===== Spec tables ===== */
+table.inv{border-collapse:collapse;width:100%;max-width:1200px;margin-top:12px}
+table.inv td,table.inv th{border-bottom:1px solid var(--hair);padding:8px 10px;text-align:left;vertical-align:top;color:var(--tx2)}
+table.inv th{color:var(--tx);font-size:12px}
+table.inv td:first-child{color:var(--tx);font-weight:600;white-space:nowrap}
+.specimens{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start;background:var(--canvas);border:1px solid #2a2d33;border-radius:10px;padding:24px}
+.specimens .cap{font-size:11px;color:var(--tx3);margin-top:8px}
+.states{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.states .insp{max-height:none}
+.states h5{margin:0 0 8px;font-size:12px;color:var(--tx2)}
+.cmp{display:grid;grid-template-columns:1fr 1fr;gap:16px;max-width:1400px}
+.cmp img{width:100%;border-radius:8px;border:1px solid #2a2d33}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7M19 12H5"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 3v18l15-9z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-play-o" viewBox="0 0 24 24"><path d="M6 3v18l15-9z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol>
+  <symbol id="i-sort" viewBox="0 0 24 24"><path d="m3 16 4 4 4-4M7 20V4M21 8l-4-4-4 4M17 4v16"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5"/></symbol>
+  <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9z"/></symbol>
+  <symbol id="i-arrowup" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3.1V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24"><path d="m3 16 4 4 4-4M7 20V4M21 8l-4-4-4 4M17 4v16"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24"><path d="m21.7 18-8-14a2 2 0 0 0-3.4 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3M12 9v4M12 17h.01"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M4 16V5a2 2 0 0 1 2-2h11"/></symbol>
+  <symbol id="i-tv" viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="m17 2-5 5-5-5"/></symbol>
+</svg>
+
+<div class="doc">
+<header class="top"><h1>Streams page redesign</h1><a href="#wide">1 Wide</a><a href="#states">2 Inspector states</a><a href="#narrow">3 Narrow</a><a href="#primitives">4 Primitives</a><a href="#rules">5 Behaviour</a></header>
+
+<h2 class="s" id="wide">1 · Wide window: compact hero, filters beside the art, list and inspector side by side</h2>
+<p class="lead">The page now uses the same language as Detail. It has artwork fading into the canvas, the poster with a Display title, chips for facts, and the same Segmented control used for seasons. The bordered "control box", the column-header table and the Play modal are gone. The inspector on the right is sticky and owns playback from selection through to launch. <b>Click a row to select it. Press Play to see the inline preparation flow.</b></p>
+
+<div class="win"><div class="wt">Kinema Next</div>
+<div class="page" id="wide-page">
+  <div class="backdrop"></div>
+  <div class="tb">
+    <div class="glass"><button class="ib" title="Back to details (Esc)"><svg class="i"><use href="#i-back"/></svg></button></div>
+    <div class="glass"><button class="ib"><svg class="i"><use href="#i-folder"/></svg></button><button class="ib"><svg class="i"><use href="#i-refresh"/></svg></button><span class="dv"></span><span class="xf"><svg class="i sm"><use href="#i-swap"/></svg>No transfers</span><span class="dv"></span><button class="ib"><svg class="i"><use href="#i-gear"/></svg></button><button class="ib"><svg class="i"><use href="#i-more"/></svg></button></div>
+  </div>
+  <div class="frame">
+    <div class="sh">
+      <div class="poster"><span>CRIMINAL<br>MINDS</span></div>
+      <div>
+        <div class="eyebrow">Choose a stream</div>
+        <h1>Criminal Minds</h1>
+        <div class="ep"><span class="chip solid"><svg class="i xs"><use href="#i-tv"/></svg>S01E02</span><span class="name">Compulsion</span><span class="chip">2005</span><span class="chip">42 min</span></div>
+        <div class="fb">
+          <div class="seg"><button class="on">Torrentio <span class="n">22</span></button><button>Peerflix <span class="n">3</span></button></div>
+          <div class="seg"><button>All <span class="n">22</span></button><button class="on">1080p <span class="n">8</span></button><button>720p <span class="n">5</span></button><button>Other <span class="n">9</span></button></div>
+          <div class="vsep"></div>
+          <div class="sf"><svg class="i sm"><use href="#i-search"/></svg>Filter releases<kbd>/</kbd></div>
+          <span class="mb"><svg class="i sm"><use href="#i-sort"/></svg><span class="k">Sort</span> Seeders<svg class="i sm"><use href="#i-down"/></svg></span>
+          <span class="tc" title="Only releases already in a connected debrid account"><svg class="i sm"><use href="#i-zap"/></svg>In my account</span>
+          <button class="ab icon" title="Refresh streams"><svg class="i"><use href="#i-refresh"/></svg></button>
+        </div>
+      </div>
+    </div>
+
+    <div class="body">
+      <div class="list">
+        <div class="lh"><h3>Streams</h3><span class="n">8 of 22</span><span class="note">Filters are remembered</span></div>
+        <div id="rows"></div>
+      </div>
+      <aside class="insp" id="insp"></aside>
+    </div>
+  </div>
+</div></div>
+<div class="notes"><b>What changed and why</b><ul>
+  <li><b>Hero-lite header.</b> It uses the Detail backdrop recipe (art, directional scrim, fade to canvas), a 104 px poster with the same edge and shadow, an uppercase eyebrow, the <code>type.display</code> title, and the episode as chip + <code>type.heading</code> name. No more 14 px title floating next to a 56 px thumbnail.</li>
+  <li><b>Filters sit beside the art</b>, under the title, in one unboxed row. Provider and quality use <code>Segmented</code> with counts, the same control as the season switcher, instead of orange-outlined <code>ChoiceChip</code>s. Search is the compact <code>SearchField</code>, sort is a <code>MenuButton</code>, and "In my account" is a <code>ToggleChip</code> (shown only with a debrid token). The "remembered" sentence becomes a quiet note above the list.</li>
+  <li><b>List without a table.</b> No column headers, no per-row surface fill. Rows sit on the canvas and get a surface fill on hover. Selection uses <code>accent.tint</code> plus a 2 px accent left marker (the v3 list-row rule), replacing today's heavy brown flood. Release names use the regular UI face (<code>type.body</code>, medium), not mono, and parsed tags are quiet captions.</li>
+  <li><b>Inspector replaces drawer + modal.</b> Identity (badges, cleaned name, source), three <code>StatTile</code>s, account presence, and file disclosure scroll inside the panel. The <b>PlayFooter</b> is pinned to the bottom and changes in place: Ready → Preparing → Starting → (closes to Ready) / Error. The Play sheet modal is removed.</li>
+</ul></div>
+
+<h2 class="s" id="states">2 · Inspector states: the PlayFooter replaces the Play sheet</h2>
+<p class="lead">Everything the modal showed now happens in the footer. The content above stays put, so the user keeps their place. Cancel returns to Ready. Choosing another row while one is preparing shows a one-line banner, and pressing Play on the new row replaces the old session (it is cancelled).</p>
+<div class="states" id="states-grid"></div>
+
+<h2 class="s" id="narrow">3 · Narrow window (frame &lt; 1040 px): single column + PlayDock</h2>
+<p class="lead">There is no room for a side panel, so the same PlayFooter becomes a floating dock at the bottom of the page (<code>bg.overlay</code>, sheet elevation). The header stacks its filters under the title and they wrap. Still no modal. Clicking a row selects it, and double-click or Enter plays.</p>
+<div style="max-width:960px">
+<div class="win"><div class="wt">Kinema Next</div>
+<div class="page narrow">
+  <div class="backdrop"></div>
+  <div class="tb" style="padding:0 20px">
+    <div class="glass"><button class="ib"><svg class="i"><use href="#i-back"/></svg></button></div>
+    <div class="glass"><button class="ib"><svg class="i"><use href="#i-refresh"/></svg></button><span class="dv"></span><button class="ib"><svg class="i"><use href="#i-gear"/></svg></button><button class="ib"><svg class="i"><use href="#i-more"/></svg></button></div>
+  </div>
+  <div class="frame" style="padding:60px 20px 0">
+    <div class="sh" style="grid-template-columns:80px minmax(0,1fr);gap:16px">
+      <div class="poster"><span>CRIMINAL<br>MINDS</span></div>
+      <div>
+        <div class="eyebrow">Choose a stream</div>
+        <h1 style="font-size:24px;line-height:30px">Criminal Minds</h1>
+        <div class="ep" style="margin-bottom:12px"><span class="chip solid">S01E02</span><span class="name">Compulsion</span></div>
+        <div class="fb">
+          <div class="seg"><button class="on">Torrentio <span class="n">22</span></button><button>Peerflix <span class="n">3</span></button></div>
+          <div class="seg"><button>All</button><button class="on">1080p <span class="n">8</span></button><button>720p</button><button>Other</button></div>
+          <div class="sf" style="width:180px"><svg class="i sm"><use href="#i-search"/></svg>Filter</div>
+          <span class="mb"><svg class="i sm"><use href="#i-sort"/></svg>Seeders<svg class="i sm"><use href="#i-down"/></svg></span>
+          <span class="tc"><svg class="i sm"><use href="#i-zap"/></svg></span>
+        </div>
+      </div>
+    </div>
+    <div class="body"><div class="list"><div class="lh"><h3>Streams</h3><span class="n">8 of 22</span></div><div id="rows-narrow"></div></div></div>
+  </div>
+  <div class="dock">
+    <div class="qt"><b>1080p</b></div>
+    <div style="min-width:0"><div class="rn">Criminal Minds (2005) Season 1 S01 (1080p WEB-DL x265 HEVC 10bit EAC3 6.0 FreetheFish)</div><div class="sub"><span>1.0 GiB</span><span>117 seeders</span><span class="am ok"><svg class="i xs"><use href="#i-zap"/></svg>AllDebrid</span></div></div>
+    <div class="seg" style="height:28px"><button class="on">AllDebrid</button><button>Real-Debrid</button></div>
+    <button class="ab primary" style="height:36px;padding:0 18px"><svg class="i"><use href="#i-play"/></svg>Play</button>
+  </div>
+</div></div>
+</div>
+
+<h2 class="s" id="primitives">4 · Purpose-built primitives (all token-driven, under <code>widgets/</code>)</h2>
+<div class="specimens">
+  <div><div style="display:flex;gap:8px"><div class="qt"><b>4K</b><i class="hdr">DV</i></div><div class="qt"><b>1080p</b></div><div class="qt"><b>1080p</b><i class="hdr">HDR</i></div><div class="qt"><b>720p</b></div><div class="qt"><b>SD</b></div></div><div class="cap">QualityTile: resolution + optional dynamic range</div></div>
+  <div><div class="tags"><span class="t">HEVC</span><span class="t">DDP 5.1</span><span class="t">EN · PL</span><span class="t" style="color:var(--tx3);font-weight:500">Torrentio</span></div><div class="cap">TagList: quiet caption tags, no boxes</div></div>
+  <div><div style="display:flex;gap:6px"><span class="am ok"><svg class="i xs"><use href="#i-zap"/></svg>AllDebrid</span><span class="am chk">RD · Checking</span><span class="am unk">RD · Unknown</span><span class="am busy">Preparing…</span></div><div class="cap">AccountMark: presence only, never "cached/ready"</div></div>
+  <div style="width:300px"><div class="stats"><div class="st"><div class="l">Size</div><div class="v">1.0 GiB</div></div><div class="st"><div class="l">Seeders</div><div class="v ok">117</div></div><div class="st"><div class="l">Audio</div><div class="v">DDP 5.1</div></div></div><div class="cap">StatTile: caption label + heading value</div></div>
+  <div><div class="seg"><button class="on">Torrentio <span class="n">22</span></button><button>Peerflix <span class="n">3</span></button></div><div class="cap">Segmented + count (extends existing widget)</div></div>
+  <div><div style="display:flex;gap:8px"><span class="tc"><svg class="i sm"><use href="#i-zap"/></svg>In my account</span><span class="tc on"><svg class="i sm"><use href="#i-zap"/></svg>In my account</span></div><div class="cap">ToggleChip: off / on</div></div>
+  <div><span class="mb"><svg class="i sm"><use href="#i-sort"/></svg><span class="k">Sort</span> Seeders<svg class="i sm"><use href="#i-down"/></svg></span><div class="cap">MenuButton (Select with leading icon + key label)</div></div>
+</div>
+<table class="inv">
+  <tr><th>Primitive / composite</th><th>Location</th><th>Replaces</th></tr>
+  <tr><td>QualityTile</td><td><code>widgets/quality_tile.rs</code></td><td>Stacked resolution/HDR Badges in a 92 px column</td></tr>
+  <tr><td>TagList</td><td><code>widgets/tag_list.rs</code></td><td>"HEVC · DDP · Torrentio" free text</td></tr>
+  <tr><td>AccountMark</td><td><code>widgets/account_mark.rs</code></td><td>"⚡ AD In account" emoji text column</td></tr>
+  <tr><td>StatTile</td><td><code>widgets/stat_tile.rs</code></td><td>Ad-hoc stat closure in the drawer</td></tr>
+  <tr><td>ToggleChip</td><td><code>widgets/toggle_chip.rs</code></td><td>Switch + long label in the control box</td></tr>
+  <tr><td>Segmented counts</td><td><code>widgets/segmented.rs</code> (<code>.counts()</code>)</td><td>ChoiceChip rows for provider/quality</td></tr>
+  <tr><td>StreamRow</td><td><code>widgets/patterns/stream_row.rs</code></td><td>Column-aligned table row + header</td></tr>
+  <tr><td>StreamsHeader</td><td><code>screens/detail/streams_page.rs</code> (MediaHero backdrop + Thumb)</td><td>56 px thumbnail header + bordered control box</td></tr>
+  <tr><td>StreamInspector + PlayFooter</td><td><code>screens/detail/streams.rs</code>; workflow from <code>play_sheet/workflow.rs</code> becomes a non-modal <code>PlaySession</code></td><td>Drawer and the modal Play sheet</td></tr>
+</table>
+
+<h2 class="s" id="rules">5 · Behaviour kept and changed</h2>
+<div class="notes" style="margin-top:0"><ul>
+  <li><b>Kept:</b> remembered provider/quality/sort/account-only, per-visit text filter, default first-row selection, explicit pick that survives re-sort, account presence wording ("presence only, not a cache or readiness check"), resume / play-from-beginning, context menu, loading/empty/error/provider-limit states, and Esc/Back returning to Detail with focus restored.</li>
+  <li><b>Changed:</b> Play no longer opens a modal. Single click selects. Double-click, Enter, or the footer's Play starts preparation in the footer. A row being prepared shows an <code>AccountMark busy</code> "Preparing…" in the list. Starting another stream cancels the previous session. Leaving the page cancels it as well (same ownership and generation rules as today's sheet).</li>
+  <li><b>Play with:</b> a <code>Segmented</code> between configured services (default: the one whose account contains the release). With one service it becomes a static caption, and with none it shows the "Open Settings" notice in the footer.</li>
+  <li><b>Breakpoints:</b> ≥ 1040 px frame gets a side inspector (340–400 px), and narrower windows get the PlayDock. Text never shrinks to fit; filters wrap.</li>
+</ul></div>
+</div>
+
+<script>
+const data=[
+ {q:'1080p',name:'Criminal Minds (2005) Season 1 S01 (1080p WEB-DL x265 HEVC 10bit EAC3 6.0 FreetheFish) [QxR] Criminal Minds (2005) - S01E02 - Compulsion (1080p WEB x265 FreetheFish).mkv',tags:['HEVC','DDP 6.0'],src:'Torrentio',size:'1.0 GiB',seed:117,acct:'ok'},
+ {q:'1080p',name:'Criminal.Minds.S01.1080p.WEBRip.x265-KONTRAST Criminal.Minds.S01E02.1080p.WEBRip.x265-KONTRAST.mp4',tags:['HEVC'],src:'Torrentio',size:'0.8 GiB',seed:85},
+ {q:'1080p',name:'Esprits.Criminels.S01.MULTI.VFF.1080p.WEB.EAC3.x265-AvALoN (Criminal Minds) Esprits.Criminels.S01E02.1080p.MULTi.WEB-DL.AvALoN.mkv',tags:['HEVC','DDP','FR'],src:'Torrentio',size:'0.8 GiB',seed:12},
+ {q:'1080p',name:'Criminal.Minds.S01E02.Compulsion.1080p.HEVC.x265-MeGusta',tags:['HEVC'],src:'Torrentio',size:'0.4 GiB',seed:9},
+ {q:'1080p',name:'Criminal.Minds.S01.1080p.AMZN.WEBRip.DD5.1.x264-DEFLATE[rartv] Criminal.Minds.S01E02.1080p.WEB.H264-DEFLATE.mkv',tags:['AVC','DD 5.1'],src:'Torrentio',size:'3.9 GiB',seed:5},
+ {q:'1080p',name:'Criminal.Minds.S01.MULTi.1080p.WEB-DL.H264.AC3-Mixio Criminal.Minds.S01E02.MULTi.1080p.WEB-DL.H264.AC3-Mixio.mkv',tags:['AVC','AC3','EN · PL'],src:'Torrentio',size:'2.4 GiB',seed:4},
+ {q:'1080p',name:'Zabójcze umysły - Criminal Minds 2005-2020 [S01-S17] [10Bit] [1080p.WEB-DL.H265-AS76-FT] [ENG-Lektor PL] [Alusia] S01/Criminal Minds.S01E02_Przymus zabijania [10Bit] [1080p.WEB-DL.H265-AS76-FT].mkv',tags:['HEVC','EN · PL'],src:'Torrentio',size:'0.6 GiB',seed:1},
+ {q:'1080p',name:'Criminal.Minds.S01.MULTi.1080p.DSNP.WEB-DL.DDP2.0.H264-Ralf Criminal.Minds.S01E02.Compulsion.MULTi.1080p.DSNP.WEB-DL.REPACK.DDP2.0.H264-Ralf.mkv',tags:['AVC','DDP 2.0','EN · PL'],src:'Torrentio',size:'2.4 GiB',seed:1},
+];
+let sel=0,state='ready',prepIdx=null,fileOpen=false,timer=null;
+const ico=(id,c='i sm')=>`<svg class="${c}"><use href="#${id}"/></svg>`;
+function row(d,i,narrow){
+  const busy=prepIdx===i&&(state==='prep'||state==='start');
+  const mark=busy?`<span class="am busy">Preparing…</span>`:d.acct==='ok'?`<span class="am ok">${ico('i-zap','i xs')}AllDebrid</span>`:'';
+  return `<div class="sr ${i===sel?'on':''}" data-i="${i}" ${narrow?'':`onclick="pick(${i})" ondblclick="play(${i})"`}>
+    <div class="qt"><b>${d.q}</b></div>
+    <div style="min-width:0"><div class="rn" title="${d.name}">${d.name}</div>
+      <div class="meta"><div class="tags">${d.tags.map(t=>`<span class="t">${t}</span>`).join('')}<span class="t" style="font-weight:500">${d.src}</span></div>${mark}</div></div>
+    <div class="num">${d.size}<small>size</small></div>
+    <div class="num"><span class="seed ${d.seed>=50?'hot':''}">${ico('i-arrowup','i xs')}${d.seed}</span><small>seeders</small></div>
+  </div>`}
+function footer(st,d){
+  if(st==='ready'||st==='other') return `${st==='other'?`<div class="ntc" style="background:var(--raised);padding:8px 10px">${ico('i-alert')}<div style="flex:1">Preparing another stream</div><button class="ab ghost" style="height:24px;padding:0 8px;font-size:12px" onclick="cancel()">Cancel</button></div>`:''}
+    <div class="row"><span class="lab">Play with</span><div class="seg"><button class="on">AllDebrid</button><button>Real-Debrid</button></div></div>
+    <button class="ab primary block" onclick="play(sel)">${ico('i-play','i')}Play</button>
+    <div class="cap"><span>Opens in Embedded MPV</span><span>Enter ↵</span></div>`;
+  if(st==='resume') return `<div class="row"><span class="lab">Play with</span><div class="seg"><button class="on">AllDebrid</button><button>Real-Debrid</button></div></div>
+    <button class="ab primary block">${ico('i-play','i')}Resume · 24:18</button>
+    <button class="ab ghost block" style="height:28px;font-size:12px">Play from beginning</button>`;
+  if(st==='prep'||st==='start') return `<div class="steps">
+      <div class="step ${st==='prep'?'now':'done'}"><span class="dot">${st==='start'?ico('i-check','i xs'):''}</span>Preparing with AllDebrid…</div>
+      <div class="step ${st==='start'?'now':''}"><span class="dot"></span>Starting playback in Embedded MPV</div></div>
+    <div class="prog"><i></i></div>
+    <button class="ab block" style="height:32px;font-size:13px" onclick="cancel()">Cancel</button>`;
+  if(st==='error') return `<div class="ntc err">${ico('i-alert','i')}<div><b>Couldn’t play this stream</b>Couldn't identify the file in this torrent. Try another stream.</div></div>
+    <div style="display:flex;gap:8px"><button class="ab" style="flex:1;justify-content:center" onclick="play(sel)">Try again</button><button class="ab ghost" style="flex:1;justify-content:center" onclick="cancel()">Dismiss</button></div>`;
+  if(st==='missing') return `<div class="ntc warn">${ico('i-warn','i')}<div><b>No debrid account connected</b>Add a Real-Debrid or AllDebrid key to play torrents.</div></div>
+    <button class="ab block" style="height:32px;font-size:13px">Open Settings</button>`;
+}
+function inspector(d,st){
+  return `<div class="sc">
+    <div><div class="badges"><span class="bdg">${d.q}</span>${d.tags.map(t=>`<span class="bdg">${t}</span>`).join('')}</div>
+    <h4>${d.name.split(' ').slice(0,12).join(' ')}</h4><div class="src">${d.src} · from QxR</div></div>
+    <div class="stats"><div class="st"><div class="l">Size</div><div class="v">${d.size}</div></div><div class="st"><div class="l">Seeders</div><div class="v ${d.seed>=50?'ok':''}">${d.seed}</div></div><div class="st"><div class="l">Codec</div><div class="v">${d.tags[0]}</div></div></div>
+    <div class="sect"><div class="l"><span>Debrid accounts</span></div>
+      <div class="acct"><span>AllDebrid</span>${d.acct==='ok'?`<span class="am ok">${ico('i-zap','i xs')}In account</span>`:`<span class="am chk">Not in account</span>`}</div>
+      <div class="acct"><span>Real-Debrid</span><span class="am chk">Checking</span></div>
+      <div class="hint">Account presence only. This is not a cache or readiness check.</div></div>
+    <div class="sect"><div class="disc" onclick="fileOpen=!fileOpen;render()">${ico(fileOpen?'i-up':'i-down')}${fileOpen?'Hide':'Show'} file name</div>${fileOpen?`<div class="file">Criminal Minds (2005) - S01E02 - Compulsion (1080p WEB x265 FreetheFish).mkv</div>`:''}</div>
+  </div><div class="pf">${footer(st,d)}</div>`}
+function render(){
+  document.getElementById('rows').innerHTML=data.map((d,i)=>row(d,i)).join('');
+  const st=(prepIdx!==null&&prepIdx!==sel&&(state==='prep'||state==='start'))?'other':state;
+  document.getElementById('insp').innerHTML=inspector(data[sel],st);
+}
+function pick(i){sel=i;fileOpen=false;render()}
+function play(i){clearTimeout(timer);sel=i;prepIdx=i;state='prep';render();
+  timer=setTimeout(()=>{state='start';render();timer=setTimeout(()=>{state=Math.random()<.35?'error':'ready';prepIdx=null;render()},1800)},2000)}
+function cancel(){clearTimeout(timer);state='ready';prepIdx=null;render()}
+render();
+document.getElementById('rows-narrow').innerHTML=data.slice(0,6).map((d,i)=>row(d,i,true)).join('').replaceAll('grid-template-columns','x');
+const g=document.getElementById('states-grid');
+[['Ready','ready'],['Resume available','resume'],['Preparing','prep'],['Starting','start'],['Error','error'],['No account','missing'],['Another stream preparing','other']].forEach(([t,s])=>{
+  const w=document.createElement('div');w.innerHTML=`<h5>${t}</h5><aside class="insp">${inspector(data[0],s)}</aside>`;g.appendChild(w)});
+</script>
+</body>
+</html>

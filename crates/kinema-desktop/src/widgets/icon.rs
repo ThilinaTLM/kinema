@@ -56,6 +56,9 @@ pub enum IconName {
     Library,
     Filters,
     Layers,
+    Zap,
+    ArrowUp,
+    Sort,
 }
 
 impl IconName {
@@ -109,6 +112,9 @@ impl IconName {
             IconName::Library => "icons/library-big.svg",
             IconName::Filters => "icons/sliders-horizontal.svg",
             IconName::Layers => "icons/layers-2.svg",
+            IconName::Zap => "icons/zap.svg",
+            IconName::ArrowUp => "icons/arrow-up.svg",
+            IconName::Sort => "icons/arrow-down-wide-narrow.svg",
         }
     }
 
@@ -160,6 +166,9 @@ impl IconName {
         IconName::Library,
         IconName::Filters,
         IconName::Layers,
+        IconName::Zap,
+        IconName::ArrowUp,
+        IconName::Sort,
     ];
 }
 

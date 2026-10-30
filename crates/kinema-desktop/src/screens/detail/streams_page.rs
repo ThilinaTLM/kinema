@@ -1,4 +1,5 @@
-//! Compact Streams header, remembered controls and read-only account presence.
+//! Streams page: hero-lite header with remembered filters beside the art,
+//! the release list beside the inspector, and read-only account presence.
 use super::streams::stream_skeleton;
 use super::*;
 use crate::widgets::patterns::MediaHero;
@@ -8,9 +9,11 @@ use crate::{
     providers::{DebridClient, DebridError},
     settings::StreamSort,
     widgets::{
-        choice_card::ChoiceChip,
-        patterns::{POSTER_ASPECT, ViewState},
-        text_input::{TextInput, TextInputEvent},
+        action_button::{ActionButton, ActionKind},
+        patterns::{MetaItem, ViewState},
+        search_field::SearchField,
+        segmented::Segmented,
+        text_input::TextInputEvent,
     },
 };
 use kinema_core::sources::{DebridKind, InfoHash};
@@ -24,16 +27,17 @@ use std::{
 
 #[derive(Default)]
 pub(super) struct StreamPage {
-    pub input: Option<Entity<TextInput>>,
+    pub search: Option<Entity<SearchField>>,
     sort: Option<Entity<Select<StreamSort>>>,
-    pub play_service: Option<Entity<Select<DebridKind>>>,
+    /// Service the selected row plays with; follows account presence until
+    /// the user picks one.
+    pub play_service: Option<DebridKind>,
     pub service_chosen: bool,
     /// Full file name disclosure in the drawer; reset when the selection changes.
     pub file_detail_open: bool,
     /// True once the user clicked/played a row; otherwise the first row is followed.
     pub explicit_selection: bool,
     pub drawer_scroll: ScrollHandle,
-    pub service_subscription: Option<Subscription>,
     pub query: String,
     pub wide: bool,
     pub accounts: Vec<(DebridKind, AccountPresence)>,
@@ -109,12 +113,14 @@ impl Detail {
         cx.notify();
     }
     fn prepare_stream_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.stream_page.input.is_none() {
-            let input = cx.new(|cx| {
-                let mut input = TextInput::new(window, cx);
-                input.set_placeholder("Filter releases", cx);
-                input
+        if self.stream_page.search.is_none() {
+            let search = cx.new(|cx| {
+                let mut field = SearchField::new(window, cx).toolbar_style();
+                field.set_placeholder("Filter releases", cx);
+                field
             });
+            // Local filtering is cheap: follow every edit, not the debounced event.
+            let input = search.read(cx).input();
             self.stream_page
                 .subscriptions
                 .push(cx.subscribe(&input, |this, input, event, cx| {
@@ -123,7 +129,7 @@ impl Detail {
                         cx.notify();
                     }
                 }));
-            self.stream_page.input = Some(input);
+            self.stream_page.search = Some(search);
             let active = self
                 .coordinator
                 .read(cx)
@@ -135,12 +141,15 @@ impl Detail {
                 Select::new(
                     active,
                     vec![
-                        (StreamSort::Seeders, "Sort: Seeders".into()),
-                        (StreamSort::Size, "Sort: Size".into()),
-                        (StreamSort::Quality, "Sort: Quality".into()),
+                        (StreamSort::Seeders, "Seeders".into()),
+                        (StreamSort::Size, "Size".into()),
+                        (StreamSort::Quality, "Quality".into()),
                     ],
                     cx,
                 )
+                .icon(IconName::Sort)
+                .prefix("Sort")
+                .toolbar_style()
             });
             self.stream_page.subscriptions.push(cx.subscribe(
                 &sort,
@@ -343,7 +352,8 @@ impl Detail {
         let p = self.tinted_palette(cx);
         let viewport = window.viewport_size();
         let frame = content_width(viewport.width);
-        self.stream_page.wide = frame >= px(1280.);
+        self.stream_page.wide = frame >= geometry::STREAMS_INSPECTOR_MIN_FRAME;
+        let wide = self.stream_page.wide;
         let title = self.display_title(cx);
         let (sources, busy, error, prefs) = {
             let c = self.coordinator.read(cx);
@@ -373,149 +383,12 @@ impl Detail {
             self.reconcile_stream_selection(&visible_rows, cx);
         }
         let visible = visible_rows.len();
-        let mut poster = div()
-            .w(px(56.))
-            .h(px(56.) * POSTER_ASPECT)
-            .flex_none()
-            .rounded(radius::SM)
-            .overflow_hidden()
-            .bg(p.bg_placeholder);
-        if let Some(image) = self.image(
-            title.poster_url(),
-            ArtworkKind::Poster,
-            &self.title.key(),
-            cx,
-        ) {
-            poster = poster.child(img(image).size_full().object_fit(ObjectFit::Cover));
-        }
-        let facts = self.title_facts(cx);
-        let subtitle = self
-            .episode
-            .as_ref()
-            .map(episode_caption)
-            .unwrap_or_else(|| {
-                let mut parts = Vec::new();
-                if let Some(year) = title.year() {
-                    parts.push(year.to_string());
-                }
-                if let Some(runtime) = facts.runtime_minutes.or(title.runtime().map(u32::from)) {
-                    parts.push(format!("{runtime} min"));
-                }
-                if !title.genres().is_empty() {
-                    parts.push(title.genres().join(", "));
-                }
-                parts.join(" · ")
-            });
-        let header = div()
-            .w_full()
-            .flex()
-            .items_center()
-            .gap(s::S16)
-            .child(poster)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .child(div().type_style(t::HEADING).child(title.name().to_owned()))
-                    .child(
-                        div()
-                            .type_style(t::SMALL)
-                            .text_color(p.text_secondary)
-                            .child(subtitle),
-                    ),
-            )
-            .child(
-                div()
-                    .type_style(t::SMALL)
-                    .text_color(p.text_muted)
-                    .child(format!("Showing {visible} of {total}")),
-            );
-        let mut controls = div()
-            .w_full()
-            .p(s::S12)
-            .rounded(radius::MD)
-            .bg(p.bg_surface)
-            .border(s::HAIRLINE)
-            .border_color(p.line_subtle)
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap(s::S8);
-        for kind in [IndexerKind::Torrentio, IndexerKind::Peerflix] {
-            let label = self.stream_page.counts.get(&kind).map_or_else(
-                || indexer_name(kind).to_owned(),
-                |count| format!("{} {count}", indexer_name(kind)),
-            );
-            let weak = cx.entity().downgrade();
-            controls = controls.child(
-                ChoiceChip::new(("streams-provider", kind as usize), label)
-                    .selected(kind == active)
-                    .on_click(move |_, cx| {
-                        let _ = weak.update(cx, |this, cx| this.choose_indexer(kind, cx));
-                    }),
-            );
-        }
-        if let Some(sources) = &sources {
-            for (q, name) in self.quality_options(sources) {
-                let count = sources
-                    .candidates
-                    .iter()
-                    .filter(|c| q == Quality::All || source_quality(c) == q)
-                    .count();
-                let weak = cx.entity().downgrade();
-                controls = controls.child(
-                    ChoiceChip::new(("streams-quality", q as usize), name)
-                        .count(count)
-                        .selected(self.filter == q)
-                        .on_click(move |_, cx| {
-                            let _ = weak.update(cx, |this, cx| {
-                                this.save_stream_settings(|s| s.streams.quality = q, cx)
-                            });
-                        }),
-                );
-            }
-        }
-        controls = controls
-            .child(div().w(px(220.)).children(self.stream_page.input.clone()))
-            .children(self.stream_page.sort.clone());
+
+        let hero = self.streams_hero(&title, sources.as_ref(), busy, wide, viewport.width, cx);
+
+        // List heading: count plus the quiet notes that used to crowd the control box.
         let has_accounts = !self.stream_page.accounts.is_empty();
-        if has_accounts {
-            let weak = cx.entity().downgrade();
-            controls = controls.child(
-                crate::widgets::switch::Switch::new(
-                    "streams-account-only",
-                    "In my debrid account",
-                    prefs.account_only,
-                )
-                .on_change(move |value, _, cx| {
-                    let _ = weak.update(cx, |this, cx| {
-                        this.save_stream_settings(|s| s.streams.account_only = value, cx)
-                    });
-                }),
-            );
-        }
-        controls =
-            controls
-                .child(
-                    crate::widgets::icon_button::IconButton::new(
-                        "streams-refresh",
-                        IconName::Refresh,
-                        "Refresh",
-                    )
-                    .busy(busy)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.stream_page.account_key = None;
-                        this.stream_page.count_target = None;
-                        this.retry_streams(cx);
-                    })),
-                )
-                .child(div().type_style(t::CAPTION).text_color(p.text_muted).child(
-                    if has_accounts {
-                        "Provider, quality, sort and account filter are remembered"
-                    } else {
-                        "Provider, quality and sort are remembered"
-                    },
-                ));
+        let mut notes = Vec::new();
         if prefs.account_only
             && self
                 .stream_page
@@ -523,15 +396,55 @@ impl Detail {
                 .iter()
                 .any(|(_, state)| !matches!(state, AccountPresence::Known(_)))
         {
-            controls = controls.child(div().type_style(t::SMALL).text_color(p.text_muted).child(
-                "Account-only results are incomplete while a service is Checking or Unknown",
-            ));
+            notes.push(
+                "Account-only results are incomplete while a service is Checking or Unknown"
+                    .to_owned(),
+            );
         }
         if prefs.quality != self.filter && sources.is_some() {
-            controls = controls.child(div().type_style(t::SMALL).text_color(p.text_muted).child(
-                format!("No {} streams · showing all", prefs.quality.label()),
+            notes.push(format!(
+                "No {} streams · showing all",
+                prefs.quality.label()
             ));
         }
+        let heading =
+            div()
+                .w_full()
+                .flex()
+                .flex_wrap()
+                .items_baseline()
+                .gap_x(s::S8)
+                .gap_y(s::S4)
+                .pb(s::S8)
+                .child(
+                    div()
+                        .type_style(t::HEADING)
+                        .text_color(p.text_primary)
+                        .child("Streams"),
+                )
+                .when(sources.is_some(), |el| {
+                    el.child(
+                        div()
+                            .type_style(t::SMALL)
+                            .text_color(p.text_muted)
+                            .child(format!("{visible} of {total}")),
+                    )
+                })
+                .children(notes.into_iter().map(|note| {
+                    div()
+                        .type_style(t::SMALL)
+                        .text_color(p.status_warn)
+                        .child(note)
+                }))
+                .child(div().flex_1())
+                .child(div().type_style(t::SMALL).text_color(p.text_muted).child(
+                    if has_accounts {
+                        "Provider, quality, sort and account filter are remembered"
+                    } else {
+                        "Provider, quality and sort are remembered"
+                    },
+                ));
+
         let sel = selection(
             sources.is_some(),
             sources.as_ref().is_some_and(|s| s.candidates.is_empty()),
@@ -561,22 +474,28 @@ impl Detail {
         let list = div().flex_1().min_w_0().h_full().child(
             ScrollArea::new("streams-scroll", self.streams_scroll.clone())
                 .gutter(s::S8)
-                .child(view),
+                .child(
+                    div()
+                        .w_full()
+                        .pb(streams::dock_clearance(!wide))
+                        .child(heading)
+                        .child(view),
+                ),
         );
+        let selected = sources
+            .as_ref()
+            .and_then(|s| self.selected.and_then(|i| s.candidates.get(i)))
+            .cloned();
         let mut body = div()
             .size_full()
             .flex()
             .items_start()
-            .gap(s::S16)
+            .gap(s::S24)
             .child(list);
-        if self.stream_page.wide
-            && let Some(candidate) = sources
-                .as_ref()
-                .and_then(|s| self.selected.and_then(|i| s.candidates.get(i)))
-        {
-            let width = (frame * 0.27).clamp(px(320.), px(420.));
-            // Sticky: the drawer column never scrolls with the list; it scrolls
-            // internally only when taller than the viewport.
+        if wide && let Some(candidate) = &selected {
+            let width = (frame * 0.27).clamp(px(340.), px(400.));
+            // Sticky: the inspector column never scrolls with the list; it
+            // scrolls internally only when taller than the viewport.
             body = body.child(
                 div().w(width + s::S8).flex_none().h_full().child(
                     ScrollArea::new(
@@ -584,54 +503,228 @@ impl Detail {
                         self.stream_page.drawer_scroll.clone(),
                     )
                     .gutter(s::S8)
-                    .child(self.stream_drawer(candidate, provider, width, cx)),
+                    .child(
+                        div()
+                            .pb(s::S24)
+                            .child(self.stream_inspector(candidate, provider, width, cx)),
+                    ),
                 ),
             );
         }
-        let (_, backdrop) = self.hero_art(&title, cx);
-        let backdrop_layer = backdrop.map(|image| {
-            div()
-                .absolute()
-                .top_0()
-                .left_0()
-                .right_0()
-                .h(px(320.))
-                .child(
-                    MediaHero::new("streams-backdrop", "")
-                        .backdrop(Some(image))
-                        .fade_into(p.bg_canvas)
-                        .min_height(px(320.)),
-                )
-        });
-        div()
-            .id("detail-streams-page")
-            .track_focus(&self.page_focus)
-            .size_full()
-            .relative()
-            .bg(p.bg_canvas)
-            .children(backdrop_layer)
-            .child(
+        let gutter = gutter(viewport.width);
+        let dock = (!wide)
+            .then_some(selected.as_ref())
+            .flatten()
+            .map(|candidate| {
                 div()
-                    .size_full()
-                    .pt(s::TOOLBAR_HEIGHT)
+                    .absolute()
+                    .left_0()
+                    .right_0()
+                    .bottom(s::S16)
                     .flex()
                     .justify_center()
                     .child(
                         div()
                             .w_full()
                             .max_w(geometry::PAGE_MAX_WIDTH)
-                            .px(gutter(viewport.width))
-                            .h_full()
-                            .flex()
-                            .flex_col()
-                            .gap(s::S16)
-                            .pt(s::S16)
-                            .child(header)
-                            .child(controls)
-                            .child(div().flex_1().min_h_0().child(body)),
-                    ),
+                            .px(gutter)
+                            .child(self.play_dock(candidate, provider, cx)),
+                    )
+            });
+        div()
+            .id("detail-streams-page")
+            .track_focus(&self.page_focus)
+            .size_full()
+            .relative()
+            .bg(p.bg_canvas)
+            .child(
+                div().size_full().flex().flex_col().child(hero).child(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .w_full()
+                        .flex()
+                        .justify_center()
+                        .child(
+                            div()
+                                .w_full()
+                                .max_w(geometry::PAGE_MAX_WIDTH)
+                                .px(gutter)
+                                .h_full()
+                                .child(body),
+                        ),
+                ),
             )
+            .children(dock)
             .into_any_element()
+    }
+
+    /// Hero-lite header: the Detail backdrop recipe with a small poster, the
+    /// display title, episode/fact chips and the filter row beside the art.
+    fn streams_hero(
+        &mut self,
+        title: &BrowseTitle,
+        sources: Option<&crate::metadata_bridge::SourceSet>,
+        busy: bool,
+        wide: bool,
+        viewport: Pixels,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let p = self.tinted_palette(cx);
+        let (poster_url, backdrop) = self.hero_art(title, cx);
+        let mut poster = div().size_full().bg(p.bg_placeholder);
+        if let Some(image) = self.image(
+            poster_url.as_deref(),
+            ArtworkKind::Poster,
+            &self.title.key(),
+            cx,
+        ) {
+            poster = poster.child(img(image).size_full().object_fit(ObjectFit::Cover));
+        }
+        let mut hero = MediaHero::new("streams-hero", title.name().to_owned())
+            .eyebrow("Choose a stream")
+            .backdrop(backdrop)
+            .poster(poster)
+            .fade_into(p.bg_canvas)
+            .min_height(px(0.))
+            .top_inset(s::TOOLBAR_HEIGHT)
+            .frame(gutter(viewport), geometry::PAGE_MAX_WIDTH)
+            .sizing(
+                if wide {
+                    geometry::STREAMS_POSTER_WIDTH
+                } else {
+                    geometry::STREAMS_POSTER_WIDTH_NARROW
+                },
+                px(920.),
+            );
+
+        // Episode marker + name, then plain facts as chips.
+        if let Some(episode) = &self.episode {
+            hero = hero.meta_badge(Badge::new(episode_marker(episode)).icon(IconName::Tv));
+            if let Some(name) = episode.name.as_deref().filter(|n| !n.trim().is_empty()) {
+                hero = hero.meta(
+                    div()
+                        .type_style(t::HEADING)
+                        .text_color(p.text_primary)
+                        .child(name.to_owned()),
+                );
+            }
+        }
+        let facts = self.title_facts(cx);
+        let mut chips = Vec::new();
+        if let Some(year) = title.year() {
+            chips.push(year.to_string());
+        }
+        if self.episode.is_none() {
+            if let Some(runtime) = facts.runtime_minutes.or(title.runtime().map(u32::from)) {
+                chips.push(format!("{runtime} min"));
+            }
+            chips.extend(title.genres().iter().take(2).cloned());
+        }
+        for chip in chips {
+            hero = hero.meta_item(MetaItem::Badge(Badge::new(chip)));
+        }
+
+        // Filters: provider and quality segments, search, sort, account toggle, refresh.
+        let active = *self.indexer.read(cx).value();
+        let providers = [IndexerKind::Torrentio, IndexerKind::Peerflix];
+        let weak = cx.entity().downgrade();
+        hero = hero.secondary(
+            Segmented::new(
+                "streams-provider",
+                providers.map(|kind| (kind, SharedString::from(indexer_name(kind)))),
+                active,
+            )
+            .counts(providers.map(|kind| self.stream_page.counts.get(&kind).copied()))
+            .toolbar()
+            .on_change(move |kind, _, cx| {
+                let _ = weak.update(cx, |this, cx| this.choose_indexer(*kind, cx));
+            }),
+        );
+        if let Some(sources) = sources {
+            let options = self.quality_options(sources);
+            let counts: Vec<_> = options
+                .iter()
+                .map(|(q, _)| {
+                    Some(
+                        sources
+                            .candidates
+                            .iter()
+                            .filter(|c| *q == Quality::All || source_quality(c) == *q)
+                            .count(),
+                    )
+                })
+                .collect();
+            let weak = cx.entity().downgrade();
+            hero = hero.secondary(
+                Segmented::new("streams-quality", options, self.filter)
+                    .counts(counts)
+                    .toolbar()
+                    .on_change(move |q, _, cx| {
+                        let q = *q;
+                        let _ = weak.update(cx, |this, cx| {
+                            this.save_stream_settings(|s| s.streams.quality = q, cx)
+                        });
+                    }),
+            );
+        }
+        hero = hero
+            .secondary(
+                div()
+                    .flex_none()
+                    .w(s::HAIRLINE)
+                    .h(s::S20)
+                    .mx(s::S4)
+                    .bg(p.line_hairline),
+            )
+            .secondary(
+                div()
+                    .w(if wide { px(240.) } else { px(180.) })
+                    .children(self.stream_page.search.clone()),
+            );
+        if let Some(sort) = self.stream_page.sort.clone() {
+            hero = hero.secondary(sort);
+        }
+        if !self.stream_page.accounts.is_empty() {
+            let account_only = self
+                .coordinator
+                .read(cx)
+                .settings
+                .as_ref()
+                .is_some_and(|s| s.streams.account_only);
+            let weak = cx.entity().downgrade();
+            hero = hero.secondary(
+                ActionButton::new(
+                    "streams-account-only",
+                    if wide {
+                        ActionKind::Secondary
+                    } else {
+                        ActionKind::Icon
+                    },
+                    "In my account",
+                )
+                .icon(IconName::Zap)
+                .on(account_only)
+                .toggled(account_only, false)
+                .tooltip("Only releases already in a connected debrid account")
+                .on_click(move |_, _, cx| {
+                    let _ = weak.update(cx, |this, cx| {
+                        this.save_stream_settings(|s| s.streams.account_only = !account_only, cx)
+                    });
+                }),
+            );
+        }
+        hero = hero.secondary(
+            ActionButton::new("streams-refresh", ActionKind::Icon, "Refresh streams")
+                .icon(IconName::Refresh)
+                .busy(busy)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.stream_page.account_key = None;
+                    this.stream_page.count_target = None;
+                    this.retry_streams(cx);
+                })),
+        );
+        hero.into_any_element()
     }
 }
 

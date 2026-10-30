@@ -10,6 +10,7 @@ implementation do not establish full workflow or cross-platform acceptance.
 | [Desktop v3](desktop-v3.md) | Layouts, components, accessibility, motion and performance requirements |
 | [UI revision](ui-revision-2026-10.html) | Approved toolbar, detail, Streams and catalog design revisions |
 | [Episodes revision](episodes-revision-2026-10.html) | Approved episode, season and shared artwork/control revisions |
+| [Streams revision](streams-revision-2026-10.html) | Approved Streams page: hero-lite header with filters, list + inspector, inline play (no Play sheet) |
 | [Player](player.md) | Independent native player, controls, ownership and scoped evidence |
 | [Playback progress and desktop integration](playback-progress-desktop.md) | Approved resume persistence, OS media controls, inhibition, and tray lifecycle; scoped source validation |
 | [Playback progress in context](playback-progress-in-context.html) | Reviewed screenshot-based placements in series, episode grid, Streams and movie detail |

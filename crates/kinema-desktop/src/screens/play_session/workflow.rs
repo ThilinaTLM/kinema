@@ -1,17 +1,17 @@
 //! Preparation ownership, account invalidation, and worker-event transitions.
 use super::*;
 
-impl PlaySheet {
+impl PlaySession {
     pub(crate) fn new(
         coordinator: Entity<AppCoordinator>,
         title: String,
-        context: PlayContext,
+        episode_title: Option<String>,
         target: PlaybackTarget,
         candidate: SourceCandidate,
         intent: PlaybackIntent,
         cx: &mut Context<Self>,
     ) -> Self {
-        // Navigation/window teardown can drop the view without a Sheet dismiss event.
+        // Navigation/window teardown can drop the session without a dismiss.
         cx.on_release(|this, cx| this.cancel_owned_work(cx))
             .detach();
         let subscription = cx.subscribe(&coordinator, |this, _, event: &CoordinatorEvent, cx| {
@@ -41,9 +41,9 @@ impl PlaySheet {
             Some(CredentialState::Unavailable(message)) => {
                 format!("Secure storage unavailable: {message}. Preparation has not started.")
             }
-            None => "Account status unavailable. Close and retry after settings load.".into(),
+            None => "Account status unavailable. Try again after settings load.".into(),
         };
-        tracing::debug!(?provider, ?target, "UI prepare/play sheet opened");
+        tracing::debug!(?provider, ?target, "UI play session started");
         let missing = !credential_notice.is_empty();
         if missing {
             tracing::warn!(
@@ -51,39 +51,27 @@ impl PlaySheet {
                 "UI preparation blocked by account state"
             );
         }
-        let shown = candidate.clone();
         let pending = if missing {
             None
         } else {
             coordinator.update(cx, |c, cx| {
-                c.prepare(
-                    title.clone(),
-                    context.episode_title.clone(),
-                    target,
-                    candidate,
-                    intent,
-                    cx,
-                )
+                c.prepare(title, episode_title, target, candidate, intent, cx)
             })
         };
         Self {
             coordinator,
-            title,
-            context,
-            candidate: shown,
             provider,
             preparation: None,
             pending,
             switch: None,
             limit_exceeded: None,
             error: if !missing && pending.is_none() {
-                Some("Application service unavailable or busy. Close and retry.".into())
+                Some("Application service unavailable or busy. Try again.".into())
             } else {
                 None
             },
             missing,
             credential_notice,
-            cancel: cx.focus_handle().tab_stop(true),
             _subscription: subscription,
         }
     }
@@ -126,7 +114,7 @@ impl PlaySheet {
             self.error = None;
             self.missing = true;
             self.credential_notice =
-                "Account changed. Close and prepare again with the current account.".into();
+                "Account changed. Dismiss and play again with the current account.".into();
             cx.notify();
             return;
         }
@@ -135,7 +123,7 @@ impl PlaySheet {
                 tracing::debug!(
                     generation = event.generation,
                     outcome = "rejected_stale",
-                    "UI play-sheet result ignored"
+                    "UI play-session result ignored"
                 );
             }
             return;
@@ -143,7 +131,7 @@ impl PlaySheet {
         tracing::debug!(
             generation = event.generation,
             outcome = "applied",
-            "UI play-sheet result applied"
+            "UI play-session result applied"
         );
         self.pending = None;
         match &event.outcome {
@@ -199,7 +187,7 @@ impl PlaySheet {
         self.pending = None;
         self.preparation = None;
     }
-    /// Submit the auto-selected file; the sheet stays open until playback starts.
+    /// Submit the auto-selected file; the session stays until playback starts.
     fn play_file(&mut self, preparation: u64, file_id: String, cx: &mut Context<Self>) {
         tracing::debug!(preparation, provider = ?self.provider, "UI selected-file play requested");
         self.error = None;

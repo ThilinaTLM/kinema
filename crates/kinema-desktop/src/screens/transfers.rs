@@ -48,7 +48,7 @@ impl Transfers {
                         protected_files,
                     } => format!(
                         "Freed {} · {} protected files. Original local files untouched.",
-                        super::play_sheet::format_bytes(*bytes),
+                        super::play_session::format_bytes(*bytes),
                         protected_files
                     ),
                     AppOutcome::Failed { message } => message.clone(),
@@ -152,9 +152,9 @@ impl Render for Transfers {
         content = content.child(match usage {
             Some(usage) => muted(format!(
                 "Cache {} of {} · {} downloaded",
-                super::play_sheet::format_bytes(usage.reserved_bytes),
-                super::play_sheet::format_bytes(usage.limit_bytes),
-                super::play_sheet::format_bytes(usage.downloaded_bytes)
+                super::play_session::format_bytes(usage.reserved_bytes),
+                super::play_session::format_bytes(usage.limit_bytes),
+                super::play_session::format_bytes(usage.downloaded_bytes)
             )),
             None => muted("Cache usage unavailable".into()),
         });

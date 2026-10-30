@@ -8,7 +8,7 @@ mod player_controls;
 pub mod player_window;
 
 pub(crate) mod detail;
-pub(crate) mod play_sheet;
+pub(crate) mod play_session;
 pub(crate) mod quit;
 pub mod settings_window;
 pub(crate) mod transfers;

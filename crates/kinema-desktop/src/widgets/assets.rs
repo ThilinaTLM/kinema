@@ -62,6 +62,9 @@ const ICONS: &[(&str, &[u8])] = icons![
     "library-big",
     "sliders-horizontal",
     "layers-2",
+    "zap",
+    "arrow-up",
+    "arrow-down-wide-narrow",
 ];
 
 const LOGO: &[u8] = include_bytes!("../../assets/tmdb-logo.svg");

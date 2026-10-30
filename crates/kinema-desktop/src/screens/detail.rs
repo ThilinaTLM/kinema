@@ -1,7 +1,7 @@
 //! Production title detail. Route-local selection; the shared coordinator owns I/O.
 use super::{
     coordinator::{AppCoordinator, BrowseTitle, PlaybackIntent},
-    play_sheet::{PlayContext, PlaySheet, format_bytes},
+    play_session::{PlaySession, PlaySessionEvent, format_bytes},
 };
 use crate::{
     artwork::{self, ArtworkKey, ArtworkKind, ArtworkState},
@@ -63,6 +63,11 @@ mod geometry {
     pub const FACT_LABEL_WIDTH: Pixels = px(120.);
     /// Skeleton row counts, roughly one screenful.
     pub const STREAM_SKELETON_ROWS: usize = 6;
+    /// Frame width from which the Streams inspector sits beside the list;
+    /// narrower frames use the floating play dock.
+    pub const STREAMS_INSPECTOR_MIN_FRAME: Pixels = px(1040.);
+    pub const STREAMS_POSTER_WIDTH: Pixels = px(104.);
+    pub const STREAMS_POSTER_WIDTH_NARROW: Pixels = px(80.);
     pub const EPISODE_SKELETON_CARDS: usize = 4;
 }
 
@@ -290,8 +295,10 @@ pub(crate) struct Detail {
     stream_focus: Vec<FocusHandle>,
     episode_focus: HashMap<(u32, u32), FocusHandle>,
     inline: Option<usize>,
-    play: Option<Entity<PlaySheet>>,
-    play_subscription: Option<Subscription>,
+    /// Inline playback session and the candidate index it plays; dropping
+    /// it cancels its preparation/launch.
+    play: Option<(usize, Entity<PlaySession>)>,
+    play_subscriptions: Vec<Subscription>,
     bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     art_generation: u64,
     page_generation: u64,
@@ -413,7 +420,7 @@ impl Detail {
             episode_focus: HashMap::new(),
             inline: None,
             play: None,
-            play_subscription: None,
+            play_subscriptions: Vec::new(),
             bounds: Rc::new(Cell::new(None)),
             art_generation,
             page_generation: 0,
@@ -632,6 +639,7 @@ impl Detail {
             self.page_generation += 1;
             self.page_direction = -1.;
             self.play = None;
+            self.play_subscriptions.clear();
         }
         self.coordinator
             .update(cx, |c, cx| c.cancel_detail_sources(cx));
@@ -842,6 +850,7 @@ impl Detail {
         tracing::debug!(route = "detail", "UI route changed");
         self.page = Page::Overview;
         self.play = None;
+        self.play_subscriptions.clear();
         self.reset_stream_selection();
         self.episode = None;
         if self.is_series() {
@@ -876,21 +885,7 @@ impl Detail {
         }
         cx.notify();
     }
-    /// Context for the play sheet header: episode caption and poster.
-    fn play_context(&self, cx: &mut Context<Self>) -> PlayContext {
-        PlayContext {
-            episode: self.episode.as_ref().map(episode_caption),
-            episode_title: self
-                .episode
-                .as_ref()
-                .and_then(|episode| episode.name.clone()),
-            poster: self
-                .display_title(cx)
-                .poster_url()
-                .map(str::to_owned)
-                .and_then(|url| self.image(Some(&url), ArtworkKind::Poster, &self.title.key(), cx)),
-        }
-    }
+    /// Start an inline play session, preserving the active-account save generation.
     fn open_stream(
         &mut self,
         index: usize,
@@ -907,28 +902,41 @@ impl Detail {
             .cloned();
         if let (Some(target), Some(candidate)) = (self.target.clone(), candidate) {
             tracing::debug!(indexer = ?self.indexer.read(cx).value(), ?intent, quality = super::coordinator::diagnostic_quality(candidate.quality.as_deref()), ?target, "UI stream chosen");
+            self.stop_play(cx);
             let coordinator = self.coordinator.clone();
             let title = self.display_title(cx).name().to_owned();
-            let context = self.play_context(cx);
-            let sheet = cx.new(|cx| {
-                PlaySheet::new(coordinator, title, context, target, candidate, intent, cx)
-                    .after_switch(switch)
+            let episode_title = self.episode.as_ref().and_then(|e| e.name.clone());
+            let session = cx.new(|cx| {
+                PlaySession::new(
+                    coordinator,
+                    title,
+                    episode_title,
+                    target,
+                    candidate,
+                    intent,
+                    cx,
+                )
+                .after_switch(switch)
             });
-            self.play_subscription = Some(cx.subscribe(&sheet, |this, _, _: &DismissEvent, cx| {
-                this.play = None;
-                cx.notify();
-            }));
-            self.play = Some(sheet);
+            self.play_subscriptions = vec![
+                cx.subscribe(&session, |this, _, _: &DismissEvent, cx| this.stop_play(cx)),
+                cx.subscribe(&session, move |this, _, event: &PlaySessionEvent, cx| {
+                    let PlaySessionEvent::Retry = event;
+                    this.play_stream_row(index, None, cx);
+                }),
+                cx.observe(&session, |_, _, cx| cx.notify()),
+            ];
+            self.play = Some((index, session));
             self.selected = Some(index);
             cx.notify();
         }
     }
-}
-/// `S01E02 · The Signal`, or just the marker for unnamed episodes.
-fn episode_caption(ep: &CatalogEpisode) -> String {
-    match ep.name.as_deref() {
-        Some(name) if !name.trim().is_empty() => format!("{} · {name}", episode_marker(ep)),
-        _ => episode_marker(ep),
+    /// Drop the inline session; its release hook cancels owned work.
+    fn stop_play(&mut self, cx: &mut Context<Self>) {
+        self.play_subscriptions.clear();
+        if self.play.take().is_some() {
+            cx.notify();
+        }
     }
 }
 
@@ -1172,12 +1180,7 @@ impl Render for Detail {
                 )
                 .into_any_element()
         };
-        crate::widgets::ambient_background::AmbientBackground::new(ambient, mode).child(
-            div()
-                .relative()
-                .size_full()
-                .child(content)
-                .when_some(self.play.clone(), |el, play| el.child(play)),
-        )
+        crate::widgets::ambient_background::AmbientBackground::new(ambient, mode)
+            .child(div().relative().size_full().child(content))
     }
 }
