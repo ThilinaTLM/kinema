@@ -143,8 +143,8 @@ fn play_opens_the_streams_page_and_enter_prepares_a_stream(cx: &mut TestAppConte
     window
         .update(cx, |view, window, cx| {
             assert!(
-                !view.stream_page.wide,
-                "1280 px viewport has a narrower frame"
+                view.stream_page.wide,
+                "a 1280 px window keeps the inspector beside the list"
             );
             assert_eq!(
                 view.inline, None,
@@ -153,10 +153,9 @@ fn play_opens_the_streams_page_and_enter_prepares_a_stream(cx: &mut TestAppConte
             assert_eq!(view.selected, Some(0));
             assert!(
                 view.play.is_some(),
-                "the context menu's Play opens the sheet"
+                "the context menu's Play starts an inline session"
             );
-            view.play = None;
-            view.play_subscription = None;
+            view.stop_play(cx);
             view.stream_focus[0].focus(window, cx);
         })
         .unwrap_or_else(|e| panic!("details:{e}"));
@@ -166,7 +165,7 @@ fn play_opens_the_streams_page_and_enter_prepares_a_stream(cx: &mut TestAppConte
         .update(cx, |view, _, cx| {
             assert!(view.play.is_some());
             assert_eq!(view.selected, Some(0));
-            // Back leaves the page and drops the in-flight sheet with it.
+            // Back leaves the page and drops the in-flight session with it.
             assert!(view.go_back(cx));
             assert!(view.play.is_none());
             assert_eq!(view.page(), Page::Overview);
@@ -316,7 +315,7 @@ fn column_counts_follow_the_window_width_on_every_resize(cx: &mut TestAppContext
 }
 
 #[gpui::test]
-fn stream_pointer_selection_uses_a_wide_drawer_and_narrow_clicks_play(cx: &mut TestAppContext) {
+fn stream_clicks_select_and_play_starts_inline_in_the_inspector_or_dock(cx: &mut TestAppContext) {
     cx.update(|cx| {
         tokens::init(cx);
         tokens::set_reduce_motion(true, cx);
@@ -363,11 +362,10 @@ fn stream_pointer_selection_uses_a_wide_drawer_and_narrow_clicks_play(cx: &mut T
     cx.simulate_keystrokes(window.into(), "enter");
     cx.run_until_parked();
     window
-        .update(cx, |view, _, _| {
+        .update(cx, |view, _, cx| {
             assert_eq!(view.selected, Some(1));
             assert!(view.play.is_some(), "Enter plays the focused wide row");
-            view.play = None;
-            view.play_subscription = None;
+            view.stop_play(cx);
         })
         .unwrap_or_else(|e| panic!("enter:{e}"));
     draw(window, cx);
@@ -399,11 +397,10 @@ fn stream_pointer_selection_uses_a_wide_drawer_and_narrow_clicks_play(cx: &mut T
     .unwrap_or_else(|e| panic!("double-click:{e}"));
     cx.run_until_parked();
     window
-        .update(cx, |view, _, _| {
+        .update(cx, |view, _, cx| {
             assert_eq!(view.selected, Some(0));
             assert!(view.play.is_some(), "wide double-click plays");
-            view.play = None;
-            view.play_subscription = None;
+            view.stop_play(cx);
         })
         .unwrap_or_else(|e| panic!("double-click result:{e}"));
     cx.simulate_window_resize(window.into(), size(px(1000.), px(900.)));
@@ -413,17 +410,25 @@ fn stream_pointer_selection_uses_a_wide_drawer_and_narrow_clicks_play(cx: &mut T
         .debug_bounds("stream-row-1")
         .unwrap_or_else(|| panic!("narrow stream row"));
     visual.simulate_click(row.center(), Modifiers::default());
-    cx.run_until_parked();
+    draw(window, cx);
     window
         .read_with(cx, |view, _| {
             assert!(!view.stream_page.wide);
             assert_eq!(view.selected, Some(1));
-            assert!(
-                view.play.is_some(),
-                "narrow single-click opens Play immediately"
-            );
+            assert!(view.play.is_none(), "narrow single-click also only selects");
         })
         .unwrap_or_else(|e| panic!("narrow click:{e}"));
+    // The dock replaces the inspector; its content stays inside its frame.
+    let dock = visual
+        .debug_bounds("streams-dock")
+        .unwrap_or_else(|| panic!("play dock"));
+    let play = visual
+        .debug_bounds("streams-dock-actions")
+        .unwrap_or_else(|| panic!("dock actions"));
+    assert!(
+        play.right() <= dock.right(),
+        "dock actions {play:?} overflow the dock {dock:?}"
+    );
 }
 #[gpui::test]
 fn failed_debrid_switch_is_saved_again_on_the_next_play(cx: &mut TestAppContext) {

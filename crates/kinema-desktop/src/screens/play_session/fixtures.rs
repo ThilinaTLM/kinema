@@ -1,7 +1,7 @@
-//! Offline production-sheet states; never initializes providers or players.
+//! Offline production play-session states; never initializes providers or players.
 use super::*;
 
-impl PlaySheet {
+impl PlaySession {
     pub(crate) fn fixture(
         coordinator: Entity<AppCoordinator>,
         state: &str,
@@ -25,20 +25,10 @@ impl PlaySheet {
                 filename: None,
             },
         };
-        let poster = coordinator
-            .read(cx)
-            .fixture_art
-            .get("Movie:tt1234567")
-            .cloned();
-        let context = PlayContext {
-            episode: None,
-            episode_title: None,
-            poster,
-        };
         let mut this = Self::new(
             coordinator,
             "The Quiet Orbit".into(),
-            context,
+            None,
             target,
             candidate,
             crate::screens::coordinator::PlaybackIntent::Normal,

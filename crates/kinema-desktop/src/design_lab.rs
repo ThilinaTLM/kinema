@@ -2329,7 +2329,7 @@ impl ProductionScene {
         use crate::screens::{
             coordinator::{AppCoordinator, BrowseTitle},
             detail::Detail,
-            play_sheet::PlaySheet,
+            play_session::PlaySession,
             transfers::Transfers,
         };
         use kinema_core::{
@@ -2373,7 +2373,7 @@ impl ProductionScene {
             c
         });
         let content: AnyView = if scene.starts_with("play-live") {
-            cx.new(|cx| PlaySheet::fixture(coordinator.clone(), scene, cx))
+            cx.new(|cx| PlaySession::fixture(coordinator.clone(), scene, cx))
                 .into()
         } else if scene.starts_with("transfers-live") {
             coordinator.update(cx, |c, _| {

@@ -68,6 +68,7 @@ struct BackdropState {
 pub struct MediaHero {
     id: ElementId,
     title: SharedString,
+    eyebrow: Option<SharedString>,
     backdrop: Option<Arc<RenderImage>>,
     poster: Option<AnyElement>,
     meta: Vec<MetaItem>,
@@ -98,6 +99,7 @@ impl MediaHero {
         Self {
             id: id.into(),
             title: title.into(),
+            eyebrow: None,
             backdrop: None,
             poster: None,
             meta: Vec::new(),
@@ -121,6 +123,11 @@ impl MediaHero {
             poster_width: POSTER_WIDTH,
             text_max_width: TEXT_MAX_WIDTH,
         }
+    }
+    /// Small uppercase context line above the title (e.g. "Choose a stream").
+    pub fn eyebrow(mut self, eyebrow: impl Into<SharedString>) -> Self {
+        self.eyebrow = Some(eyebrow.into());
+        self
     }
     /// Blurred, darkened image from `artwork::backdrop*`.
     pub fn backdrop(mut self, image: Option<Arc<RenderImage>>) -> Self {
@@ -411,6 +418,13 @@ impl RenderOnce for MediaHero {
                                         .flex()
                                         .flex_col()
                                         .gap(space::S8)
+                                        .children(self.eyebrow.map(|eyebrow| {
+                                            div()
+                                                .mb(-space::S4)
+                                                .type_style(typeface::CAPTION)
+                                                .text_color(ink.text_muted)
+                                                .child(eyebrow.to_uppercase())
+                                        }))
                                         .child(
                                             div()
                                                 .flex()

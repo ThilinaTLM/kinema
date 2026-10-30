@@ -687,6 +687,9 @@ pub struct Select<T: Clone + PartialEq + 'static> {
     focus: FocusHandle,
     menu: Option<Entity<Menu>>,
     subscription: Option<Subscription>,
+    icon: Option<IconName>,
+    prefix: Option<SharedString>,
+    toolbar: bool,
 }
 impl<T: Clone + PartialEq + 'static> EventEmitter<SelectEvent<T>> for Select<T> {}
 impl<T: Clone + PartialEq + 'static> Select<T> {
@@ -697,7 +700,25 @@ impl<T: Clone + PartialEq + 'static> Select<T> {
             focus: cx.focus_handle().tab_stop(true),
             menu: None,
             subscription: None,
+            icon: None,
+            prefix: None,
+            toolbar: false,
         }
+    }
+    /// Leading glyph, e.g. a sort icon.
+    pub fn icon(mut self, icon: IconName) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+    /// Muted key shown before the value ("Sort" Seeders).
+    pub fn prefix(mut self, prefix: impl Into<SharedString>) -> Self {
+        self.prefix = Some(prefix.into());
+        self
+    }
+    /// Floating-header geometry and glass material, matching `Segmented::toolbar`.
+    pub fn toolbar_style(mut self) -> Self {
+        self.toolbar = true;
+        self
     }
     pub fn value(&self) -> &T {
         &self.value
@@ -765,23 +786,44 @@ impl<T: Clone + PartialEq + 'static> Render for Select<T> {
             .focus_visible(move |s| s.border(space::FOCUS_RING).border_color(p.focus_ring))
             .tab_stop(true)
             .relative()
-            .rounded(radius::SM)
-            .child(
-                div()
-                    .h(space::CONTROL_HEIGHT)
-                    .rounded(radius::SM)
+            .rounded(if self.toolbar { radius::MD } else { radius::SM })
+            .child({
+                let face = div()
                     .flex()
                     .items_center()
-                    .gap(space::S8)
-                    .px(space::S8)
-                    .bg(p.ctl_rest)
-                    .border_1()
-                    .border_color(p.line_control)
+                    .gap(space::S6)
                     .text_color(p.text_primary)
-                    .type_style(typeface::BODY)
+                    .children(
+                        self.icon
+                            .map(|icon| Icon::new(icon).color(p.text_secondary)),
+                    )
+                    .children(
+                        self.prefix
+                            .clone()
+                            .map(|prefix| div().text_color(p.text_muted).child(prefix)),
+                    )
                     .child(label)
-                    .child(Icon::new(IconName::ChevronDown)),
-            )
+                    .child(Icon::new(IconName::ChevronDown).color(p.text_secondary));
+                if self.toolbar {
+                    let (fill, hover, edge) = super::toolbar::glass(p);
+                    face.h(space::TOOLBAR_CONTROL)
+                        .rounded(radius::MD)
+                        .px(space::S12)
+                        .bg(fill)
+                        .border(space::HAIRLINE)
+                        .border_color(edge)
+                        .type_style(typeface::SMALL_MEDIUM)
+                        .hover(move |s| s.bg(hover))
+                } else {
+                    face.h(space::CONTROL_HEIGHT)
+                        .rounded(radius::SM)
+                        .px(space::S8)
+                        .bg(p.ctl_rest)
+                        .border_1()
+                        .border_color(p.line_control)
+                        .type_style(typeface::BODY)
+                }
+            })
             .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
                 this.open(!event.is_keyboard(), window, cx)
             }))

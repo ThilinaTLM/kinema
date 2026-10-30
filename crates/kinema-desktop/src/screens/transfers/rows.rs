@@ -63,8 +63,8 @@ impl Transfers {
                 )
                 .child(div().px(s::S12).type_style(t::MONO).child(format!(
                     "{} / {}",
-                    crate::screens::play_sheet::format_bytes(progress.downloaded_bytes),
-                    crate::screens::play_sheet::format_bytes(progress.total_bytes)
+                    crate::screens::play_session::format_bytes(progress.downloaded_bytes),
+                    crate::screens::play_session::format_bytes(progress.total_bytes)
                 )))
             })
             .when_some(error, |row, error| {

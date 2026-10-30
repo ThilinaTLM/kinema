@@ -29,6 +29,7 @@ pub struct Segmented<T: Clone + PartialEq + 'static> {
     selected: T,
     on_change: Option<ChangeHandler<T>>,
     icons: Vec<IconName>,
+    counts: Vec<Option<usize>>,
     toolbar: bool,
 }
 impl<T: Clone + PartialEq + 'static> Segmented<T> {
@@ -43,12 +44,18 @@ impl<T: Clone + PartialEq + 'static> Segmented<T> {
             selected,
             on_change: None,
             icons: Vec::new(),
+            counts: Vec::new(),
             toolbar: false,
         }
     }
     /// Leading glyph per option, matched by position.
     pub fn icons(mut self, icons: impl IntoIterator<Item = IconName>) -> Self {
         self.icons = icons.into_iter().collect();
+        self
+    }
+    /// Trailing muted count per option (e.g. results per filter), by position.
+    pub fn counts(mut self, counts: impl IntoIterator<Item = Option<usize>>) -> Self {
+        self.counts = counts.into_iter().collect();
         self
     }
     /// Floating-header geometry and glass material (see [`toolbar`]).
@@ -73,6 +80,8 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for Segmented<T> {
         let options = self.options.clone();
         let keyboard_handler = self.on_change.clone();
         let icons = self.icons;
+        let counts = self.counts;
+        let muted = p.text_muted;
         let in_toolbar = self.toolbar;
         let (track, track_edge, height, outer, inner) = if in_toolbar {
             let (fill, _, edge) = toolbar::glass(&p);
@@ -97,6 +106,18 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for Segmented<T> {
                         .map(|icon| Icon::new(*icon).size(space::S12 + space::S2).color(ink)),
                 )
                 .child(label)
+                .children(counts.get(index).copied().flatten().map(|count| {
+                    // Counts read as secondary: muted at rest, softened accent when active.
+                    let ink = if ink == p.accent_text {
+                        ink.opacity(0.75)
+                    } else {
+                        muted
+                    };
+                    div()
+                        .font_weight(FontWeight::NORMAL)
+                        .text_color(ink)
+                        .child(count.to_string())
+                }))
         };
         div()
             .id(self.id)
