@@ -1,0 +1,102 @@
+# Kinema native repeat state for pre-action keystroke interception.
+# Applies after patches 0001 and 0010 to gpui-pre-0.3.9.
+# Upstream license: Apache-2.0; retain upstream license files.
+# Apply from the vendored crate directory with patch -p1; never edit registry sources.
+
+diff --git a/src/app.rs b/src/app.rs
+index cdbd559..d07a06e 100644
+--- a/src/app.rs
++++ b/src/app.rs
+@@ -3470,6 +3470,10 @@ pub enum InputPreference {
+ /// A keystroke event, and potentially the associated action
+ #[derive(Debug)]
+ pub struct KeystrokeEvent {
++    /// Whether the source keydown is an auto-repeat. False for modifier-only
++    /// events and replayed multi-stroke input, matching replay KeyDownEvent.
++    pub is_held: bool,
++
+     /// The keystroke that occurred
+     pub keystroke: Keystroke,
+ 
+diff --git a/src/window.rs b/src/window.rs
+index 54f0fd6..f8e2322 100644
+--- a/src/window.rs
++++ b/src/window.rs
+@@ -2560,6 +2560,7 @@ impl Window {
+     pub(crate) fn dispatch_keystroke_observers(
+         &mut self,
+         keystroke: &Keystroke,
++        is_held: bool,
+         input_preference: InputPreference,
+         action: Option<&dyn Action>,
+         context_stack: Vec<KeyContext>,
+@@ -2569,6 +2570,7 @@ impl Window {
+             (callback)(
+                 &KeystrokeEvent {
+                     keystroke: keystroke.clone(),
++                    is_held,
+                     input_preference,
+                     action: action.map(|action| action.boxed_clone()),
+                     context_stack: context_stack.clone(),
+@@ -2582,6 +2584,7 @@ impl Window {
+     pub(crate) fn dispatch_keystroke_interceptors(
+         &mut self,
+         keystroke: &Keystroke,
++        is_held: bool,
+         input_preference: InputPreference,
+         context_stack: Vec<KeyContext>,
+         cx: &mut App,
+@@ -2592,6 +2595,7 @@ impl Window {
+                 (callback)(
+                     &KeystrokeEvent {
+                         keystroke: keystroke.clone(),
++                        is_held,
+                         input_preference,
+                         action: None,
+                         context_stack: context_stack.clone(),
+@@ -6109,6 +6113,9 @@ impl Window {
+         cx.propagate_event = true;
+         self.dispatch_keystroke_interceptors(
+             &keystroke,
++            event
++                .downcast_ref::<KeyDownEvent>()
++                .is_some_and(|event| event.is_held),
+             input_preference,
+             self.context_stack(),
+             cx,
+@@ -6187,6 +6194,9 @@ impl Window {
+                 if !cx.propagate_event {
+                     self.dispatch_keystroke_observers(
+                         &keystroke,
++                        event
++                            .downcast_ref::<KeyDownEvent>()
++                            .is_some_and(|event| event.is_held),
+                         input_preference,
+                         Some(binding.action.as_ref()),
+                         match_result.context_stack,
+@@ -6267,7 +6277,16 @@ impl Window {
+         }
+ 
+         if let Some(keystroke) = recognized_keystroke {
+-            self.dispatch_keystroke_observers(keystroke, input_preference, None, context_stack, cx);
++            self.dispatch_keystroke_observers(
++                keystroke,
++                event
++                    .downcast_ref::<KeyDownEvent>()
++                    .is_some_and(|event| event.is_held),
++                input_preference,
++                None,
++                context_stack,
++                cx,
++            );
+         }
+     }
+ 
+@@ -6471,6 +6490,7 @@ impl Window {
+                 if !cx.propagate_event {
+                     self.dispatch_keystroke_observers(
+                         &replay.keystroke,
++                        event.is_held,
+                         InputPreference::KeyBindings,
+                         Some(binding.action.as_ref()),
+                         Vec::default(),

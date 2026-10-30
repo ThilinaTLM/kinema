@@ -37,15 +37,17 @@ pub enum Section {
     General,
     Accounts,
     Playback,
+    KeyboardMouse,
     Storage,
     Appearance,
     About,
 }
 impl Section {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::General,
         Self::Accounts,
         Self::Playback,
+        Self::KeyboardMouse,
         Self::Storage,
         Self::Appearance,
         Self::About,
@@ -55,6 +57,7 @@ impl Section {
             Self::General => "General",
             Self::Accounts => "Accounts",
             Self::Playback => "Playback",
+            Self::KeyboardMouse => "Keyboard & Mouse",
             Self::Storage => "Storage",
             Self::Appearance => "Appearance",
             Self::About => "About",
@@ -1005,6 +1008,9 @@ impl SettingsWindow {
                     p.text_secondary,
                 ));
             }
+            Section::KeyboardMouse => {
+                body = body.child(keyboard_mouse_reference(&p));
+            }
             Section::Storage => {
                 let usage = self.coordinator.read(cx).usage.as_ref();
                 body = body.child(text(usage.map(|u| format!("Downloaded {} · reserved {} · limit {}", bytes_label(u.downloaded_bytes), bytes_label(u.reserved_bytes), bytes_label(u.limit_bytes))).unwrap_or_else(|| "Cache usage unavailable (not an empty cache).".into()), p.text_secondary))
@@ -1128,6 +1134,59 @@ fn text(value: impl Into<SharedString>, color: Hsla) -> AnyElement {
         .text_color(color)
         .child(value.into())
         .into_any_element()
+}
+fn keyboard_mouse_reference(p: &tokens::Palette) -> AnyElement {
+    let mut root = div().flex().flex_col().gap(s::S24).child(text(
+        "Reference for the embedded Kinema player only. These are not global shortcuts and do not apply to external mpv or VLC. Rebinding is not available yet.",
+        p.text_secondary,
+    ));
+    for group in crate::player_shortcuts::reference_groups() {
+        let mut list = div()
+            .flex()
+            .flex_col()
+            .border_t(s::HAIRLINE)
+            .border_color(p.line_hairline);
+        for entry in group.entries {
+            list = list.child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_baseline()
+                    .justify_between()
+                    .gap_x(s::S16)
+                    .gap_y(s::S4)
+                    .py(s::S8)
+                    .border_b(s::HAIRLINE)
+                    .border_color(p.line_hairline)
+                    .child(div().flex_1().min_w(s::S48 * 3.).child(entry.label))
+                    .child(
+                        div()
+                            .type_style(t::SMALL_MEDIUM)
+                            .text_color(p.text_secondary)
+                            .child(entry.keys),
+                    ),
+            );
+        }
+        root = root.child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(s::S8)
+                .child(div().type_style(t::HEADING).child(group.title))
+                .child(list),
+        );
+    }
+    root.child(
+        div()
+            .flex()
+            .flex_col()
+            .gap(s::S4)
+            .type_style(t::SMALL)
+            .text_color(p.text_muted)
+            .child(crate::player_shortcuts::FOCUS_NOTE)
+            .child(crate::player_shortcuts::MEDIA_NOTE),
+    )
+    .into_any_element()
 }
 fn row(label: &'static str, control: impl IntoElement) -> AnyElement {
     div()
@@ -1253,6 +1312,23 @@ mod tests {
         assert_eq!(Section::About.navigate("down"), Some(Section::General));
         assert_eq!(Section::Accounts.navigate("home"), Some(Section::General));
         assert_eq!(Section::Playback.navigate("end"), Some(Section::About));
+        assert_eq!(
+            Section::Playback.navigate("down"),
+            Some(Section::KeyboardMouse)
+        );
+        assert_eq!(
+            Section::Storage.navigate("up"),
+            Some(Section::KeyboardMouse)
+        );
+        assert_eq!(Section::KeyboardMouse.label(), "Keyboard & Mouse");
+        assert_eq!(Section::ALL.len(), 7);
+        let groups = crate::player_shortcuts::reference_groups();
+        assert!(!groups.is_empty());
+        assert!(
+            groups
+                .iter()
+                .all(|g| !g.title.is_empty() && !g.entries.is_empty())
+        );
         assert_eq!(Section::Storage.navigate("a"), None);
     }
     #[test]

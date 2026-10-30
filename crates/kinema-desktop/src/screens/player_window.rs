@@ -184,38 +184,10 @@ fn video_surface(frame: kinema_mpv::GpuSurfaceFrame) -> Result<Arc<VideoSurfaceF
         .map_err(|_| "Invalid embedded GPU surface; refusing CPU fallback".into())
 }
 
-actions!(
-    player_window,
-    [
-        TogglePlayback,
-        SeekBack,
-        SeekForward,
-        ToggleMute,
-        ToggleFullscreen,
-        Escape,
-        VolumeUp,
-        VolumeDown,
-        NextControl,
-        PreviousControl
-    ]
-);
+use crate::player_shortcuts::{self as shortcuts, ShortcutId as Sid, *};
 
 pub fn bind_keys(cx: &mut App) {
-    cx.bind_keys([
-        // Space belongs to focused buttons when navigating the dock; K is the
-        // unambiguous playback shortcut everywhere in the player window.
-        KeyBinding::new("space", TogglePlayback, Some("KinemaPlayerSurface")),
-        KeyBinding::new("k", TogglePlayback, Some("KinemaPlayer")),
-        KeyBinding::new("left", SeekBack, Some("KinemaPlayer")),
-        KeyBinding::new("right", SeekForward, Some("KinemaPlayer")),
-        KeyBinding::new("m", ToggleMute, Some("KinemaPlayer")),
-        KeyBinding::new("f", ToggleFullscreen, Some("KinemaPlayer")),
-        KeyBinding::new("escape", Escape, Some("KinemaPlayer")),
-        KeyBinding::new("up", VolumeUp, Some("KinemaPlayer")),
-        KeyBinding::new("down", VolumeDown, Some("KinemaPlayer")),
-        KeyBinding::new("tab", NextControl, Some("KinemaPlayer")),
-        KeyBinding::new("shift-tab", PreviousControl, Some("KinemaPlayer")),
-    ]);
+    cx.bind_keys(shortcuts::key_bindings());
 }
 
 // Focus/tab order follows the visual order of the dock.
@@ -231,7 +203,8 @@ const SPEED: usize = 8;
 const FULLSCREEN: usize = 9;
 const MUTE: usize = 10;
 const VOLUME: usize = 11;
-const CONTROL_COUNT: usize = 12;
+const HELP: usize = 12;
+const CONTROL_COUNT: usize = 13;
 /// Chrome auto-hides after this much inactivity while playing (approved design).
 const CHROME_IDLE: Duration = Duration::from_millis(2500);
 /// Dock height assumed until its first layout is measured.
@@ -1310,6 +1283,14 @@ pub struct PlayerWindow {
     volume_dragging: bool,
     volume_requested: Option<(f64, Instant)>,
     menu: Option<OpenMenu>,
+    help_focus: Option<FocusHandle>,
+    help_dismiss_focus: FocusHandle,
+    help_previous: Option<FocusHandle>,
+    shortcut_held: bool,
+    _shortcut_keystrokes: Subscription,
+    seek_requested: Option<(f64, Instant)>,
+    speed_requested: Option<(f64, Instant)>,
+    delay_requested: Option<(f64, Instant)>,
     dock_height: Pixels,
     /// In-memory download observations of the leased remote session.
     transfer: TransferRate,
@@ -1333,6 +1314,223 @@ impl Drop for PlayerWindow {
 }
 
 impl PlayerWindow {
+    fn open_help(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.help_focus.is_some() {
+            return;
+        }
+        self.help_previous = window.focused(cx);
+        let focus = cx.focus_handle();
+        focus.focus(window, cx);
+        self.help_focus = Some(focus);
+        self.activity(cx);
+    }
+    fn close_help(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.help_focus = None;
+        self.help_previous
+            .take()
+            .unwrap_or_else(|| self.surface_focus.clone())
+            .focus(window, cx);
+        self.activity(cx);
+    }
+    fn shortcut_help(&self, cx: &mut Context<Self>) -> AnyElement {
+        let p = Palette::dark();
+        div()
+            .id("player-shortcut-overlay")
+            .absolute()
+            .inset_0()
+            .bg(p.scrim_max)
+            .flex()
+            .flex_col()
+            .p(s::S24)
+            .gap(s::S12)
+            .track_focus(self.help_focus.as_ref().unwrap_or(&self.surface_focus))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+            .child(
+                div()
+                    .type_style(t::TITLE)
+                    .child("Embedded player — Keyboard & Mouse"),
+            )
+            .child(div().type_style(t::SMALL).child(shortcuts::FOCUS_NOTE))
+            .child(
+                div()
+                    .id("player-shortcut-scroll")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .children(shortcuts::reference_groups().iter().map(|group| {
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(s::S8)
+                            .mb(s::S16)
+                            .child(div().type_style(t::BODY).child(group.title))
+                            .children(group.entries.iter().map(|entry| {
+                                div()
+                                    .flex()
+                                    .flex_wrap()
+                                    .gap(s::S12)
+                                    .child(
+                                        div()
+                                            .min_w(px(150.))
+                                            .type_style(t::SMALL)
+                                            .child(entry.keys),
+                                    )
+                                    .child(
+                                        div()
+                                            .type_style(t::SMALL)
+                                            .text_color(p.text_secondary)
+                                            .child(entry.label),
+                                    )
+                            }))
+                    })),
+            )
+            .child(
+                div()
+                    .type_style(t::SMALL)
+                    .text_color(p.text_secondary)
+                    .child("Scroll for more shortcuts"),
+            )
+            .child(div().type_style(t::SMALL).child(shortcuts::MEDIA_NOTE))
+            .child(
+                Button::new("player-shortcut-dismiss", "Close (Escape)")
+                    .focus_handle(self.help_dismiss_focus.clone())
+                    .on_click(cx.listener(|view, _, window, cx| view.close_help(window, cx))),
+            )
+            .into_any_element()
+    }
+    fn shortcut(&mut self, id: Sid, window: &mut Window, cx: &mut Context<Self>) {
+        // Only the surface and our own controls participate. A future text editor
+        // nested in this window must retain native editing shortcuts.
+        let owns_focus = self.surface_focus.is_focused(window)
+            || self.controls.iter().any(|focus| focus.is_focused(window));
+        if shortcuts::entry(id).repeat == RepeatPolicy::Suppress && self.shortcut_held {
+            return;
+        }
+        if self.help_focus.is_some() && matches!(id, Sid::NextControl | Sid::PreviousControl) {
+            self.help_dismiss_focus.focus(window, cx);
+            self.activity(cx);
+            return;
+        }
+        if id == Sid::Escape && self.help_focus.is_some() {
+            self.close_help(window, cx);
+            return;
+        }
+        if self.menu_open() || !owns_focus {
+            cx.propagate();
+            return;
+        }
+        match id {
+            Sid::TogglePlayback => self.toggle_playback(cx),
+            Sid::SeekBack => self.seek(-10., cx),
+            Sid::SeekForward => self.seek(10., cx),
+            Sid::SeekBackLong => self.seek(-60., cx),
+            Sid::SeekForwardLong => self.seek(60., cx),
+            Sid::SeekBackFine => self.seek(-1., cx),
+            Sid::SeekForwardFine => self.seek(1., cx),
+            Sid::ToggleMute => self.command(Player::toggle_mute, cx),
+            Sid::VolumeUp => self.nudge_volume(VOLUME_STEP, cx),
+            Sid::VolumeDown => self.nudge_volume(-VOLUME_STEP, cx),
+            Sid::ToggleFullscreen => {
+                window.toggle_fullscreen();
+                self.activity(cx);
+            }
+            Sid::Escape => {
+                if !self.cancel_drag(cx) && window.is_fullscreen() {
+                    window.toggle_fullscreen();
+                }
+                self.activity(cx);
+            }
+            Sid::NextControl => self.focus_control(false, window, cx),
+            Sid::PreviousControl => self.focus_control(true, window, cx),
+            Sid::ShowHelp => self.open_help(window, cx),
+            Sid::SpeedUp | Sid::SpeedDown | Sid::ResetSpeed => {
+                if !self.backend_available() {
+                    return self.unavailable(cx);
+                }
+                let speed = self
+                    .speed_requested
+                    .filter(|(_, since)| since.elapsed() < Duration::from_millis(1200))
+                    .map_or(self.state.speed, |(value, _)| value);
+                let target = if id == Sid::ResetSpeed {
+                    Some(1.)
+                } else {
+                    dock::adjacent_speed(speed, &SPEEDS, id == Sid::SpeedUp)
+                };
+                if let Some(target) = target {
+                    self.speed_requested = Some((target, Instant::now()));
+                    self.command(|p| p.set_speed(target), cx);
+                }
+            }
+            Sid::PreviousChapter | Sid::NextChapter => {
+                if !self.state.chapters_available || !self.can_seek() {
+                    return self.unavailable(cx);
+                }
+                if let Some(target) = dock::adjacent_chapter(
+                    &self.state.chapters,
+                    self.state.position,
+                    id == Sid::NextChapter,
+                ) {
+                    self.seek_to(target, cx);
+                }
+            }
+            Sid::NextSubtitle | Sid::PreviousSubtitle | Sid::NextAudio => {
+                if !self.state.tracks_available || !self.backend_available() {
+                    return self.unavailable(cx);
+                }
+                let kind = if id == Sid::NextAudio {
+                    TrackKind::Audio
+                } else {
+                    TrackKind::Subtitle
+                };
+                if let Some(target) =
+                    dock::cycle_track(&self.state.tracks, kind, id != Sid::PreviousSubtitle)
+                {
+                    self.command(
+                        |p| {
+                            if kind == TrackKind::Subtitle {
+                                p.select_subtitle(target)
+                            } else {
+                                p.select_audio(target)
+                            }
+                        },
+                        cx,
+                    );
+                } else {
+                    self.unavailable(cx);
+                }
+            }
+            Sid::ToggleSubtitles => self.command(Player::toggle_subtitle_visibility, cx),
+            Sid::DelayBack | Sid::DelayForward => {
+                let Some(actual) = self.state.subtitle_delay else {
+                    return self.unavailable(cx);
+                };
+                let delay = self
+                    .delay_requested
+                    .filter(|(_, since)| since.elapsed() < Duration::from_millis(1200))
+                    .map_or(actual, |(value, _)| value);
+                let target = ((delay + if id == Sid::DelayForward { 0.1 } else { -0.1 }) * 10.)
+                    .round()
+                    .clamp(-600., 600.)
+                    / 10.;
+                self.delay_requested = Some((target, Instant::now()));
+                self.command(|p| p.set_subtitle_delay(target), cx);
+            }
+            Sid::PreviousFrame | Sid::NextFrame => {
+                if self.request_command(|p| p.step_frame(id == Sid::PreviousFrame), cx)
+                    && let Some(progress) = self.progress.as_mut()
+                {
+                    progress.play = false;
+                }
+            }
+            Sid::SurfaceFullscreen | Sid::SurfacePause | Sid::SurfaceFocus => {}
+        }
+    }
+    fn unavailable(&mut self, cx: &mut Context<Self>) {
+        self.control_notice = true;
+        self.activity(cx);
+    }
+
     fn new_mode(
         title: PlaybackTitle,
         url: Option<String>,
@@ -1383,6 +1581,15 @@ impl PlayerWindow {
             true
         });
         cx.on_release(|view, cx| view.flush_progress(cx)).detach();
+        let weak = cx.weak_entity();
+        let player_window = window.window_handle();
+        // Native repeats must be inspected before action dispatch. Key-up
+        // symbols need not match keydown (X11 emits "?" down and "/" up).
+        let shortcut_keystrokes = cx.intercept_keystrokes(move |event, window, cx| {
+            if window.window_handle() == player_window {
+                let _ = weak.update(cx, |view, _| view.shortcut_held = event.is_held);
+            }
+        });
         let view = Self {
             title,
             progress: None,
@@ -1423,6 +1630,14 @@ impl PlayerWindow {
             volume_dragging: false,
             volume_requested: None,
             menu: None,
+            help_focus: None,
+            help_dismiss_focus: cx.focus_handle(),
+            help_previous: None,
+            shortcut_held: false,
+            _shortcut_keystrokes: shortcut_keystrokes,
+            seek_requested: None,
+            speed_requested: None,
+            delay_requested: None,
             dock_height: Pixels::default(),
             transfer: TransferRate::default(),
             last_transfer_poll: None,
@@ -1847,6 +2062,18 @@ impl PlayerWindow {
             self.volume_requested = None;
             state_changed = true;
         }
+        for (requested, actual) in [
+            (&mut self.seek_requested, Some(self.state.position)),
+            (&mut self.speed_requested, Some(self.state.speed)),
+            (&mut self.delay_requested, self.state.subtitle_delay),
+        ] {
+            if requested.is_some_and(|(target, since)| {
+                since.elapsed() >= Duration::from_millis(1200)
+                    || actual.is_some_and(|value| (value - target).abs() < 0.01)
+            }) {
+                *requested = None;
+            }
+        }
         // No animations: reduced motion and normal motion both settle instantly.
         // GPUI's is_visible is application hide/show, not a reliable cross-platform
         // minimized/occluded signal; do not pause or change lease state from it.
@@ -1897,19 +2124,33 @@ impl PlayerWindow {
         command: impl FnOnce(&Player) -> kinema_mpv::Result<()>,
         cx: &mut Context<Self>,
     ) {
+        self.request_command(command, cx);
+    }
+    fn request_command(
+        &mut self,
+        command: impl FnOnce(&Player) -> kinema_mpv::Result<()>,
+        cx: &mut Context<Self>,
+    ) -> bool {
         self.activity(cx);
-        if let Some(player) = self.player.as_ref().and_then(|owner| owner.player.as_ref())
-            && let Err(error) = command(player)
-        {
-            if matches!(error, kinema_mpv::Error::Disconnected) {
-                self.failure_reason = Some(error.playback_failure());
-                self.failure_phase = Some(FailurePhase::Command);
-                self.error = Some(error.to_string());
-            } else {
-                self.control_notice = true;
+        let Some(player) = self.player.as_ref().and_then(|owner| owner.player.as_ref()) else {
+            self.unavailable(cx);
+            return false;
+        };
+        match command(player) {
+            Ok(()) => {
+                self.control_notice = false;
+                true
             }
-        } else {
-            self.control_notice = false;
+            Err(error) => {
+                if matches!(error, kinema_mpv::Error::Disconnected) {
+                    self.failure_reason = Some(error.playback_failure());
+                    self.failure_phase = Some(FailurePhase::Command);
+                    self.error = Some(error.to_string());
+                } else {
+                    self.control_notice = true;
+                }
+                false
+            }
         }
     }
     fn desktop_transport(&mut self, action: Transport, cx: &mut Context<Self>) -> bool {
@@ -2009,6 +2250,10 @@ impl PlayerWindow {
             }
             // Do not assume the previous sub-pos survives.
             self.subtitle_position = None;
+            self.delay_requested = None;
+            self.speed_requested = None;
+            self.seek_requested = None;
+            self.scrub = None;
             self.command(
                 |player| {
                     player.set_paused(tracked)?;
@@ -2021,8 +2266,20 @@ impl PlayerWindow {
         }
     }
     fn seek(&mut self, seconds: f64, cx: &mut Context<Self>) {
-        if progress(self.state.position, self.state.duration).is_some() {
-            self.command(|player| player.seek(seconds), cx);
+        if self.can_seek() {
+            let position = self
+                .seek_requested
+                .filter(|(_, since)| since.elapsed() < Duration::from_millis(1200))
+                .map_or(self.state.position, |(target, _)| target);
+            let target = bounded_seek(position + seconds, self.state.duration);
+            self.seek_requested = Some((target, Instant::now()));
+            self.scrub = Some(Scrub::Pending {
+                target,
+                since: Instant::now(),
+            });
+            self.command(|player| player.seek_absolute(target), cx);
+        } else {
+            self.unavailable(cx);
         }
     }
     /// Backend command for automatic presentation: unlike `command`, it never
@@ -2073,11 +2330,12 @@ impl PlayerWindow {
     }
     fn seek_to(&mut self, target: f64, cx: &mut Context<Self>) {
         if self.can_seek() {
+            self.seek_requested = Some((target, Instant::now()));
             self.command(|player| player.seek_absolute(target), cx);
         }
     }
     fn menu_open(&self) -> bool {
-        self.menu.is_some()
+        self.menu.is_some() || self.help_focus.is_some()
     }
     fn availability(&self) -> Availability {
         let has = |kind| self.state.tracks.iter().any(|track| track.kind == kind);
@@ -2312,7 +2570,7 @@ impl PlayerWindow {
         self.player.is_some() && !terminal_failure(self.error.is_some(), &self.state)
     }
     fn can_seek(&self) -> bool {
-        self.backend_available() && progress(self.state.position, self.state.duration).is_some()
+        self.backend_available() && desktop_can_seek(&self.state)
     }
     fn chrome_visible(&self, window: &Window) -> bool {
         controls_visible(
@@ -2378,7 +2636,7 @@ impl PlayerWindow {
             p.accent
         };
         let slider = div()
-            .id("player-volume")
+            .id("player-volume").occlude()
             .aria_label(format!(
                 "Volume, {volume:.0} percent{}. Up and down arrows change volume by {VOLUME_STEP:.0}.",
                 if self.state.muted { ", muted" } else { "" }
@@ -2448,6 +2706,7 @@ impl PlayerWindow {
             });
         div()
             .id("player-volume-panel")
+            .occlude()
             .absolute()
             .right(s::S20)
             .top(relative(0.5))
@@ -2481,11 +2740,7 @@ impl PlayerWindow {
                     } else {
                         IconName::Volume
                     },
-                    if self.state.muted {
-                        "Unmute (M)"
-                    } else {
-                        "Mute (M)"
-                    },
+                    shortcuts::tooltip(Sid::ToggleMute),
                 )
                 .on_click(cx.listener(|view, _, _, cx| view.command(Player::toggle_mute, cx))),
             )
@@ -2787,7 +3042,17 @@ impl PlayerWindow {
             }
         };
         let buffer = self.buffer_summary(f32::from(viewport.width) < 960.);
-        let status = [notice, buffer.as_str()]
+        let requested = self
+            .delay_requested
+            .filter(|(_, since)| since.elapsed() < Duration::from_millis(1200))
+            .map(|(delay, _)| format!("Requested subtitle delay {delay:+.1}s"))
+            .or_else(|| {
+                self.speed_requested
+                    .filter(|(_, since)| since.elapsed() < Duration::from_millis(1200))
+                    .map(|(speed, _)| format!("Requested speed {}", speed_label(speed)))
+            })
+            .unwrap_or_default();
+        let status = [notice, buffer.as_str(), requested.as_str()]
             .into_iter()
             .filter(|part| !part.is_empty())
             .collect::<Vec<_>>()
@@ -2859,7 +3124,7 @@ impl PlayerWindow {
                     } else {
                         IconName::Fullscreen
                     },
-                    "Toggle fullscreen (F)",
+                    shortcuts::tooltip(Sid::ToggleFullscreen),
                 )
                 .on_click(|_, window, _| window.toggle_fullscreen()),
             ));
@@ -2875,6 +3140,7 @@ impl PlayerWindow {
                     .items_center()
                     .gap(s::S12)
                     .p(s::S16)
+                    .occlude()
                     .bg(p.scrim_max)
                     .child(
                         div()
@@ -2900,6 +3166,7 @@ impl PlayerWindow {
                 // approved `.dock` is only inset content, with no card or border.
                 div()
                     .id("player-dock-scrim")
+                    .occlude()
                     .w_full()
                     .flex_none()
                     .relative()
@@ -2970,13 +3237,7 @@ impl PlayerWindow {
                                             } else {
                                                 IconName::Pause
                                             },
-                                            if self.state.ended {
-                                                "Replay (K)"
-                                            } else if self.state.paused {
-                                                "Play (K)"
-                                            } else {
-                                                "Pause (K)"
-                                            },
+                                            shortcuts::tooltip(Sid::TogglePlayback),
                                         )
                                         .on_click(
                                             cx.listener(|view, _, _, cx| view.toggle_playback(cx)),
@@ -2987,7 +3248,7 @@ impl PlayerWindow {
                                             BACK,
                                             "player-back",
                                             IconName::SeekBack,
-                                            "Back 10 seconds (←)",
+                                            shortcuts::tooltip(Sid::SeekBack),
                                         )
                                         .on_click(
                                             cx.listener(|view, _, _, cx| view.seek(-10., cx)),
@@ -2998,7 +3259,7 @@ impl PlayerWindow {
                                             FORWARD,
                                             "player-forward",
                                             IconName::SeekForward,
-                                            "Forward 10 seconds (→)",
+                                            shortcuts::tooltip(Sid::SeekForward),
                                         )
                                         .on_click(cx.listener(|view, _, _, cx| view.seek(10., cx))),
                                     )
@@ -3012,6 +3273,13 @@ impl PlayerWindow {
                                             .type_style(t::SMALL)
                                             .text_color(p.text_secondary)
                                             .child(status),
+                                    )
+                                    .child(
+                                        Button::new("player-shortcut-help", "Keyboard & Mouse")
+                                            .focus_handle(self.controls[HELP].clone())
+                                            .on_click(cx.listener(|view, _, window, cx| {
+                                                view.open_help(window, cx)
+                                            })),
                                     )
                                     .child(utilities),
                             )
@@ -3063,26 +3331,50 @@ impl Render for PlayerWindow {
         #[cfg(feature = "gpu-surface")]
         let has_video = has_video || self.gpu_frame.is_some();
         div().id("kinema-player").key_context("KinemaPlayer").relative().size_full().overflow_hidden().bg(p.bg_canvas).text_color(p.text_primary).font_family(t::UI_FAMILY)
-            // While a menu is open every player shortcut is passed through
-            // (`propagate`) so the menu's own key handling sees the keystroke.
-            .on_action(cx.listener(|view, _: &TogglePlayback, _, cx| if view.menu_open() { cx.propagate() } else { view.toggle_playback(cx) }))
-            .on_action(cx.listener(|view, _: &SeekBack, _, cx| if view.menu_open() { cx.propagate() } else { view.seek(-10., cx) }))
-            .on_action(cx.listener(|view, _: &SeekForward, _, cx| if view.menu_open() { cx.propagate() } else { view.seek(10., cx) }))
-            .on_action(cx.listener(|view, _: &ToggleMute, _, cx| if view.menu_open() { cx.propagate() } else { view.command(Player::toggle_mute, cx) }))
-            .on_action(cx.listener(|view, _: &VolumeUp, _, cx| if view.menu_open() { cx.propagate() } else { view.nudge_volume(VOLUME_STEP, cx) }))
-            .on_action(cx.listener(|view, _: &VolumeDown, _, cx| if view.menu_open() { cx.propagate() } else { view.nudge_volume(-VOLUME_STEP, cx) }))
-            .on_action(cx.listener(|view, _: &ToggleFullscreen, window, cx| if view.menu_open() { cx.propagate() } else { window.toggle_fullscreen(); view.activity(cx); }))
-            // Escape: an open menu dismisses itself first; otherwise it cancels an
-            // active drag, and only then leaves fullscreen.
-            .on_action(cx.listener(|view, _: &Escape, window, cx| { if view.menu_open() { cx.propagate(); } else { if !view.cancel_drag(cx) && window.is_fullscreen() { window.toggle_fullscreen(); } view.activity(cx); } }))
-            .on_action(cx.listener(|view, _: &NextControl, window, cx| if view.menu_open() { cx.propagate() } else { view.focus_control(false, window, cx) }))
-            .on_action(cx.listener(|view, _: &PreviousControl, window, cx| if view.menu_open() { cx.propagate() } else { view.focus_control(true, window, cx) }))
+            .on_action(cx.listener(|view, _: &TogglePlayback, window, cx| view.shortcut(Sid::TogglePlayback, window, cx)))
+            .on_action(cx.listener(|view, _: &SeekBack, window, cx| view.shortcut(Sid::SeekBack, window, cx)))
+            .on_action(cx.listener(|view, _: &SeekForward, window, cx| view.shortcut(Sid::SeekForward, window, cx)))
+            .on_action(cx.listener(|view, _: &SeekBackLong, window, cx| view.shortcut(Sid::SeekBackLong, window, cx)))
+            .on_action(cx.listener(|view, _: &SeekForwardLong, window, cx| view.shortcut(Sid::SeekForwardLong, window, cx)))
+            .on_action(cx.listener(|view, _: &SeekBackFine, window, cx| view.shortcut(Sid::SeekBackFine, window, cx)))
+            .on_action(cx.listener(|view, _: &SeekForwardFine, window, cx| view.shortcut(Sid::SeekForwardFine, window, cx)))
+            .on_action(cx.listener(|view, _: &ToggleMute, window, cx| view.shortcut(Sid::ToggleMute, window, cx)))
+            .on_action(cx.listener(|view, _: &VolumeUp, window, cx| view.shortcut(Sid::VolumeUp, window, cx)))
+            .on_action(cx.listener(|view, _: &VolumeDown, window, cx| view.shortcut(Sid::VolumeDown, window, cx)))
+            .on_action(cx.listener(|view, _: &NextAudio, window, cx| view.shortcut(Sid::NextAudio, window, cx)))
+            .on_action(cx.listener(|view, _: &NextSubtitle, window, cx| view.shortcut(Sid::NextSubtitle, window, cx)))
+            .on_action(cx.listener(|view, _: &PreviousSubtitle, window, cx| view.shortcut(Sid::PreviousSubtitle, window, cx)))
+            .on_action(cx.listener(|view, _: &ToggleSubtitles, window, cx| view.shortcut(Sid::ToggleSubtitles, window, cx)))
+            .on_action(cx.listener(|view, _: &DelayBack, window, cx| view.shortcut(Sid::DelayBack, window, cx)))
+            .on_action(cx.listener(|view, _: &DelayForward, window, cx| view.shortcut(Sid::DelayForward, window, cx)))
+            .on_action(cx.listener(|view, _: &SpeedDown, window, cx| view.shortcut(Sid::SpeedDown, window, cx)))
+            .on_action(cx.listener(|view, _: &SpeedUp, window, cx| view.shortcut(Sid::SpeedUp, window, cx)))
+            .on_action(cx.listener(|view, _: &ResetSpeed, window, cx| view.shortcut(Sid::ResetSpeed, window, cx)))
+            .on_action(cx.listener(|view, _: &PreviousFrame, window, cx| view.shortcut(Sid::PreviousFrame, window, cx)))
+            .on_action(cx.listener(|view, _: &NextFrame, window, cx| view.shortcut(Sid::NextFrame, window, cx)))
+            .on_action(cx.listener(|view, _: &PreviousChapter, window, cx| view.shortcut(Sid::PreviousChapter, window, cx)))
+            .on_action(cx.listener(|view, _: &NextChapter, window, cx| view.shortcut(Sid::NextChapter, window, cx)))
+            .on_action(cx.listener(|view, _: &ToggleFullscreen, window, cx| view.shortcut(Sid::ToggleFullscreen, window, cx)))
+            .on_action(cx.listener(|view, _: &Escape, window, cx| view.shortcut(Sid::Escape, window, cx)))
+            .on_action(cx.listener(|view, _: &ShowHelp, window, cx| view.shortcut(Sid::ShowHelp, window, cx)))
+            .on_action(cx.listener(|view, _: &NextControl, window, cx| view.shortcut(Sid::NextControl, window, cx)))
+            .on_action(cx.listener(|view, _: &PreviousControl, window, cx| view.shortcut(Sid::PreviousControl, window, cx)))
             .on_mouse_move(cx.listener(|view, event: &MouseMoveEvent, _, cx| view.pointer_moved(event, cx)))
             .on_mouse_up(MouseButton::Left, cx.listener(|view, _: &MouseUpEvent, _, cx| view.finish_drag(cx)))
             .on_mouse_up_out(MouseButton::Left, cx.listener(|view, _: &MouseUpEvent, _, cx| view.finish_drag(cx)))
             .child(div().id("player-surface").key_context("KinemaPlayerSurface").track_focus(&self.surface_focus).absolute().size_full()
-                .on_mouse_down(MouseButton::Left, cx.listener(|view, _, window, cx| { view.surface_focus.focus(window, cx); view.activity(cx); })))
-            .when(self.mode == PlayerChoice::Embedded && !failed, |element| element.child(self.embedded_video()))
+                .on_mouse_down(MouseButton::Left, cx.listener(|view, event: &MouseDownEvent, window, cx| {
+                    view.surface_focus.focus(window, cx);
+                    if event.click_count == 2 { window.toggle_fullscreen(); }
+                    view.activity(cx);
+                    cx.stop_propagation();
+                }))
+                .on_mouse_down(MouseButton::Right, cx.listener(|view, _, window, cx| {
+                    view.surface_focus.focus(window, cx);
+                    view.toggle_playback(cx);
+                    cx.stop_propagation();
+                }))
+                .when(self.mode == PlayerChoice::Embedded && !failed, |element| element.child(self.embedded_video())))
             .when(failed || !has_video, |element| element.child(
                 div().absolute().inset_0().flex().flex_col().items_center().justify_center().gap(s::S12).when(failed, |panel| panel.bg(p.scrim_max))
                     .child(div().type_style(t::TITLE).child(if failed { "Playback unavailable" } else if self.state.ended { "Playback finished" } else if self.state.paused_for_cache { "Buffering…" } else if self.state.loading || self.player.is_none() { "Opening media…" } else { "Audio playback" }))
@@ -3109,7 +3401,7 @@ impl Render for PlayerWindow {
                 let unavailable = self.progress.as_ref().is_some_and(|p| p.phase == ProgressPhase::Unavailable);
                 let first_play = self.progress.as_ref().is_some_and(|p| p.usable_checkpoint().is_none());
                 let mismatch = self.progress.as_ref().is_some_and(|p| p.phase == ProgressPhase::Mismatch);
-                element.child(div().absolute().inset_0().bg(p.scrim_max).flex().flex_col().items_center().justify_center().gap(s::S16)
+                element.child(div().absolute().inset_0().occlude().bg(p.scrim_max).flex().flex_col().items_center().justify_center().gap(s::S16)
                     .child(div().type_style(t::TITLE).child(if unavailable && first_play { "Playback could not start" } else if unavailable { "Saved position cannot be resumed" } else if mismatch { "This source has a different duration" } else { "Resume this replay?" }))
                     .child(div().type_style(t::BODY).child(if unavailable && first_play { "Playback readiness could not be confirmed. Retry, or try playing without saving progress." } else if unavailable { "Playback readiness or resume could not be confirmed. Your saved progress is unchanged." } else if mismatch { "Resume at the saved time, or start over. Your saved progress is unchanged until playback is ready." } else { "Resume your saved position, or play from the beginning." }))
                     .when(!unavailable, |panel| panel.child(Button::new("progress-resume", if mismatch { "Resume anyway" } else { "Resume" }).on_click(cx.listener(|view, _, _, cx| view.choose_progress(true, cx)))))
@@ -3119,12 +3411,13 @@ impl Render for PlayerWindow {
                     .when(self.progress.as_ref().is_some_and(|progress| progress.can_start_over(&self.state)), |panel| panel.child(Button::new("progress-start-over", "Play from beginning").on_click(cx.listener(|view, _, _, cx| view.choose_progress(false, cx))))))
             })
             .when(self.progress.as_ref().is_some_and(|p| p.notice && matches!(p.phase, ProgressPhase::Ready | ProgressPhase::Reset)), |element| {
-                element.child(div().absolute().inset_0().bg(p.scrim_max).flex().flex_col().items_center().justify_center().gap(s::S16)
+                element.child(div().absolute().inset_0().occlude().bg(p.scrim_max).flex().flex_col().items_center().justify_center().gap(s::S16)
                     .child(div().type_style(t::TITLE).child("Progress could not be saved"))
                     .child(div().type_style(t::BODY).child("Your saved progress is unchanged. Retry saving, or play without saving progress."))
                     .child(Button::new("progress-retry-saving", "Retry saving").on_click(cx.listener(|view, _, _, cx| view.retry_progress_ready(cx))))
                     .child(Button::new("progress-untracked", "Play without saving").on_click(cx.listener(|view, _, _, cx| view.play_without_saving(cx)))))
             })
+            .when(self.help_focus.is_some(), |el| el.child(self.shortcut_help(cx)))
             // Opt-in diagnostics only: no handlers, id or focus, so it never takes input.
             .when_some(self.cadence_text.clone(), |el, text| {
                 el.child(
@@ -3146,6 +3439,7 @@ impl Render for PlayerWindow {
     }
 }
 
+#[cfg(test)]
 fn progress(position: f64, duration: Option<f64>) -> Option<f64> {
     duration.filter(|d| d.is_finite() && *d > 0.).map(|d| {
         if position.is_finite() {
@@ -3176,7 +3470,7 @@ struct Availability {
 }
 fn control_enabled(index: usize, a: Availability) -> bool {
     match index {
-        CLOSE | FULLSCREEN => true,
+        CLOSE | FULLSCREEN | HELP => true,
         TIMELINE | BACK | FORWARD => a.backend && a.seekable,
         CHAPTERS => a.backend && a.seekable && a.chapters,
         SUBTITLES => a.backend && a.subtitles,
@@ -4398,7 +4692,7 @@ mod tests {
             chapters_known: true,
             tracks_known: true,
         };
-        assert_eq!(enabled(none), vec![CLOSE, FULLSCREEN]);
+        assert_eq!(enabled(none), vec![CLOSE, FULLSCREEN, HELP]);
         let live = Availability {
             backend: true,
             ..none
@@ -4406,7 +4700,7 @@ mod tests {
         assert_eq!(
             enabled(live),
             vec![
-                CLOSE, PLAY, SUBTITLES, AUDIO, SPEED, FULLSCREEN, MUTE, VOLUME
+                CLOSE, PLAY, SUBTITLES, AUDIO, SPEED, FULLSCREEN, MUTE, VOLUME, HELP
             ]
         );
         let seekable = Availability {
@@ -4445,5 +4739,248 @@ mod tests {
         state.stopped = true;
         assert!(terminal_failure(false, &state));
         assert!(!replay_needed(&state));
+    }
+}
+
+#[cfg(all(test, feature = "ui-probe-test"))]
+mod input_tests {
+    use super::*;
+    use ::core::prelude::v1::test;
+    use gpui::TestAppContext;
+
+    fn key(window: &mut Window, cx: &mut App, name: &str, held: bool, release: bool) -> bool {
+        let Ok(keystroke) = Keystroke::parse(name) else {
+            panic!("invalid fixture key")
+        };
+        let consumed = !window
+            .dispatch_event(
+                KeyDownEvent {
+                    keystroke: keystroke.clone(),
+                    is_held: held,
+                    prefer_character_input: false,
+                }
+                .to_platform_input(),
+                cx,
+            )
+            .propagate;
+        if release {
+            window.dispatch_event(KeyUpEvent { keystroke }.to_platform_input(), cx);
+        }
+        consumed
+    }
+    fn mouse(
+        window: &mut Window,
+        cx: &mut App,
+        position: Point<Pixels>,
+        button: MouseButton,
+        count: usize,
+    ) {
+        window.dispatch_event(
+            MouseDownEvent {
+                position,
+                button,
+                click_count: count,
+                ..Default::default()
+            }
+            .to_platform_input(),
+            cx,
+        );
+        window.dispatch_event(
+            MouseUpEvent {
+                position,
+                button,
+                click_count: count,
+                ..Default::default()
+            }
+            .to_platform_input(),
+            cx,
+        );
+    }
+    #[test]
+    fn real_dispatch_repeat_help_focus_and_surface_hit_testing()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut cx = TestAppContext::single();
+        cx.update(crate::widgets::tokens::init);
+        cx.update(bind_keys);
+        let window = cx.add_window(|window, cx| {
+            let mut view = PlayerWindow::new_mode(
+                kinema_core::media::playback_title("Fixture", None),
+                None,
+                PlayerChoice::Embedded,
+                window,
+                cx,
+            );
+            view.startup_cancel
+                .store(true, std::sync::atomic::Ordering::Release);
+            view.state.loading = false;
+            if let Some(title_id) = kinema_core::library::TitleId::new(1) {
+                view.progress = Some(Progress::new(PlaybackLaunch {
+                    subject: kinema_core::watch_progress::PlaybackProgressTarget::Movie(title_id),
+                    epoch: 1,
+                    run: 1,
+                    checkpoint: None,
+                    watched: false,
+                    intent: PlaybackIntent::Normal,
+                }));
+            }
+            view._updates = Task::ready(());
+            view
+        });
+        cx.update_window(window.into(), |view, window, cx| {
+            let view = view
+                .downcast::<PlayerWindow>()
+                .map_err(|_| "expected player fixture")?;
+            window.draw(cx).clear(cx);
+            key(window, cx, "f", false, false);
+            assert!(window.is_fullscreen());
+            key(window, cx, "f", true, false);
+            assert!(window.is_fullscreen(), "held toggle must be suppressed");
+            window.dispatch_event(
+                KeyUpEvent {
+                    keystroke: Keystroke::parse("f")?,
+                }
+                .to_platform_input(),
+                cx,
+            );
+            key(window, cx, "f", false, true);
+            assert!(!window.is_fullscreen());
+            for symbol in [
+                "[",
+                "]",
+                "#",
+                "shift-j",
+                "ctrl-left",
+                "shift-left",
+                "shift-3->#",
+            ] {
+                assert!(
+                    key(window, cx, symbol, false, true),
+                    "registered logical key {symbol}"
+                );
+            }
+            // Replay captured native X11 structs, not a parsed shift-/ pair.
+            let native_help_key = |window: &mut Window, cx: &mut App| {
+                window.dispatch_event(
+                    KeyDownEvent {
+                        keystroke: Keystroke {
+                            key: "?".into(),
+                            key_char: Some("?".into()),
+                            modifiers: Modifiers::default(),
+                        },
+                        is_held: false,
+                        prefer_character_input: false,
+                    }
+                    .to_platform_input(),
+                    cx,
+                );
+                window.dispatch_event(
+                    KeyUpEvent {
+                        keystroke: Keystroke {
+                            key: "/".into(),
+                            key_char: Some("/".into()),
+                            modifiers: Modifiers::default(),
+                        },
+                    }
+                    .to_platform_input(),
+                    cx,
+                );
+            };
+            native_help_key(window, cx);
+            view.update(cx, |view, _| assert!(view.help_focus.is_some()));
+            key(window, cx, "tab", false, true);
+            key(window, cx, "escape", false, true);
+            key(window, cx, "?", true, false);
+            view.update(cx, |view, _| {
+                assert!(
+                    view.help_focus.is_none(),
+                    "native repeat cannot reopen help"
+                )
+            });
+            native_help_key(window, cx);
+            view.update(cx, |view, _| {
+                assert!(
+                    view.help_focus.is_some(),
+                    "native normalized symbol reopens after mismatched keyup"
+                )
+            });
+            key(window, cx, "escape", false, true);
+            key(window, cx, "?", false, true);
+            view.update(cx, |view, _| assert!(view.help_focus.is_some()));
+            key(window, cx, "f", false, true);
+            assert!(!window.is_fullscreen(), "help must isolate shortcuts");
+            key(window, cx, "tab", false, true);
+            view.update(cx, |view, _| {
+                assert!(view.help_dismiss_focus.is_focused(window))
+            });
+            mouse(window, cx, point(px(200.), px(100.)), MouseButton::Left, 2);
+            assert!(!window.is_fullscreen(), "help excludes video gestures");
+            key(window, cx, "escape", false, true);
+            view.update(cx, |view, _| assert!(view.surface_focus.is_focused(window)));
+            key(window, cx, "?", false, true);
+            key(window, cx, "tab", false, true);
+            key(window, cx, "enter", false, true);
+            view.update(cx, |view, _| {
+                assert!(
+                    view.help_focus.is_none(),
+                    "help close is keyboard accessible"
+                )
+            });
+            // Key actions invalidate the frame; native rendering draws before
+            // the next pointer event. Refresh stale overlay hitboxes in the mock.
+            window.draw(cx).clear(cx);
+            let center = point(
+                window.viewport_size().width / 2.,
+                window.viewport_size().height / 2.,
+            );
+            mouse(window, cx, center, MouseButton::Right, 1);
+            view.update(cx, |view, _| {
+                assert!(
+                    view.progress.as_ref().is_some_and(|p| !p.play),
+                    "right down/up toggles once"
+                )
+            });
+            mouse(window, cx, point(px(30.), px(25.)), MouseButton::Right, 1);
+            view.update(cx, |view, _| {
+                assert!(
+                    view.progress.as_ref().is_some_and(|p| !p.play),
+                    "header right click must not toggle"
+                )
+            });
+            mouse(
+                window,
+                cx,
+                point(
+                    window.viewport_size().width - px(25.),
+                    window.viewport_size().height / 2. - px(90.),
+                ),
+                MouseButton::Right,
+                1,
+            );
+            view.update(cx, |view, _| {
+                assert!(
+                    view.progress.as_ref().is_some_and(|p| !p.play),
+                    "volume panel padding excludes surface gestures"
+                )
+            });
+            mouse(window, cx, center, MouseButton::Left, 1);
+            assert!(!window.is_fullscreen());
+            mouse(window, cx, center, MouseButton::Left, 2);
+            assert!(
+                window.is_fullscreen(),
+                "native double click toggles exactly once"
+            );
+            mouse(window, cx, point(px(30.), px(25.)), MouseButton::Left, 2);
+            assert!(
+                window.is_fullscreen(),
+                "header must exclude surface gestures"
+            );
+            // An unrelated focused widget inside the player owns its key semantics.
+            let foreign_focus = cx.focus_handle();
+            foreign_focus.focus(window, cx);
+            key(window, cx, "f", false, true);
+            assert!(window.is_fullscreen());
+            Ok::<_, Box<dyn std::error::Error>>(())
+        })??;
+        Ok(())
     }
 }

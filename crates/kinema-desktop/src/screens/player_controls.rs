@@ -297,3 +297,98 @@ mod tests {
         assert_eq!(subtitle_position(true, f32::NAN, 600.), 100);
     }
 }
+
+/// Next strictly adjacent speed preset, including intermediate observations.
+pub fn adjacent_speed(speed: f64, presets: &[f64], forward: bool) -> Option<f64> {
+    if !speed.is_finite() {
+        return None;
+    }
+    if forward {
+        presets.iter().copied().find(|v| *v > speed)
+    } else {
+        presets.iter().rev().copied().find(|v| *v < speed)
+    }
+}
+
+pub fn adjacent_chapter(chapters: &[Chapter], position: f64, forward: bool) -> Option<f64> {
+    if !position.is_finite() {
+        return None;
+    }
+    let current = chapter_index(chapters, position);
+    let next = if forward {
+        current.map_or(Some(0), |i| i.checked_add(1))
+    } else {
+        current.and_then(|i| i.checked_sub(1))
+    }?;
+    chapters
+        .get(next)
+        .map(|c| c.time)
+        .filter(|time| time.is_finite() && *time >= 0.)
+}
+
+/// Outer None means unavailable, inner None is the explicit subtitle Off slot.
+pub fn cycle_track(
+    tracks: &[Track],
+    kind: kinema_mpv::TrackKind,
+    forward: bool,
+) -> Option<Option<i64>> {
+    let filtered: Vec<_> = tracks.iter().filter(|t| t.kind == kind).collect();
+    if filtered.is_empty() {
+        return None;
+    }
+    let off = kind == kinema_mpv::TrackKind::Subtitle;
+    let count = filtered.len() + usize::from(off);
+    let selected = filtered.iter().position(|t| t.selected);
+    let current = selected.or(if off { Some(filtered.len()) } else { None });
+    let index = match (current, forward) {
+        (Some(i), true) => (i + 1) % count,
+        (Some(i), false) => (i + count - 1) % count,
+        (None, true) => 0,
+        (None, false) => count - 1,
+    };
+    Some(filtered.get(index).map(|t| t.id))
+}
+
+#[cfg(test)]
+mod shortcut_tests {
+    use super::*;
+    use kinema_mpv::TrackKind;
+    #[test]
+    fn speed_and_chapter_edges_do_not_wrap() {
+        let speeds = [0.5, 0.75, 1., 1.25, 1.5, 1.75, 2.];
+        assert_eq!(adjacent_speed(1.1, &speeds, true), Some(1.25));
+        assert_eq!(adjacent_speed(1.1, &speeds, false), Some(1.));
+        assert_eq!(adjacent_speed(2., &speeds, true), None);
+        assert_eq!(adjacent_speed(0.5, &speeds, false), None);
+        let chapters = [10., 50., 90.].map(|time| Chapter { time, title: None });
+        assert_eq!(adjacent_chapter(&chapters, 0., true), Some(10.));
+        assert_eq!(adjacent_chapter(&chapters, 0., false), None);
+        assert_eq!(adjacent_chapter(&chapters, 51., false), Some(10.));
+        assert_eq!(adjacent_chapter(&chapters, 90., true), None);
+        assert_eq!(adjacent_chapter(&[], 0., true), None);
+    }
+    #[test]
+    fn cycling_uses_ids_and_distinct_off_slot() {
+        let track = |id, kind, selected| Track {
+            id,
+            kind,
+            selected,
+            title: None,
+            lang: None,
+        };
+        let tracks = [
+            track(42, TrackKind::Subtitle, true),
+            track(3, TrackKind::Audio, true),
+            track(91, TrackKind::Subtitle, false),
+        ];
+        assert_eq!(
+            cycle_track(&tracks, TrackKind::Subtitle, true),
+            Some(Some(91))
+        );
+        assert_eq!(cycle_track(&tracks, TrackKind::Subtitle, false), Some(None));
+        assert_eq!(cycle_track(&tracks, TrackKind::Audio, true), Some(Some(3)));
+        assert_eq!(cycle_track(&[], TrackKind::Audio, true), None);
+        let off = [track(91, TrackKind::Subtitle, false)];
+        assert_eq!(cycle_track(&off, TrackKind::Subtitle, true), Some(Some(91)));
+    }
+}

@@ -3470,6 +3470,10 @@ pub enum InputPreference {
 /// A keystroke event, and potentially the associated action
 #[derive(Debug)]
 pub struct KeystrokeEvent {
+    /// Whether the source keydown is an auto-repeat. False for modifier-only
+    /// events and replayed multi-stroke input, matching replay KeyDownEvent.
+    pub is_held: bool,
+
     /// The keystroke that occurred
     pub keystroke: Keystroke,
 

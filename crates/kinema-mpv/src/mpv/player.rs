@@ -15,7 +15,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc::{self, Receiver, SyncSender, TrySendError},
     },
     thread::{self, JoinHandle},
@@ -74,6 +74,7 @@ impl Shared {
             state.error = Some(error);
         }
     }
+    #[cfg(test)]
     pub fn set_error_typed(&self, error: Error) {
         if let Some(mut state) = self.control_state() {
             state.failure_reason = Some(error.playback_failure());
@@ -170,13 +171,34 @@ impl Drop for WorkerExit {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OperationKind {
+    Control,
+    Load,
+}
+
+struct Operation {
+    kind: OperationKind,
+    commands: Vec<Vec<CString>>,
+    generation: Option<u64>,
+}
+
+impl Operation {
+    fn reply_id(&self) -> u64 {
+        self.generation.map_or(0, |generation| {
+            generation.wrapping_add(1).wrapping_mul(2) | u64::from(self.kind == OperationKind::Load)
+        })
+    }
+}
+
 /// A bounded asynchronous control queue and a latest-frame mailbox.
 /// Dropping joins both workers; rendering is freed before the libmpv client.
 /// Runtime renderer errors permanently stop this Player; inspect state/diagnostics
 /// and recreate the Player to recover. Media/command errors remain recoverable.
 pub struct Player {
     shared: Arc<Shared>,
-    commands: SyncSender<Vec<CString>>,
+    commands: SyncSender<Operation>,
+    command_generation: Arc<AtomicU64>,
     control: Option<JoinHandle<()>>,
     render: Option<JoinHandle<()>>,
 }
@@ -303,6 +325,8 @@ impl Player {
             (16, c"demuxer-cache-state", 6),
             (22, c"seekable", 3),
             (23, c"seeking", 3),
+            (24, c"sub-visibility", 3),
+            (25, c"sub-delay", 5),
         ] {
             client.loaded.check(
                 unsafe { (client.loaded.api.observe)(handle, id, name.as_ptr(), format) },
@@ -357,11 +381,21 @@ impl Player {
             .option_warnings(option_warnings);
         let (commands, receiver) = mpsc::sync_channel(64);
         let (decoder_tx, decoder_rx) = mpsc::sync_channel(1);
+        let command_generation = Arc::new(AtomicU64::new(0));
+        let worker_generation = command_generation.clone();
         let control_shared = shared.clone();
         let control_client = client.clone();
         let control = thread::Builder::new()
             .name("mpv-control".into())
-            .spawn(move || control_worker(control_client, control_shared, receiver, decoder_rx))?;
+            .spawn(move || {
+                control_worker(
+                    control_client,
+                    control_shared,
+                    receiver,
+                    decoder_rx,
+                    worker_generation,
+                )
+            })?;
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
         let render_shared = shared.clone();
         let render = match thread::Builder::new()
@@ -386,6 +420,7 @@ impl Player {
         Ok(Self {
             shared,
             commands,
+            command_generation,
             control: Some(control),
             render: Some(render),
         })
@@ -394,16 +429,43 @@ impl Player {
         if self.shared.stopped.load(Ordering::Acquire) {
             return Err(Error::Disconnected);
         }
-        let arguments = arguments
+        self.submit(&[arguments], None)?;
+        Ok(())
+    }
+    fn submit(&self, commands: &[&[&str]], generation: Option<u64>) -> Result<()> {
+        self.submit_operation(commands, generation, OperationKind::Control)
+    }
+    fn submit_operation(
+        &self,
+        commands: &[&[&str]],
+        generation: Option<u64>,
+        kind: OperationKind,
+    ) -> Result<()> {
+        if self.shared.stopped.load(Ordering::Acquire) {
+            return Err(Error::Disconnected);
+        }
+        let commands = commands
             .iter()
-            .map(|s| {
-                CString::new(*s).map_err(|_| Error::InvalidInput("command contains a NUL byte"))
+            .map(|arguments| {
+                arguments
+                    .iter()
+                    .map(|s| {
+                        CString::new(*s)
+                            .map_err(|_| Error::InvalidInput("command contains a NUL byte"))
+                    })
+                    .collect::<Result<Vec<_>>>()
             })
             .collect::<Result<Vec<_>>>()?;
-        self.commands.try_send(arguments).map_err(|e| match e {
-            TrySendError::Full(_) => Error::QueueFull,
-            TrySendError::Disconnected(_) => Error::Disconnected,
-        })?;
+        self.commands
+            .try_send(Operation {
+                kind,
+                commands,
+                generation,
+            })
+            .map_err(|e| match e {
+                TrySendError::Full(_) => Error::QueueFull,
+                TrySendError::Disconnected(_) => Error::Disconnected,
+            })?;
         if let Some(worker) = &self.control {
             worker.thread().unpark();
         }
@@ -419,7 +481,20 @@ impl Player {
             .pipeline
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        self.command(&["loadfile", source, "replace"])?;
+        let generation = self
+            .command_generation
+            .load(Ordering::Acquire)
+            .wrapping_add(1);
+        self.submit_operation(
+            &[
+                &["set", "sub-delay", "0"],
+                &["set", "sub-visibility", "yes"],
+                &["loadfile", source, "replace"],
+            ],
+            Some(generation),
+            OperationKind::Load,
+        )?;
+        self.command_generation.store(generation, Ordering::Release);
         // Revoke old readiness immediately; START_FILE supplies the new observed
         // generation. A queued load must never expose the outgoing file as ready.
         state.file_loaded = false;
@@ -472,7 +547,91 @@ impl Player {
     }
     /// Select an observed subtitle track ID; None disables subtitles.
     pub fn select_subtitle(&self, id: Option<i64>) -> Result<()> {
-        self.select_track("sid", id)
+        if id.is_some_and(|id| id < 0) {
+            return Err(Error::InvalidInput("track ID must be nonnegative"));
+        }
+        let value = id.map_or_else(|| "no".to_owned(), |id| id.to_string());
+        let _state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        let generation = Some(self.command_generation.load(Ordering::Acquire));
+        if id.is_some() {
+            self.submit(
+                &[&["set", "sid", &value], &["set", "sub-visibility", "yes"]],
+                generation,
+            )
+        } else {
+            self.submit(&[&["set", "sid", &value]], generation)
+        }
+    }
+    /// Pause and step one video frame as a single bounded worker operation.
+    /// `false` steps forward; `true` steps backward and requires observed
+    /// seekability. Reverse stepping is seek-based and can be slow/inaccurate.
+    /// Acceptance is not proof that a frame advanced. Failures appear in state.
+    pub fn step_frame(&self, backward: bool) -> Result<()> {
+        let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        if self.shared.stopped.load(Ordering::Acquire) {
+            return Err(Error::Disconnected);
+        }
+        validate_frame_step(&state, backward)?;
+        self.submit(
+            &[
+                &["set", "pause", "yes"],
+                &[if backward {
+                    "frame-back-step"
+                } else {
+                    "frame-step"
+                }],
+            ],
+            Some(self.command_generation.load(Ordering::Acquire)),
+        )
+    }
+    /// Set visibility without changing the selected subtitle. Requires a selected
+    /// subtitle in a loaded file; observations are not updated optimistically.
+    pub fn set_subtitle_visibility(&self, visible: bool) -> Result<()> {
+        self.subtitle_visibility_command(&[
+            "set",
+            "sub-visibility",
+            if visible { "yes" } else { "no" },
+        ])
+    }
+    pub fn toggle_subtitle_visibility(&self) -> Result<()> {
+        self.subtitle_visibility_command(&["cycle", "sub-visibility"])
+    }
+    fn subtitle_visibility_command(&self, arguments: &[&str]) -> Result<()> {
+        let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        if self.shared.stopped.load(Ordering::Acquire) {
+            return Err(Error::Disconnected);
+        }
+        if !state.file_loaded
+            || state.loading
+            || state.media_stopped
+            || !state.tracks_available
+            || !state
+                .tracks
+                .iter()
+                .any(|t| t.kind == crate::TrackKind::Subtitle && t.selected)
+        {
+            return Err(Error::InvalidInput(
+                "subtitle visibility requires a loaded selected subtitle",
+            ));
+        }
+        self.submit(
+            &[arguments],
+            Some(self.command_generation.load(Ordering::Acquire)),
+        )
+    }
+    /// Subtitle offset in seconds: positive means later. Reset to zero on load.
+    /// Finite values in -60..=60 are accepted, without optimistic state updates.
+    pub fn set_subtitle_delay(&self, seconds: f64) -> Result<()> {
+        if !seconds.is_finite() || !(-60.0..=60.0).contains(&seconds) {
+            return Err(Error::InvalidInput(
+                "subtitle delay must be finite and between -60 and 60",
+            ));
+        }
+        let _state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        self.submit(
+            &[&["set", "sub-delay", &seconds.to_string()]],
+            Some(self.command_generation.load(Ordering::Acquire)),
+        )
     }
     /// Position subtitles vertically: 0 is the top, 100 the default bottom.
     /// Accepts 0..=100 and persists across media loads on this Player.
@@ -606,7 +765,144 @@ unsafe fn observe_media_metadata(state: &mut PlaybackState, id: u64, property: &
     }
 }
 
+fn subtitle_property(client: &Client, name: &CStr) -> Option<String> {
+    let ptr = unsafe { (client.loaded.api.get_property_string)(client.handle, name.as_ptr()) };
+    if ptr.is_null() {
+        return None;
+    }
+    let value = unsafe { CStr::from_ptr(ptr) }
+        .to_string_lossy()
+        .into_owned();
+    unsafe { (client.loaded.api.free)(ptr.cast()) };
+    Some(value)
+}
+
+fn apply_subtitle_state(state: &mut PlaybackState, visibility: Option<&str>, delay: Option<&str>) {
+    state.subtitle_visibility = match visibility {
+        Some("yes") => Some(true),
+        Some("no") => Some(false),
+        _ => None,
+    };
+    state.subtitle_delay = delay
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|v| v.is_finite());
+}
+
+fn refresh_subtitle_state(client: &Client, shared: &Shared, generation: &AtomicU64) {
+    let current = generation.load(Ordering::Acquire);
+    let visibility = subtitle_property(client, c"sub-visibility");
+    let delay = subtitle_property(client, c"sub-delay");
+    let Some(mut state) = shared.control_state() else {
+        return;
+    };
+    if generation.load(Ordering::Acquire) == current
+        && state.file_loaded
+        && !state.loading
+        && !state.media_stopped
+    {
+        apply_subtitle_state(&mut state, visibility.as_deref(), delay.as_deref());
+    }
+}
+
+fn operation_error(shared: &Shared, operation: &Operation, generation: &AtomicU64, error: Error) {
+    let Some(mut state) = shared.control_state() else {
+        return;
+    };
+    if operation
+        .generation
+        .is_some_and(|g| g != generation.load(Ordering::Acquire))
+    {
+        return;
+    }
+    apply_operation_error(shared, &mut state, operation.kind, error);
+}
+
+fn apply_operation_error(
+    shared: &Shared,
+    state: &mut PlaybackState,
+    kind: OperationKind,
+    error: Error,
+) {
+    if kind == OperationKind::Load {
+        // No START_FILE/END_FILE is guaranteed when a reset or load enqueue
+        // fails. Revoke readiness and end the pending startup ourselves.
+        state.loading = false;
+        state.file_loaded = false;
+        state.position_observed = false;
+        state.seekable = None;
+        state.seeking = false;
+        state.paused_for_cache = false;
+        state.media_stopped = true;
+        clear_media_metadata(state);
+        shared
+            .pipeline
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear(state);
+    }
+    state.failure_reason = Some(error.playback_failure());
+    shared.diagnostics.failure_typed(&error, Some(state));
+    state.error = Some(error.to_string());
+}
+
+fn command_reply_error(
+    shared: &Shared,
+    state: &mut PlaybackState,
+    generation: &AtomicU64,
+    reply_id: u64,
+    error: Error,
+) {
+    if reply_id != 0 && reply_id / 2 != generation.load(Ordering::Acquire).wrapping_add(1) {
+        return;
+    }
+    let kind = if reply_id & 1 == 1 {
+        OperationKind::Load
+    } else {
+        OperationKind::Control
+    };
+    apply_operation_error(shared, state, kind, error);
+}
+
+fn execute_operation(
+    operation: &Operation,
+    current: u64,
+    mut enqueue: impl FnMut(&[CString]) -> Result<()>,
+) -> Result<()> {
+    if operation
+        .generation
+        .is_some_and(|generation| generation != current)
+    {
+        return Ok(());
+    }
+    for arguments in &operation.commands {
+        enqueue(arguments)?;
+    }
+    Ok(())
+}
+
+fn validate_frame_step(state: &PlaybackState, backward: bool) -> Result<()> {
+    if !state.file_loaded
+        || state.loading
+        || state.media_stopped
+        || !state.tracks_available
+        || !state
+            .tracks
+            .iter()
+            .any(|t| t.kind == crate::TrackKind::Video && t.selected)
+    {
+        return Err(Error::InvalidInput("frame stepping requires loaded video"));
+    }
+    if backward && state.seekable != Some(true) {
+        return Err(Error::InvalidInput(
+            "reverse frame stepping requires seekable video",
+        ));
+    }
+    Ok(())
+}
+
 fn clear_media_metadata(state: &mut PlaybackState) {
+    state.subtitle_visibility = None;
+    state.subtitle_delay = None;
     state.chapters.clear();
     state.chapters_available = false;
     state.tracks.clear();
@@ -694,8 +990,9 @@ fn pause_on_control_exit(shared: &Shared, enqueue: impl FnOnce(&[&CStr; 3]) -> c
 fn control_worker(
     client: Arc<Client>,
     shared: Arc<Shared>,
-    receiver: Receiver<Vec<CString>>,
+    receiver: Receiver<Operation>,
     decoder: Receiver<SyncSender<Result<()>>>,
+    generation: Arc<AtomicU64>,
 ) {
     shared.diagnostics.event(Lifecycle::ControlStarted);
     let _exit = WorkerExit(shared.clone());
@@ -725,15 +1022,47 @@ fn control_worker(
             let _ = reply.send(result);
         }
         // Bounded batches prevent command floods starving events or shutdown.
-        for arguments in receiver.try_iter().take(64) {
+        for operation in receiver.try_iter().take(64) {
+            // Synchronize with load's successful enqueue + generation publication.
+            let (current, readiness) = {
+                let state = shared.state.lock().unwrap_or_else(|e| e.into_inner());
+                let readiness = operation
+                    .commands
+                    .last()
+                    .and_then(|args| args.first())
+                    .map_or(Ok(()), |name| {
+                        if name.as_c_str() == c"frame-step" || name.as_c_str() == c"frame-back-step"
+                        {
+                            validate_frame_step(&state, name.as_c_str() == c"frame-back-step")
+                        } else {
+                            Ok(())
+                        }
+                    });
+                (generation.load(Ordering::Acquire), readiness)
+            };
             if shared.stopped.load(Ordering::Acquire) {
                 break;
             }
-            let mut pointers: Vec<_> = arguments.iter().map(|s| s.as_ptr()).collect();
-            pointers.push(std::ptr::null());
-            let code = unsafe { (client.loaded.api.command)(client.handle, 0, pointers.as_ptr()) };
-            if let Err(e) = client.loaded.check(code, "queue command") {
-                shared.set_error_typed(e);
+            if operation.generation.is_some_and(|g| g != current) {
+                continue;
+            }
+            if let Err(e) = readiness {
+                operation_error(&shared, &operation, &generation, e);
+                continue;
+            }
+            if let Err(e) = execute_operation(&operation, current, |arguments| {
+                let mut pointers: Vec<_> = arguments.iter().map(|s| s.as_ptr()).collect();
+                pointers.push(std::ptr::null());
+                let code = unsafe {
+                    (client.loaded.api.command)(
+                        client.handle,
+                        operation.reply_id(),
+                        pointers.as_ptr(),
+                    )
+                };
+                client.loaded.check(code, "queue command")
+            }) {
+                operation_error(&shared, &operation, &generation, e);
             }
         }
         for _ in 0..256 {
@@ -766,13 +1095,15 @@ fn control_worker(
                     break;
                 }
                 5 if event.error < 0 => {
-                    let error = client.loaded.check(event.error, "command").err();
-                    state.failure_reason = error.as_ref().map(Error::playback_failure);
-                    if let Some(error) = &error {
-                        shared.diagnostics.failure_typed(error, Some(&state));
+                    if let Err(error) = client.loaded.check(event.error, "command") {
+                        command_reply_error(
+                            &shared,
+                            &mut state,
+                            &generation,
+                            event.userdata,
+                            error,
+                        );
                     }
-                    state.error = error.map(|e| e.to_string());
-                    state.loading = false;
                 }
                 6 => {
                     shared.diagnostics.new_media();
@@ -906,12 +1237,21 @@ fn control_worker(
                 }
                 _ => {}
             }
-            if !state.loading
+            let refresh_subtitles = state.file_loaded
+                && !state.loading
                 && !state.media_stopped
-                && (event.id == 8 || (event.id == 22 && matches!(event.userdata, 6..=11 | 17..=21)))
-            {
-                // Never hold UI-visible state/pipeline locks during client calls.
-                drop(state);
+                && (event.id == 8 || (event.id == 22 && matches!(event.userdata, 24 | 25)));
+            let refresh_decode = !state.loading
+                && !state.media_stopped
+                && (event.id == 8
+                    || (event.id == 22 && matches!(event.userdata, 6..=11 | 17..=21)));
+            // Native property calls must never hold UI-visible locks. Recheck
+            // generation/readiness before publishing sampled subtitle values.
+            drop(state);
+            if refresh_subtitles {
+                refresh_subtitle_state(&client, &shared, &generation);
+            }
+            if refresh_decode {
                 refresh_decode_evidence(&client, &shared);
             }
         }
@@ -1002,7 +1342,7 @@ fn refresh_decode_evidence(client: &Client, shared: &Shared) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn mock_player() -> (Player, Receiver<Vec<CString>>) {
+    fn mock_player() -> (Player, Receiver<Operation>) {
         let (commands, receiver) = mpsc::sync_channel(1);
         (
             Player {
@@ -1013,11 +1353,366 @@ mod tests {
                     state: Mutex::new(PlaybackState::default()),
                 }),
                 commands,
+                command_generation: Arc::new(AtomicU64::new(0)),
                 control: None,
                 render: None,
             },
             receiver,
         )
+    }
+    fn ready_video_and_subtitle(player: &Player) {
+        let mut state = player.shared.state.lock().unwrap();
+        state.file_loaded = true;
+        state.media_stopped = false;
+        state.tracks_available = true;
+        state.seekable = Some(true);
+        state.tracks = [crate::TrackKind::Video, crate::TrackKind::Subtitle]
+            .into_iter()
+            .enumerate()
+            .map(|(id, kind)| crate::Track {
+                id: id as i64 + 7,
+                kind,
+                selected: true,
+                title: None,
+                lang: None,
+            })
+            .collect();
+    }
+    fn arguments(operation: &Operation) -> Vec<Vec<&str>> {
+        operation
+            .commands
+            .iter()
+            .map(|args| args.iter().map(|s| s.to_str().unwrap()).collect())
+            .collect()
+    }
+    #[test]
+    fn frame_step_is_one_ordered_operation_without_optimistic_state() {
+        let (player, receiver) = mock_player();
+        assert!(matches!(
+            player.step_frame(false),
+            Err(Error::InvalidInput(_))
+        ));
+        ready_video_and_subtitle(&player);
+        let before = player.state();
+        for (backward, command) in [(false, "frame-step"), (true, "frame-back-step")] {
+            player.step_frame(backward).unwrap();
+            assert!(matches!(player.step_frame(backward), Err(Error::QueueFull)));
+            let operation = receiver.try_recv().unwrap();
+            assert_eq!(
+                arguments(&operation),
+                [vec!["set", "pause", "yes"], vec![command]]
+            );
+            assert_eq!(operation.generation, Some(0));
+            let mut calls = Vec::new();
+            execute_operation(&operation, 0, |args| {
+                calls.push(args[0].to_str().unwrap().to_owned());
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(calls, ["set", command]);
+            assert_eq!(player.state(), before);
+        }
+        player.shared.state.lock().unwrap().seekable = None;
+        assert!(matches!(
+            player.step_frame(true),
+            Err(Error::InvalidInput(_))
+        ));
+        player.step_frame(false).unwrap();
+        receiver.try_recv().unwrap();
+        player.shared.state.lock().unwrap().seekable = Some(false);
+        assert!(player.step_frame(true).is_err());
+        player
+            .shared
+            .state
+            .lock()
+            .unwrap()
+            .tracks
+            .retain(|t| t.kind != crate::TrackKind::Video);
+        assert!(player.step_frame(false).is_err());
+        ready_video_and_subtitle(&player);
+        player.shared.state.lock().unwrap().loading = true;
+        assert!(player.step_frame(false).is_err());
+        assert!(receiver.try_recv().is_err());
+        player.shared.stopped.store(true, Ordering::Release);
+        assert!(matches!(player.step_frame(false), Err(Error::Disconnected)));
+    }
+    #[test]
+    fn subtitle_commands_validate_arguments_and_selected_track_without_optimism() {
+        let (player, receiver) = mock_player();
+        assert!(matches!(
+            player.toggle_subtitle_visibility(),
+            Err(Error::InvalidInput(_))
+        ));
+        ready_video_and_subtitle(&player);
+        let before = player.state();
+        for visible in [true, false] {
+            player.set_subtitle_visibility(visible).unwrap();
+            assert!(matches!(
+                player.toggle_subtitle_visibility(),
+                Err(Error::QueueFull)
+            ));
+            let operation = receiver.try_recv().unwrap();
+            assert_eq!(
+                arguments(&operation),
+                [vec![
+                    "set",
+                    "sub-visibility",
+                    if visible { "yes" } else { "no" }
+                ]]
+            );
+        }
+        player.toggle_subtitle_visibility().unwrap();
+        assert_eq!(
+            arguments(&receiver.try_recv().unwrap()),
+            [vec!["cycle", "sub-visibility"]]
+        );
+        for delay in [-60.0, -0.1, 0.0, 0.1, 60.0] {
+            player.set_subtitle_delay(delay).unwrap();
+            assert_eq!(
+                arguments(&receiver.try_recv().unwrap()),
+                [vec!["set", "sub-delay", &delay.to_string()]]
+            );
+        }
+        for delay in [-60.1, 60.1, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(matches!(
+                player.set_subtitle_delay(delay),
+                Err(Error::InvalidInput(_))
+            ));
+        }
+        player.select_subtitle(Some(42)).unwrap();
+        assert_eq!(
+            arguments(&receiver.try_recv().unwrap()),
+            [
+                vec!["set", "sid", "42"],
+                vec!["set", "sub-visibility", "yes"]
+            ]
+        );
+        assert_eq!(player.state(), before);
+        player
+            .shared
+            .state
+            .lock()
+            .unwrap()
+            .tracks
+            .iter_mut()
+            .for_each(|t| t.selected = false);
+        assert!(player.set_subtitle_visibility(false).is_err());
+        player.set_subtitle_delay(0.1).unwrap();
+        assert!(matches!(
+            player.set_subtitle_delay(0.2),
+            Err(Error::QueueFull)
+        ));
+        receiver.try_recv().unwrap();
+        drop(receiver);
+        assert!(matches!(
+            player.set_subtitle_delay(0.0),
+            Err(Error::Disconnected)
+        ));
+        ready_video_and_subtitle(&player);
+        assert!(matches!(
+            player.set_subtitle_visibility(true),
+            Err(Error::Disconnected)
+        ));
+        assert!(matches!(player.step_frame(false), Err(Error::Disconnected)));
+    }
+    #[test]
+    fn replacement_is_ordered_resets_observations_and_rejects_stale_operations() {
+        let (player, receiver) = mock_player();
+        ready_video_and_subtitle(&player);
+        player.set_subtitle_delay(2.0).unwrap();
+        let old = receiver.try_recv().unwrap();
+        {
+            let mut state = player.shared.state.lock().unwrap();
+            apply_subtitle_state(&mut state, Some("no"), Some("2"));
+            state.speed = 1.5;
+        }
+        player.load("replacement.mkv").unwrap();
+        let load = receiver.try_recv().unwrap();
+        assert_eq!(
+            arguments(&load),
+            [
+                vec!["set", "sub-delay", "0"],
+                vec!["set", "sub-visibility", "yes"],
+                vec!["loadfile", "replacement.mkv", "replace"]
+            ]
+        );
+        let generation = player.command_generation.load(Ordering::Acquire);
+        assert_eq!(generation, 1);
+        execute_operation(&old, generation, |_| panic!("obsolete work executed")).unwrap();
+        operation_error(
+            &player.shared,
+            &old,
+            &player.command_generation,
+            Error::Disconnected,
+        );
+        assert_eq!(player.state().error, None);
+        let mut names = Vec::new();
+        execute_operation(&load, generation, |args| {
+            names.push(args[1].to_str().unwrap().to_owned());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(names, ["sub-delay", "sub-visibility", "replacement.mkv"]);
+        let state = player.state();
+        assert_eq!(state.subtitle_visibility, None);
+        assert_eq!(state.subtitle_delay, None);
+        assert_eq!(state.speed, 1.5);
+        assert!(!state.file_loaded);
+        player.stop().unwrap();
+        assert!(matches!(player.load("full.mkv"), Err(Error::QueueFull)));
+        assert_eq!(
+            player.command_generation.load(Ordering::Acquire),
+            generation
+        );
+    }
+    #[test]
+    fn load_enqueue_failure_at_each_command_ends_startup_but_not_replacement() {
+        for fail_at in 1..=3 {
+            let (player, receiver) = mock_player();
+            player.load("first.mkv").unwrap();
+            let operation = receiver.try_recv().unwrap();
+            assert_eq!(operation.kind, OperationKind::Load);
+            let mut calls = 0;
+            let error = execute_operation(&operation, 1, |_| {
+                calls += 1;
+                if calls == fail_at {
+                    Err(Error::Disconnected)
+                } else {
+                    Ok(())
+                }
+            })
+            .unwrap_err();
+            assert_eq!(calls, fail_at);
+            operation_error(
+                &player.shared,
+                &operation,
+                &player.command_generation,
+                error,
+            );
+            let failed = player.state();
+            assert!(!failed.loading && !failed.file_loaded && !failed.position_observed);
+            assert!(failed.media_stopped);
+            assert_eq!(failed.seekable, None);
+            assert!(failed.error.is_some());
+            player.load("replacement.mkv").unwrap();
+            let replacement = receiver.try_recv().unwrap();
+            let before = player.state();
+            assert!(before.loading);
+            operation_error(
+                &player.shared,
+                &operation,
+                &player.command_generation,
+                Error::Disconnected,
+            );
+            assert_eq!(
+                player.state(),
+                before,
+                "old enqueue failure clobbered replacement at {fail_at}"
+            );
+            execute_operation(&replacement, 2, |_| Ok(())).unwrap();
+        }
+    }
+    #[test]
+    fn async_load_errors_clear_readiness_and_stale_replies_leave_replacement_untouched() {
+        let (player, receiver) = mock_player();
+        player.load("first.mkv").unwrap();
+        let operation = receiver.try_recv().unwrap();
+        // Every command in this load operation uses its load-tagged reply ID,
+        // including either reset, so any native command failure ends startup.
+        for _ in &operation.commands {
+            let mut state = player.shared.state.lock().unwrap();
+            state.loading = true;
+            state.file_loaded = true;
+            state.position_observed = true;
+            state.seekable = Some(true);
+            command_reply_error(
+                &player.shared,
+                &mut state,
+                &player.command_generation,
+                operation.reply_id(),
+                Error::Disconnected,
+            );
+            assert!(!state.loading && !state.file_loaded && !state.position_observed);
+            assert!(state.media_stopped);
+            assert_eq!(state.seekable, None);
+            assert!(state.error.is_some());
+        }
+        player.load("replacement.mkv").unwrap();
+        receiver.try_recv().unwrap();
+        let before = player.state();
+        {
+            let mut state = player.shared.state.lock().unwrap();
+            command_reply_error(
+                &player.shared,
+                &mut state,
+                &player.command_generation,
+                operation.reply_id(),
+                Error::Disconnected,
+            );
+        }
+        assert_eq!(player.state(), before);
+        player.set_subtitle_delay(0.5).unwrap();
+        let control = receiver.try_recv().unwrap();
+        let mut state = player.shared.state.lock().unwrap();
+        command_reply_error(
+            &player.shared,
+            &mut state,
+            &player.command_generation,
+            control.reply_id(),
+            Error::Disconnected,
+        );
+        assert!(
+            state.loading,
+            "a control failure is not a failed replacement load"
+        );
+    }
+    #[test]
+    fn operation_enqueue_failure_aborts_remaining_commands() {
+        let (player, receiver) = mock_player();
+        ready_video_and_subtitle(&player);
+        player.step_frame(false).unwrap();
+        let operation = receiver.try_recv().unwrap();
+        let mut calls = 0;
+        assert!(matches!(
+            execute_operation(&operation, 0, |_| {
+                calls += 1;
+                Err(Error::Disconnected)
+            }),
+            Err(Error::Disconnected)
+        ));
+        assert_eq!(calls, 1, "never enqueue step after pause enqueue failure");
+        player.load("file.mkv").unwrap();
+        let operation = receiver.try_recv().unwrap();
+        let mut calls = 0;
+        assert!(
+            execute_operation(&operation, 1, |_| {
+                calls += 1;
+                Err(Error::QueueFull)
+            })
+            .is_err()
+        );
+        assert_eq!(calls, 1, "never load after reset enqueue failure");
+    }
+    #[test]
+    fn subtitle_observations_distinguish_unavailable_invalid_and_lifecycle_reset() {
+        let mut state = PlaybackState::default();
+        assert_eq!(state.subtitle_visibility, None);
+        assert_eq!(state.subtitle_delay, None);
+        apply_subtitle_state(&mut state, Some("yes"), Some("0.1"));
+        assert_eq!(state.subtitle_visibility, Some(true));
+        assert_eq!(state.subtitle_delay, Some(0.1));
+        apply_subtitle_state(&mut state, Some("no"), Some("-2.5"));
+        assert_eq!(state.subtitle_visibility, Some(false));
+        assert_eq!(state.subtitle_delay, Some(-2.5));
+        for bad in [None, Some("garbage"), Some("NaN"), Some("inf")] {
+            apply_subtitle_state(&mut state, bad, bad);
+            assert_eq!(state.subtitle_visibility, None);
+            assert_eq!(state.subtitle_delay, None);
+        }
+        apply_subtitle_state(&mut state, Some("yes"), Some("0"));
+        clear_media_metadata(&mut state);
+        assert_eq!(state.subtitle_visibility, None);
+        assert_eq!(state.subtitle_delay, None);
     }
     #[test]
     fn borrowed_native_warning_strings_are_consumed_before_event_lifetime_ends() {
@@ -1106,7 +1801,10 @@ mod tests {
         for (command, expected) in cases {
             command().unwrap();
             let arguments = receiver.try_recv().unwrap();
-            let actual: Vec<_> = arguments.iter().map(|a| a.to_str().unwrap()).collect();
+            let actual: Vec<_> = arguments.commands[0]
+                .iter()
+                .map(|a| a.to_str().unwrap())
+                .collect();
             assert_eq!(actual, *expected);
             assert_eq!(player.state(), initial);
         }
@@ -1125,7 +1823,10 @@ mod tests {
         for (percent, expected) in [(0, "0"), (85, "85"), (100, "100")] {
             player.set_subtitle_position(percent).unwrap();
             let arguments = receiver.try_recv().unwrap();
-            let actual: Vec<_> = arguments.iter().map(|a| a.to_str().unwrap()).collect();
+            let actual: Vec<_> = arguments.commands[0]
+                .iter()
+                .map(|a| a.to_str().unwrap())
+                .collect();
             assert_eq!(actual, ["set", "sub-pos", expected]);
             assert_eq!(player.state(), initial);
         }
@@ -1554,7 +2255,10 @@ mod tests {
         assert!(receiver.try_recv().is_err());
         player.load("a file with spaces.mp4").unwrap();
         let command = receiver.try_recv().unwrap();
-        assert_eq!(command[1].to_str().unwrap(), "a file with spaces.mp4");
+        assert_eq!(
+            command.commands[2][1].to_str().unwrap(),
+            "a file with spaces.mp4"
+        );
     }
     #[test]
     fn command_backpressure_and_disconnect() {
@@ -2034,6 +2738,159 @@ mod tests {
         for _ in 0..3 {
             drop(Player::new(config.clone()).unwrap());
         }
+    }
+    #[test]
+    #[ignore = "requires libmpv and ffmpeg; synthetic CPU subtitle/frame shortcut probe"]
+    fn real_player_shortcuts_subtitles_and_frames() {
+        let media = TemporaryMedia::new();
+        let subtitles = media.0.join("shortcuts.srt");
+        let path = media.0.join("shortcuts.mkv");
+        std::fs::write(
+            &subtitles,
+            "1\n00:00:00,000 --> 00:00:04,000\nSynthetic shortcuts probe\n",
+        )
+        .unwrap();
+        // Local, fixed-rate, all-intra video makes the position assertions
+        // meaningful without assuming reverse-step accuracy for arbitrary media.
+        assert!(
+            std::process::Command::new("ffmpeg")
+                .args([
+                    "-v",
+                    "error",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc2=s=160x120:r=10",
+                    "-i"
+                ])
+                .arg(&subtitles)
+                .args([
+                    "-map", "0:v", "-map", "1:s", "-c:v", "mpeg4", "-g", "1", "-c:s", "srt", "-t",
+                    "4"
+                ])
+                .arg(&path)
+                .status()
+                .expect("ffmpeg required for opt-in shortcut probe")
+                .success()
+        );
+        let player = Player::new(Config {
+            render_backend: RenderBackend::Cpu,
+            hardware_decoding: HardwareDecoding::Disabled,
+            ..Config::default()
+        })
+        .unwrap();
+        player.resize(160, 120).unwrap();
+        player.select_audio(None).unwrap();
+        player.set_paused(true).unwrap();
+        player.load(path.to_str().unwrap()).unwrap();
+        wait_for(&player, |s| {
+            s.file_loaded
+                && !s.loading
+                && s.paused
+                && s.tracks_available
+                && s.seekable == Some(true)
+        });
+        let subtitle = player
+            .state()
+            .tracks
+            .iter()
+            .find(|t| t.kind == crate::TrackKind::Subtitle)
+            .unwrap()
+            .id;
+        player.select_subtitle(Some(subtitle)).unwrap();
+        wait_for(&player, |s| {
+            s.tracks
+                .iter()
+                .any(|t| t.id == subtitle && t.kind == crate::TrackKind::Subtitle && t.selected)
+                && s.subtitle_visibility == Some(true)
+        });
+        player.set_subtitle_visibility(false).unwrap();
+        wait_for(&player, |s| s.subtitle_visibility == Some(false));
+        assert!(
+            player
+                .state()
+                .tracks
+                .iter()
+                .any(|t| t.id == subtitle && t.kind == crate::TrackKind::Subtitle && t.selected),
+            "hiding subtitles must not discard selection"
+        );
+        player.toggle_subtitle_visibility().unwrap();
+        wait_for(&player, |s| s.subtitle_visibility == Some(true));
+        for delay in [0.3, -0.2] {
+            player.set_subtitle_delay(delay).unwrap();
+            wait_for(&player, |s| {
+                s.subtitle_delay
+                    .is_some_and(|v| (v - delay).abs() < 0.000_001)
+            });
+        }
+        player.seek_absolute(1.0).unwrap();
+        wait_for(&player, |s| {
+            s.paused && !s.seeking && s.position_observed && (s.position - 1.0).abs() < 0.025
+        });
+        let before = player.state();
+        player.step_frame(false).unwrap();
+        wait_for(&player, |s| {
+            s.paused
+                && s.position_revision > before.position_revision
+                && s.position > before.position + 0.025
+        });
+        let forward = player.state();
+        // This fixture is 10 fps: tolerate timestamp rounding, not multiple
+        // forward frames. Position evidence is not a pixel/frame-identity proof.
+        let forward_delta = forward.position - before.position;
+        assert!(
+            (0.075..=0.125).contains(&forward_delta),
+            "unexpected forward delta {forward_delta}"
+        );
+        player.step_frame(true).unwrap();
+        wait_for(&player, |s| {
+            s.paused
+                && !s.seeking
+                && s.position_revision > forward.position_revision
+                && s.position < forward.position - 0.025
+        });
+        let backward = player.state();
+        let backward_delta = forward.position - backward.position;
+        // Reverse is seek-based: allow up to two fixture frames, but require
+        // actual backward movement and a return close to the starting position.
+        assert!(
+            (0.05..=0.2).contains(&backward_delta),
+            "unexpected backward delta {backward_delta}"
+        );
+        assert!((backward.position - before.position).abs() <= 0.11);
+        eprintln!(
+            "synthetic CPU shortcut positions: before={}, forward={}, backward={}; deltas=+{forward_delta}/-{backward_delta}",
+            before.position, forward.position, backward.position
+        );
+        // Also exercise the combined pause/step operation from playing state;
+        // no exact delta is asserted while playback itself can advance.
+        player.set_paused(false).unwrap();
+        wait_for(&player, |s| !s.paused);
+        player.step_frame(false).unwrap();
+        wait_for(&player, |s| s.paused);
+        player.set_subtitle_visibility(false).unwrap();
+        player.set_subtitle_delay(0.7).unwrap();
+        wait_for(&player, |s| {
+            s.subtitle_visibility == Some(false)
+                && s.subtitle_delay
+                    .is_some_and(|v| (v - 0.7).abs() < 0.000_001)
+        });
+        let generation = player.state().media_generation;
+        player.load(path.to_str().unwrap()).unwrap();
+        wait_for(&player, |s| {
+            s.media_generation > generation
+                && s.file_loaded
+                && !s.loading
+                && s.paused
+                && s.subtitle_visibility == Some(true)
+                && s.subtitle_delay.is_some_and(|v| v.abs() < 0.000_001)
+        });
+        let state = player.state();
+        assert_eq!(state.error, None, "native shortcut probe failed");
+        assert_eq!(state.fatal_error, None);
+        // Player must be destroyed before TemporaryMedia removes its files.
+        drop(player);
     }
     #[test]
     #[ignore = "requires libmpv and ffmpeg; real Cinema Dock metadata and commands"]

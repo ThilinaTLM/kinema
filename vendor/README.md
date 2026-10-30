@@ -26,7 +26,9 @@ GPUI upstream: <https://github.com/zed-industries/zed>, revision
 `93d745668805029476e6d7fbb19652116fed51de`. HAL upstream:
 <https://github.com/gfx-rs/wgpu>, wgpu-hal 29.0.4. Patches `0001`–`0005` were
 promoted unchanged from the GPU experiment. Patches `0010` and `0011` add retained
-per-window visibility for the approved close-to-background lifecycle. Their
+per-window visibility for the approved close-to-background lifecycle. Patch
+`0012` exposes native key-repeat state before action dispatch so player shortcuts
+do not infer repeat from layout-dependent key-up names. Their
 headers preserve provenance and license notices; modifications retain upstream
 licensing terms. Each crate keeps its original license files.
 

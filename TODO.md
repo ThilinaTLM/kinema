@@ -49,7 +49,8 @@
 ## Embedded MPV Player
 
 - [ ] Add seek-bar thumbnail previews.
-- [ ] Add sensible keyboard shortcuts for quick player and playback control.
+- [x] Add default player keyboard/mouse controls and shared Settings/help reference ([scope and evidence](docs/design/player-shortcuts.md)).
+- [ ] Qualify expanded player shortcuts on Windows/macOS and non-US keyboard layouts; add configurable bindings in a later phase.
 - [ ] Polish the player chrome to match the application's design system.
 - [ ] Add and validate HDR playback support, including correct color output and tone mapping on supported displays and platforms.
 - [ ] Improve and validate 4K and other high-resolution, high-quality playback, including hardware decoding and performance on supported devices.

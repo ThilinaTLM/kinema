@@ -45,3 +45,5 @@ pub mod settings;
 mod sources;
 #[cfg(not(target_family = "wasm"))]
 mod tmdb;
+
+pub mod player_shortcuts;

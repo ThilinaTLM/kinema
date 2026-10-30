@@ -190,6 +190,16 @@ on the same Player; the backend does not reset it. Hosts can raise subtitles
 while chrome is visible and restore 100 when hidden;
 subtitle styling/format can affect placement, so this is not a guaranteed safe zone.
 Commands only enqueue and never optimistically change observed selections.
+`step_frame(backward)` queues pause and a single video-frame step together;
+reverse stepping requires observed seekability and may be slow/inaccurate.
+`set_subtitle_visibility(bool)` / `toggle_subtitle_visibility()` preserve the
+selected subtitle and require a selected track. `set_subtitle_delay(seconds)`
+accepts finite −60..=60 seconds; positive means later. Observed
+`subtitle_visibility: Option<bool>` and `subtitle_delay: Option<f64>` remain
+unavailable until sampled for loaded media. Explicit subtitle selection enables
+visibility; replacement loads reset visibility to true and delay to zero.
+Generation-scoped operations/errors cannot overwrite a newer queued load.
+Acceptance is queue submission, not proof of frame advancement or property change.
 Seek chapters by their time; no thumbnail extraction is implemented.
 Event-owned nodes are copied on the control worker before the next event wait;
 parsing is nonrecursive and bounded to 4096 entries, 128 fields per map and
@@ -202,6 +212,7 @@ From the workspace root:
 ```sh
 cargo test -p kinema-mpv --locked
 cargo test -p kinema-mpv --locked real_cinema_dock_metadata -- --ignored --nocapture
+cargo test -p kinema-mpv --locked real_player_shortcuts_subtitles_and_frames -- --ignored --nocapture
 cargo clippy -p kinema-mpv --all-targets --locked -- -D warnings
 cargo test -p kinema-mpv --no-default-features --locked
 # List native smoke tests (ignored by default):
