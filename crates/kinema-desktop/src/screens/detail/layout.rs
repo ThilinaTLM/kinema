@@ -218,7 +218,7 @@ pub(super) fn glance_rows(src: &FactSource) -> Vec<(&'static str, String)> {
 }
 
 /// One piece of the hero meta line.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(super) enum MetaPart {
     Text(String),
     /// Small chip (certification).

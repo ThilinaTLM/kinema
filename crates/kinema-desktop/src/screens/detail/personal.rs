@@ -115,6 +115,8 @@ impl Detail {
         })
     }
     pub(super) fn episode_status(&self, season: u32, number: u32, cx: &App) -> ToggleStatus {
+        #[cfg(all(test, feature = "ui-probe-test"))]
+        super::work::count(super::work::Section::EpisodeStatus, 1);
         let c = self.coordinator.read(cx);
         let v = c.episode_personal(&self.episode_ref(season, number));
         // Episode reads wait for the show identity; a failed show read is a failure.
@@ -164,11 +166,18 @@ impl Detail {
     /// every season from the season summaries. Unloaded seasons are therefore
     /// covered by one batched read instead of one per season.
     pub(super) fn episode_coordinates(&self, options: &[(u32, u32)], cx: &App) -> Vec<(u32, u32)> {
-        let mut set: std::collections::BTreeSet<(u32, u32)> = self
-            .all_episodes(cx)
-            .iter()
-            .map(|e| (e.season, e.number))
-            .collect();
+        #[cfg(all(test, feature = "ui-probe-test"))]
+        super::work::count(super::work::Section::EpisodeCoordinates, 1);
+        self.coordinates_of(&self.all_episodes(cx), options)
+    }
+    /// [`Self::episode_coordinates`] over an already collected episode list.
+    pub(super) fn coordinates_of(
+        &self,
+        all: &[CatalogEpisode],
+        options: &[(u32, u32)],
+    ) -> Vec<(u32, u32)> {
+        let mut set: std::collections::BTreeSet<(u32, u32)> =
+            all.iter().map(|e| (e.season, e.number)).collect();
         if matches!(self.title, BrowseTitle::Tmdb(_)) {
             for (season, count) in options {
                 set.extend((1..=*count).map(|n| (*season, n)));
@@ -192,6 +201,8 @@ impl Detail {
     /// never unwatched. Local titles fall back to their persisted detail, and an
     /// episode with no stored row is unwatched by construction.
     pub(super) fn episode_known_watched(&self, season: u32, number: u32, cx: &App) -> Option<bool> {
+        #[cfg(all(test, feature = "ui-probe-test"))]
+        super::work::count(super::work::Section::KnownWatched, 1);
         match self.episode_status(season, number, cx) {
             ToggleStatus::Known { on, .. } => return Some(on),
             ToggleStatus::Failed
@@ -279,8 +290,8 @@ impl Detail {
         cx: &mut Context<Self>,
     ) -> OverlayButton {
         let reference = self.episode_ref(season, number);
-        let ready = self.title_id(cx).is_some();
-        let status = self.episode_status(season, number, cx);
+        let ready = self.show_snapshot(cx).title_ready;
+        let status = self.episode_view(season, number, cx).status;
         let tip = mark_tooltip(status, ready);
         let on = matches!(status, ToggleStatus::Known { on: true, .. });
         let this = cx.entity().downgrade();
@@ -542,9 +553,11 @@ impl Detail {
             .map(|(_, c)| *c as usize)
             .sum();
         let marks: Vec<_> = self
-            .episode_marks(&self.season_options, cx)
-            .into_iter()
+            .show_snapshot(cx)
+            .marks
+            .iter()
             .filter(|m| m.season > 0)
+            .cloned()
             .collect();
         (total > 0 && marks.len() >= total).then(|| Tally {
             watched: marks.iter().filter(|m| m.watched).count(),
