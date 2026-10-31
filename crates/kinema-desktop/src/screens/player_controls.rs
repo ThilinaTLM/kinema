@@ -2,7 +2,7 @@
 //! chapter lookup and label formatting. No GPUI types, so they are unit-tested.
 use std::time::{Duration, Instant};
 
-use kinema_mpv::{Chapter, Track};
+use kinema_mpv::{Chapter, MAX_VOLUME, Track};
 
 /// Volume change for the Up/Down keys.
 pub const VOLUME_STEP: f64 = 5.;
@@ -19,14 +19,23 @@ pub fn ratio_in_span(pos: f32, start: f32, len: f32) -> f32 {
     ((pos - start) / len).clamp(0., 1.)
 }
 
-/// Whole-percent volume for a vertical slider whose top is 100%.
+/// Whole-percent volume for a vertical slider whose top is `MAX_VOLUME`.
 pub fn volume_at(y: f32, top: f32, height: f32) -> f64 {
-    (f64::from(1. - ratio_in_span(y, top, height)) * 100.).round()
+    (f64::from(1. - ratio_in_span(y, top, height)) * MAX_VOLUME).round()
+}
+
+/// Slider fill fraction for a volume in `0..=MAX_VOLUME`.
+pub fn volume_fraction(volume: f64) -> f32 {
+    if volume.is_finite() {
+        (volume / MAX_VOLUME).clamp(0., 1.) as f32
+    } else {
+        0.
+    }
 }
 
 pub fn step_volume(volume: f64, delta: f64) -> f64 {
     if volume.is_finite() {
-        (volume + delta).clamp(0., 100.).round()
+        (volume + delta).clamp(0., MAX_VOLUME).round()
     } else {
         0.
     }
@@ -193,14 +202,18 @@ mod tests {
     }
     #[test]
     fn vertical_volume_is_top_down_and_whole_percent() {
-        assert_eq!(volume_at(0., 0., 100.), 100.);
-        assert_eq!(volume_at(100., 0., 100.), 0.);
-        assert_eq!(volume_at(25., 0., 100.), 75.);
-        assert_eq!(volume_at(-40., 0., 100.), 100.);
+        assert_eq!(volume_at(0., 0., 150.), 150.);
+        assert_eq!(volume_at(150., 0., 150.), 0.);
+        assert_eq!(volume_at(50., 0., 150.), 100.);
+        assert_eq!(volume_at(-40., 0., 150.), 150.);
+        assert_eq!(volume_fraction(150.), 1.);
+        assert_eq!(volume_fraction(75.), 0.5);
+        assert_eq!(volume_fraction(f64::NAN), 0.);
     }
     #[test]
     fn volume_steps_stay_in_range() {
-        assert_eq!(step_volume(98., VOLUME_STEP), 100.);
+        assert_eq!(step_volume(98., VOLUME_STEP), 103.);
+        assert_eq!(step_volume(148., VOLUME_STEP), 150.);
         assert_eq!(step_volume(3., -VOLUME_STEP), 0.);
         assert_eq!(step_volume(f64::NAN, VOLUME_STEP), 0.);
     }

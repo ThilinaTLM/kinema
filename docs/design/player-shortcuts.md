@@ -39,7 +39,7 @@ This extends [Player](player.md); external mpv/VLC behavior is unchanged.
 | Left / Right | Seek -/+10 seconds |
 | Shift+Left / Right | Seek -/+60 seconds |
 | Ctrl+Left / Right | Seek -/+1 second (literal Ctrl, including macOS) |
-| Up / Down | Volume +/-5 percentage points, capped to 0–100 |
+| Up / Down | Volume +/-5 percentage points, capped to 0–150 |
 | M | Mute without losing volume |
 | F | Toggle fullscreen |
 | Escape | Dismiss help/menu first; otherwise cancel drag, then exit fullscreen; never close playback |

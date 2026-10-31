@@ -14,7 +14,7 @@ mod player;
 mod render;
 mod software;
 
-pub use player::{Config, Player};
+pub use player::{Config, MAX_VOLUME, Player};
 pub use software::Frame;
 
 #[cfg(feature = "gpu-surface")]

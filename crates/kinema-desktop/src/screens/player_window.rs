@@ -33,12 +33,12 @@ use super::{
         self as dock, Scrub, VOLUME_STEP, chapter_index, chapter_label, chapter_ticks,
         displayed_position, displayed_volume, format_clock, format_remaining, ratio_in_span,
         scrub_settled, speed_label, step_volume, subtitle_position, track_label, volume_at,
-        volume_settled,
+        volume_fraction, volume_settled,
     },
 };
 use crate::widgets::{
     button::{Button, ButtonVariant},
-    icon::IconName,
+    icon::{Icon, IconName},
     menu::{Menu, MenuItem},
     text::TypeExt,
     tokens::{Palette, radius, space as s, typeface as t},
@@ -213,6 +213,10 @@ const DOCK_SIDE_INSET: Pixels = px(28.);
 const DOCK_BOTTOM_INSET: Pixels = px(23.);
 /// Height of the transparent-to-scrim fade above the dock backing (decoration only).
 const DOCK_FADE: Pixels = px(72.);
+const TOP_FADE: Pixels = px(48.);
+const VOLUME_RAIL_HEIGHT: Pixels = px(128.);
+const VOLUME_TRACK: Pixels = px(12.);
+const VOLUME_THUMB: Pixels = px(18.);
 const DOCK_ESTIMATE: Pixels = px(148.);
 const SPEEDS: [f64; 7] = [0.5, 0.75, 1., 1.25, 1.5, 1.75, 2.];
 
@@ -882,40 +886,98 @@ fn format_bytes(bytes: u64) -> String {
 }
 
 /// Playable MPV cache ahead of the playhead; `—` when MPV reports no cache.
-fn buffer_ahead_label(state: &PlaybackState) -> String {
-    match cache_ahead(state) {
-        None => "Buffer —".into(),
-        Some(seconds) => {
-            // Round once, then split, so 179.9 s is 3m 00s rather than 2m 60s.
-            let total = seconds.max(0.).round() as u64;
-            if total < 120 {
-                format!("Buffer {total}s")
-            } else {
-                format!("Buffer {}m {:02}s", total / 60, total % 60)
-            }
+/// Playable time ahead of the playhead, e.g. `45s` or `6m 33s`.
+fn ahead_duration(state: &PlaybackState) -> Option<String> {
+    cache_ahead(state).map(|seconds| {
+        // Round once, then split, so 179.9 s is 3m 00s rather than 2m 60s.
+        let total = seconds.max(0.).round() as u64;
+        if total < 120 {
+            format!("{total}s")
+        } else {
+            format!("{}m {:02}s", total / 60, total % 60)
         }
-    }
+    })
+}
+
+fn buffer_ahead_label(state: &PlaybackState) -> String {
+    format!("Buffer {}", ahead_duration(state).as_deref().unwrap_or("—"))
+}
+
+fn download_percent(downloaded: u64, total: u64) -> Option<u64> {
+    (total > 0).then(|| (u128::from(downloaded.min(total)) * 100 / u128::from(total)) as u64)
 }
 
 /// Downloaded file bytes (not MPV's playable cache), labelled as such.
-fn download_label(transfer: &TransferRate, compact: bool) -> Option<String> {
+fn download_label(transfer: &TransferRate) -> Option<String> {
     let (downloaded, total) = transfer.latest?;
     let speed = transfer.bytes_per_second().map_or_else(
         || "—".to_owned(),
         |rate| format!("{}/s", format_bytes(rate as u64)),
     );
-    let percent =
-        (total > 0).then(|| (u128::from(downloaded.min(total)) * 100 / u128::from(total)) as u64);
-    Some(match (compact, percent) {
-        (true, Some(p)) => format!("Download {speed} · {p}%"),
-        (true, None) => format!("Download {speed} · {}", format_bytes(downloaded)),
-        (false, Some(p)) => format!(
+    Some(match download_percent(downloaded, total) {
+        Some(p) => format!(
             "Downloaded {} of {} ({p}%) · {speed}",
             format_bytes(downloaded),
             format_bytes(total)
         ),
-        (false, None) => format!("Downloaded {} · {speed}", format_bytes(downloaded)),
+        None => format!("Downloaded {} · {speed}", format_bytes(downloaded)),
     })
+}
+
+/// One compact dock status entry: optional leading icon plus short text.
+#[derive(Clone, Debug, PartialEq)]
+struct StatusItem {
+    icon: Option<IconName>,
+    text: String,
+    warn: bool,
+}
+
+impl StatusItem {
+    fn text(text: impl Into<String>) -> Self {
+        Self {
+            icon: None,
+            text: text.into(),
+            warn: false,
+        }
+    }
+    fn icon(icon: IconName, text: impl Into<String>) -> Self {
+        Self {
+            icon: Some(icon),
+            text: text.into(),
+            warn: false,
+        }
+    }
+    fn warning(text: impl Into<String>) -> Self {
+        Self {
+            icon: Some(IconName::Warning),
+            text: text.into(),
+            warn: true,
+        }
+    }
+}
+
+/// Compact buffer-ahead and in-progress download entries. Unknown buffer and
+/// completed downloads are omitted; full wording lives in the tooltip/label.
+fn transfer_items(state: &PlaybackState, transfer: &TransferRate) -> Vec<StatusItem> {
+    if state.loading || state.ended {
+        return Vec::new();
+    }
+    let mut items: Vec<StatusItem> = ahead_duration(state)
+        .map(|ahead| StatusItem::icon(IconName::Timer, ahead))
+        .into_iter()
+        .collect();
+    if let Some((downloaded, total)) = transfer.latest {
+        let percent = download_percent(downloaded, total);
+        if percent.is_none() || downloaded < total {
+            let amount = percent.map_or_else(|| format_bytes(downloaded), |p| format!("{p}%"));
+            let text = match transfer.bytes_per_second() {
+                Some(rate) => format!("{amount} · {}/s", format_bytes(rate as u64)),
+                None => amount,
+            };
+            items.push(StatusItem::icon(IconName::Download, text));
+        }
+    }
+    items
 }
 
 // Emit only fixed categories, never driver/decoder strings or fallback errors.
@@ -2629,7 +2691,9 @@ impl PlayerWindow {
         let entity = cx.entity();
         let enabled = self.backend_available();
         let volume = displayed_volume(self.volume_requested, self.state.volume, Instant::now());
-        let fraction = (volume / 100.).clamp(0., 1.) as f32;
+        let fraction = volume_fraction(volume);
+        let unity = volume_fraction(100.);
+        let amplified = volume > 100.5 && !self.state.muted;
         let fill = if self.state.muted {
             p.text_muted
         } else {
@@ -2646,7 +2710,7 @@ impl PlayerWindow {
             .tab_stop(enabled)
             .relative()
             .w(s::S32)
-            .h(px(100.))
+            .h(VOLUME_RAIL_HEIGHT)
             .flex()
             .justify_center()
             .rounded(radius::SM)
@@ -2660,7 +2724,7 @@ impl PlayerWindow {
                 div()
                     .relative()
                     .h_full()
-                    .w(s::S8)
+                    .w(VOLUME_TRACK)
                     .rounded_full()
                     .bg(p.line_control.opacity(0.5))
                     .child(
@@ -2672,15 +2736,28 @@ impl PlayerWindow {
                             .rounded_full()
                             .bg(fill),
                     )
+                    // 100% detent: above it mpv amplifies (softvol).
+                    .child(
+                        div()
+                            .absolute()
+                            .top(relative(1. - unity))
+                            .left(-s::S4)
+                            .w(VOLUME_TRACK + s::S8)
+                            .h(s::S2)
+                            .mt(-s::S2 / 2.)
+                            .rounded_full()
+                            .bg(p.text_primary.opacity(0.6)),
+                    )
                     .child(
                         div()
                             .absolute()
                             .top(relative(1. - fraction))
-                            .mt(px(-7.))
-                            .ml(px(-3.))
-                            .size(px(14.))
+                            .mt(-VOLUME_THUMB / 2.)
+                            .ml((VOLUME_TRACK - VOLUME_THUMB) / 2.)
+                            .size(VOLUME_THUMB)
                             .rounded_full()
-                            .bg(p.text_primary),
+                            .bg(p.text_primary)
+                            .shadow_sm(),
                     ),
             )
             .child(
@@ -2708,14 +2785,17 @@ impl PlayerWindow {
             .id("player-volume-panel")
             .occlude()
             .absolute()
-            .right(s::S20)
+            .right(s::S24)
             .top(relative(0.5))
-            .mt(px(-98.))
+            // Half the panel height, nudged up for minimum-window dock clearance.
+            .mt(-(VOLUME_RAIL_HEIGHT / 2. + s::S48 + s::S8))
             .flex()
             .flex_col()
             .items_center()
-            .gap(s::S6)
-            .p(s::S8)
+            .gap(s::S8)
+            .px(s::S6)
+            .pt(s::S12)
+            .pb(s::S6)
             .rounded(radius::LG)
             .bg(p.scrim_max)
             .border_1()
@@ -2726,8 +2806,15 @@ impl PlayerWindow {
             }))
             .child(
                 div()
-                    .type_style(t::MONO)
-                    .text_color(p.text_secondary)
+                    .w(s::S32)
+                    .text_center()
+                    .type_style(t::SMALL_MEDIUM)
+                    .font_features(FontFeatures(vec![("tnum".into(), 1)].into()))
+                    .text_color(if amplified {
+                        p.accent_text
+                    } else {
+                        p.text_secondary
+                    })
                     .child(format!("{volume:.0}%")),
             )
             .child(slider)
@@ -2814,7 +2901,7 @@ impl PlayerWindow {
                     "Playback position, {} of {}. {}. Left and right arrows seek 10 seconds.",
                     format_clock(shown),
                     format_clock(duration),
-                    self.buffer_summary(false)
+                    self.buffer_summary()
                 )
             } else {
                 "Playback position, seeking unavailable".to_owned()
@@ -2920,12 +3007,12 @@ impl PlayerWindow {
     }
     /// Buffer-ahead (MPV playable cache) plus, for leased remote sessions,
     /// separately labelled downloaded bytes and recent speed.
-    fn buffer_summary(&self, compact: bool) -> String {
+    fn buffer_summary(&self) -> String {
         if self.state.loading || self.state.ended {
             return String::new();
         }
         let mut parts = vec![buffer_ahead_label(&self.state)];
-        parts.extend(download_label(&self.transfer, compact));
+        parts.extend(download_label(&self.transfer));
         parts.join(" · ")
     }
     /// Cheap in-memory coordinator read; never touches MediaService or disk.
@@ -2975,11 +3062,7 @@ impl PlayerWindow {
                 .shape_line(text.to_owned().into(), style.size, &[run], None)
                 .width
         };
-        let available = window.viewport_size().width
-            - s::S16 * 2.
-            - s::S12 * 2.
-            - s::S32
-            - text_width("KINEMA / PLAYER", t::CAPTION);
+        let available = window.viewport_size().width - DOCK_SIDE_INSET * 2. - s::S12 - s::S32;
         title_for_width(
             &self.title,
             text_width(&self.title.full, t::BODY_STRONG),
@@ -3024,39 +3107,89 @@ impl PlayerWindow {
             viewport.height - DOCK_BOTTOM_INSET - dock_extent - s::S8,
         );
         let dock_entity = cx.entity();
-        let notice = {
-            if self.progress.as_ref().is_some_and(|p| p.notice) {
-                "Progress could not be saved"
-            } else if self.state.paused_for_cache {
-                "Buffering…"
-            } else if self.control_notice
-                || (self.state.error.is_some() && !terminal_failure(false, &self.state))
-            {
-                "Control unavailable — try again"
-            } else if self.state.ended {
-                "Finished · Replay to watch again"
-            } else if !seekable && !self.state.loading {
-                "Seeking unavailable"
-            } else {
-                ""
-            }
+        // (compact item, full wording for the tooltip)
+        let notice = if self.progress.as_ref().is_some_and(|p| p.notice) {
+            Some((
+                StatusItem::warning("Not saved"),
+                "Progress could not be saved",
+            ))
+        } else if self.state.paused_for_cache {
+            Some((StatusItem::text("Buffering…"), "Buffering…"))
+        } else if self.control_notice
+            || (self.state.error.is_some() && !terminal_failure(false, &self.state))
+        {
+            Some((
+                StatusItem::warning("Control failed"),
+                "Control unavailable — try again",
+            ))
+        } else if self.state.ended {
+            Some((
+                StatusItem::text("Finished"),
+                "Finished · Replay to watch again",
+            ))
+        } else if !seekable && !self.state.loading {
+            Some((StatusItem::text("No seeking"), "Seeking unavailable"))
+        } else {
+            None
         };
-        let buffer = self.buffer_summary(f32::from(viewport.width) < 960.);
         let requested = self
             .delay_requested
             .filter(|(_, since)| since.elapsed() < Duration::from_millis(1200))
-            .map(|(delay, _)| format!("Requested subtitle delay {delay:+.1}s"))
+            .map(|(delay, _)| format!("Subtitle delay {delay:+.1}s"))
             .or_else(|| {
                 self.speed_requested
                     .filter(|(_, since)| since.elapsed() < Duration::from_millis(1200))
-                    .map(|(speed, _)| format!("Requested speed {}", speed_label(speed)))
-            })
-            .unwrap_or_default();
-        let status = [notice, buffer.as_str(), requested.as_str()]
+                    .map(|(speed, _)| format!("Speed {}", speed_label(speed)))
+            });
+        let summary = self.buffer_summary();
+        let detail = [
+            notice.as_ref().map_or("", |(_, full)| *full),
+            summary.as_str(),
+            requested.as_deref().unwrap_or(""),
+        ]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ");
+        let status_items: Vec<StatusItem> = notice
+            .map(|(item, _)| item)
             .into_iter()
-            .filter(|part| !part.is_empty())
-            .collect::<Vec<_>>()
-            .join(" · ");
+            .chain(transfer_items(&self.state, &self.transfer))
+            .chain(requested.map(StatusItem::text))
+            .collect();
+        let status = div()
+            .id("player-status")
+            .flex_1()
+            .w(px(0.))
+            .min_w_0()
+            .overflow_hidden()
+            .flex()
+            .items_center()
+            .gap(s::S12)
+            .px(s::S8)
+            .type_style(t::SMALL)
+            .font_features(FontFeatures(vec![("tnum".into(), 1)].into()))
+            .text_color(p.text_secondary)
+            .children(status_items.into_iter().map(|item| {
+                let color = if item.warn {
+                    p.status_warn
+                } else {
+                    p.text_secondary
+                };
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(s::S4)
+                    .text_color(color)
+                    .when_some(item.icon, |el, icon| {
+                        el.child(Icon::new(icon).size(px(14.)).color(color))
+                    })
+                    .child(item.text)
+            }))
+            .when(!detail.is_empty(), |el| {
+                el.tooltip(crate::widgets::tooltip::tooltip(detail))
+            });
         let slot = |width: Pixels, button: Button| {
             div()
                 .w(width)
@@ -3074,6 +3207,19 @@ impl PlayerWindow {
             .flex()
             .items_center()
             .gap(s::S4)
+            .child(slot(
+                s::S32,
+                self.control(
+                    HELP,
+                    "player-shortcut-help",
+                    IconName::Keyboard,
+                    format!(
+                        "Keyboard & mouse shortcuts ({})",
+                        shortcuts::entry(Sid::ShowHelp).keys
+                    ),
+                )
+                .on_click(cx.listener(|view, _, window, cx| view.open_help(window, cx))),
+            ))
             .child(slot(
                 s::S32,
                 self.control(CHAPTERS, "player-chapters", IconName::Menu, "Chapters")
@@ -3135,13 +3281,32 @@ impl PlayerWindow {
             .flex_col()
             .justify_between()
             .child(
+                // Mirrors the dock: contrast-safe backing under the title row,
+                // then a fade down into the video instead of a hard band edge.
                 div()
+                    .relative()
                     .flex()
                     .items_center()
                     .gap(s::S12)
-                    .p(s::S16)
+                    .pl(DOCK_SIDE_INSET)
+                    .pr(DOCK_SIDE_INSET - s::S8)
+                    .pt(s::S12)
+                    .pb(s::S4)
                     .occlude()
                     .bg(p.scrim_max)
+                    .child(
+                        div()
+                            .absolute()
+                            .left_0()
+                            .right_0()
+                            .bottom(-TOP_FADE)
+                            .h(TOP_FADE)
+                            .bg(linear_gradient(
+                                180.,
+                                linear_color_stop(p.scrim_max, 0.),
+                                linear_color_stop(p.scrim_max.opacity(0.), 1.),
+                            )),
+                    )
                     .child(
                         div()
                             .flex_1()
@@ -3149,12 +3314,6 @@ impl PlayerWindow {
                             .type_style(t::BODY_STRONG)
                             .truncate()
                             .child(self.chrome_title(window)),
-                    )
-                    .child(
-                        div()
-                            .type_style(t::CAPTION)
-                            .text_color(p.text_muted)
-                            .child("KINEMA / PLAYER"),
                     )
                     .child(
                         self.control(CLOSE, "player-close", IconName::Close, "Close player")
@@ -3263,24 +3422,7 @@ impl PlayerWindow {
                                         )
                                         .on_click(cx.listener(|view, _, _, cx| view.seek(10., cx))),
                                     )
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .w(px(0.))
-                                            .min_w_0()
-                                            .truncate()
-                                            .px(s::S8)
-                                            .type_style(t::SMALL)
-                                            .text_color(p.text_secondary)
-                                            .child(status),
-                                    )
-                                    .child(
-                                        Button::new("player-shortcut-help", "Keyboard & Mouse")
-                                            .focus_handle(self.controls[HELP].clone())
-                                            .on_click(cx.listener(|view, _, window, cx| {
-                                                view.open_help(window, cx)
-                                            })),
-                                    )
+                                    .child(status)
                                     .child(utilities),
                             )
                             .child(
@@ -4351,7 +4493,7 @@ mod tests {
         assert_eq!(rate.bytes_per_second(), None);
         rate.observe("b", None, t0 + Duration::from_secs(8));
         assert_eq!(rate.latest, None);
-        assert_eq!(download_label(&rate, false), None);
+        assert_eq!(download_label(&rate), None);
     }
     #[test]
     fn cadence_counts_playing_rate_and_gap_and_resets_per_interval() {
@@ -4523,7 +4665,7 @@ mod tests {
         let t0 = Instant::now();
         transfer.observe("a", Some((1_500_000, 4_500_000)), t0);
         assert_eq!(
-            download_label(&transfer, false).as_deref(),
+            download_label(&transfer).as_deref(),
             Some("Downloaded 1.5 MB of 4.5 MB (33%) · —")
         );
         transfer.observe(
@@ -4532,8 +4674,8 @@ mod tests {
             t0 + Duration::from_secs(2),
         );
         assert_eq!(
-            download_label(&transfer, true).as_deref(),
-            Some("Download 500.0 KB/s · 55%")
+            download_label(&transfer).as_deref(),
+            Some("Downloaded 2.5 MB of 4.5 MB (55%) · 500.0 KB/s")
         );
         assert_eq!(format_bytes(999), "999 B");
         // Position 10: ahead = end - 10, rounded once before splitting.
@@ -4548,7 +4690,54 @@ mod tests {
         }
         let mut huge = TransferRate::default();
         huge.observe("a", Some((u64::MAX, u64::MAX)), t0);
-        assert!(download_label(&huge, true).is_some_and(|label| label.contains("100%")));
+        assert!(download_label(&huge).is_some_and(|label| label.contains("100%")));
+    }
+    #[test]
+    fn compact_status_omits_unknown_buffer_and_finished_downloads() {
+        let mut state = PlaybackState {
+            position: 10.,
+            ..Default::default()
+        };
+        let mut transfer = TransferRate::default();
+        assert!(transfer_items(&state, &transfer).is_empty());
+        state.buffered_ranges = Some(vec![kinema_mpv::BufferedRange {
+            start: 0.,
+            end: 403.,
+        }]);
+        let t0 = Instant::now();
+        transfer.observe("a", Some((1_500_000, 4_500_000)), t0);
+        transfer.observe(
+            "a",
+            Some((2_500_000, 4_500_000)),
+            t0 + Duration::from_secs(2),
+        );
+        assert_eq!(
+            transfer_items(&state, &transfer),
+            vec![
+                StatusItem::icon(IconName::Timer, "6m 33s"),
+                StatusItem::icon(IconName::Download, "55% · 500.0 KB/s"),
+            ]
+        );
+        // Complete download: no "100% · 0 B/s" noise.
+        transfer.observe(
+            "a",
+            Some((4_500_000, 4_500_000)),
+            t0 + Duration::from_secs(4),
+        );
+        assert_eq!(
+            transfer_items(&state, &transfer),
+            vec![StatusItem::icon(IconName::Timer, "6m 33s")]
+        );
+        // Unknown total keeps byte count; no fabricated percentage.
+        let mut unknown = TransferRate::default();
+        unknown.observe("b", Some((1_500_000, 0)), t0);
+        state.buffered_ranges = None;
+        assert_eq!(
+            transfer_items(&state, &unknown),
+            vec![StatusItem::icon(IconName::Download, "1.5 MB")]
+        );
+        state.ended = true;
+        assert!(transfer_items(&state, &unknown).is_empty());
     }
     #[test]
     fn performance_cache_preserves_unknown_empty_and_containing_ranges() {
