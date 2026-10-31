@@ -40,10 +40,15 @@ mod local;
 mod personal;
 mod progress;
 mod recommendations;
+#[cfg(all(test, feature = "ui-probe-test"))]
+mod scroll_cost_tests;
+mod snapshot;
 mod streams;
 mod streams_page;
 #[cfg(test)]
 mod tests;
+#[cfg(all(test, feature = "ui-probe-test"))]
+mod work;
 use std::{cell::Cell, collections::HashMap, rc::Rc};
 
 // Detail-specific geometry. Shared spacing, row, typography and chrome
@@ -339,8 +344,15 @@ pub(crate) struct Detail {
         std::collections::HashSet<(kinema_core::library::TitleId, u32, u32)>,
     #[cfg(feature = "ui-probe")]
     fixture_ambient: Option<artwork::ArtworkPalette>,
+    /// Bumped whenever the coordinator notifies; keys the derived-data memos below.
+    data_rev: u64,
+    facts_memo: std::cell::RefCell<Option<(u64, Rc<facts::FactsView>)>>,
+    episodes_memo: std::cell::RefCell<Option<EpisodesMemo>>,
+    snapshot_memo: std::cell::RefCell<Option<Rc<snapshot::ShowSnapshot>>>,
     _subscriptions: Vec<Subscription>,
 }
+/// Revision, season and episode list of the last `Detail::episodes` derivation.
+type EpisodesMemo = (u64, Option<u32>, Rc<Vec<CatalogEpisode>>);
 impl Detail {
     /// How far the overview body has scrolled under the floating header
     /// (zero on the Streams page, which is inset below the header instead).
@@ -374,6 +386,7 @@ impl Detail {
         });
         let subscriptions = vec![
             cx.observe(&coordinator, |this, _, cx| {
+                this.data_rev += 1;
                 this.reconcile_metadata(cx);
                 this.reconcile_similar(cx);
                 this.ensure_episode_personal(cx);
@@ -449,6 +462,10 @@ impl Detail {
             episode_personal_requested: Default::default(),
             #[cfg(feature = "ui-probe")]
             fixture_ambient: None,
+            data_rev: 0,
+            facts_memo: Default::default(),
+            episodes_memo: Default::default(),
+            snapshot_memo: Default::default(),
             _subscriptions: subscriptions,
         };
         this.reconcile_similar(cx);
@@ -759,7 +776,22 @@ impl Detail {
         self.ensure_episode_personal(cx);
         cx.notify();
     }
-    fn episodes(&self, cx: &App) -> Vec<CatalogEpisode> {
+    /// Open season's episodes, memoized per coordinator revision and season.
+    fn episodes(&self, cx: &App) -> Rc<Vec<CatalogEpisode>> {
+        let mut memo = self.episodes_memo.borrow_mut();
+        if let Some((rev, season, list)) = memo.as_ref()
+            && *rev == self.data_rev
+            && *season == self.season
+        {
+            return list.clone();
+        }
+        let list = Rc::new(self.compute_episodes(cx));
+        *memo = Some((self.data_rev, self.season, list.clone()));
+        list
+    }
+    fn compute_episodes(&self, cx: &App) -> Vec<CatalogEpisode> {
+        #[cfg(all(test, feature = "ui-probe-test"))]
+        work::count(work::Section::EpisodeList, 1);
         let c = self.coordinator.read(cx);
         let episodes = match &self.title {
             BrowseTitle::Cinemeta(_) => c.details.value().map(|d| &d.episodes),

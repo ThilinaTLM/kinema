@@ -150,7 +150,7 @@ impl Detail {
         let poster = self.poster_face(title, poster_url.as_deref(), cx);
 
         let hero_layout = layout::hero_layout(viewport);
-        let mut view = self.facts_view(title, cx);
+        let view = self.facts_view(title, cx);
         let mut banner = MediaHero::new("detail-hero", title.name().to_owned())
             .backdrop(backdrop)
             .poster(poster)
@@ -161,7 +161,7 @@ impl Detail {
             .sizing(hero_layout.poster, hero_layout.overview_max)
             .overview_loading(status.busy && !status.loaded)
             .primary(self.primary_button(cx));
-        for item in Self::meta_items(std::mem::take(&mut view.meta), p.text_muted) {
+        for item in Self::meta_items(view.meta.clone(), p.text_muted) {
             banner = banner.meta_item(item);
         }
         if let Some(tagline) = view.tagline.clone() {
@@ -248,12 +248,18 @@ impl Detail {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        #[cfg(all(test, feature = "ui-probe-test"))]
+        super::work::count(super::work::Section::Overview, 1);
         let title = self.display_title(cx);
         let status = self.meta_status(cx);
         let p = self.tinted_palette(cx);
         let viewport = window.viewport_size().width;
         let width = content_width(viewport);
+        #[cfg(all(test, feature = "ui-probe-test"))]
+        let _hero_watch = super::work::stopwatch(super::work::Timed::Hero);
         let hero = self.hero(&title, &status, viewport, cx);
+        #[cfg(all(test, feature = "ui-probe-test"))]
+        drop(_hero_watch);
         let facts = self.facts_section(&title, &status, width, cx);
         let similar = self.recommendations(width, cx);
         let footer = self.metadata_footer(&title, &status, cx);
@@ -261,6 +267,8 @@ impl Detail {
         // "About the series" (facts + cast), similar.
         let mut scroll = ScrollArea::new("detail-scroll", self.scroll.clone()).child(hero);
         if self.is_series() {
+            #[cfg(all(test, feature = "ui-probe-test"))]
+            let _watch = super::work::stopwatch(super::work::Timed::EpisodesSection);
             let episodes = self.episodes_section(width, cx);
             scroll = scroll
                 .child(body_shell(viewport, episodes))

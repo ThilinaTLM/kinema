@@ -118,6 +118,41 @@ impl Detail {
         }
         out
     }
+    /// [`Self::local_season_episodes`] for every season option, in option order,
+    /// from one pass over the persisted rows (not one scan per season).
+    pub(super) fn local_all_episodes(&self, cx: &App) -> Vec<CatalogEpisode> {
+        let mut by_season = std::collections::HashMap::<u32, Vec<CatalogEpisode>>::new();
+        if let Some(detail) = self.local_detail(cx) {
+            for row in &detail.episodes {
+                by_season
+                    .entry(row.season)
+                    .or_default()
+                    .push(local_episode(row));
+            }
+        }
+        let acquired = self.local_tmdb(cx).and_then(|id| {
+            self.coordinator
+                .read(cx)
+                .tmdb_season
+                .value()
+                .filter(|s| s.series_id == id)
+        });
+        let mut all = Vec::new();
+        for (season, _) in &self.season_options {
+            let mut out = by_season.remove(season).unwrap_or_default();
+            if let Some(s) = acquired.filter(|s| s.season == *season) {
+                let mut numbers: std::collections::HashSet<u32> =
+                    out.iter().map(|e| e.number).collect();
+                for e in &s.episodes {
+                    if numbers.insert(e.number) {
+                        out.push(e.clone());
+                    }
+                }
+            }
+            all.append(&mut out);
+        }
+        all
+    }
     /// The loaded local detail for this route, ignoring a stale previous title.
     pub(super) fn local_detail<'a>(&self, cx: &'a App) -> Option<&'a LocalDetail> {
         let BrowseTitle::Local(local) = &self.title else {

@@ -130,6 +130,19 @@ impl Detail {
         episode: Option<(u32, u32)>,
         cx: &App,
     ) -> Option<ResumePoint> {
+        match episode {
+            Some((s, n)) => self.episode_view(s, n, cx).saved,
+            None => self.saved_progress_direct(None, cx),
+        }
+    }
+    /// [`Self::saved_progress`] read from the coordinator, not the snapshot.
+    pub(super) fn saved_progress_direct(
+        &self,
+        episode: Option<(u32, u32)>,
+        cx: &App,
+    ) -> Option<ResumePoint> {
+        #[cfg(all(test, feature = "ui-probe-test"))]
+        super::work::count(super::work::Section::SavedProgress, 1);
         let c = self.coordinator.read(cx);
         let checkpoint = match episode {
             Some((s, n)) => match &c.episode_personal(&self.episode_ref(s, n)).state {
@@ -150,14 +163,14 @@ impl Detail {
         episode: Option<(u32, u32)>,
         cx: &App,
     ) -> Option<ResumePoint> {
-        let watched = match episode {
-            Some((s, n)) => self.episode_known_watched(s, n, cx),
-            None => match self.movie_watched_status(cx) {
+        let Some((s, n)) = episode else {
+            let watched = match self.movie_watched_status(cx) {
                 ToggleStatus::Known { on, .. } => Some(on),
                 _ => None,
-            },
+            };
+            return visible_resume(self.saved_progress_direct(None, cx), watched);
         };
-        visible_resume(self.saved_progress(episode, cx), watched)
+        self.episode_view(s, n, cx).visible
     }
 
     /// The one Continue / Next up target used by the hero, the card badge and
@@ -194,7 +207,10 @@ impl Detail {
         episode: Option<(u32, u32)>,
         cx: &App,
     ) -> Option<ResumePoint> {
-        resume_offer(self.embedded_player(cx), self.visible_progress(episode, cx))
+        resume_offer(
+            self.show_snapshot(cx).embedded,
+            self.visible_progress(episode, cx),
+        )
     }
 
     /// Intent for the next play request on the open Streams page.
@@ -307,9 +323,7 @@ impl Detail {
     /// (unknown duration shows no fabricated percentage).
     pub(super) fn episode_progress_bar(&self, season: u32, number: u32, cx: &App) -> Option<Div> {
         let p = *tokens::palette(cx);
-        let fraction = self
-            .visible_progress(Some((season, number)), cx)?
-            .fraction()?;
+        let fraction = self.episode_view(season, number, cx).visible?.fraction()?;
         Some(
             div()
                 .absolute()
