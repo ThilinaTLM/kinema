@@ -109,7 +109,24 @@ impl Detail {
         .filter(|n| *n > 0)
     }
 
-    pub(super) fn facts_view(&self, title: &BrowseTitle, cx: &App) -> FactsView {
+    /// Facts model, memoized per coordinator revision: every input is coordinator
+    /// state (observed by `data_rev`) or the immutable open title, so scrolling and
+    /// other repaints reuse it instead of re-deriving ratings, groups and cast.
+    pub(super) fn facts_view(&self, title: &BrowseTitle, cx: &App) -> Rc<FactsView> {
+        let mut memo = self.facts_memo.borrow_mut();
+        if let Some((rev, view)) = memo.as_ref()
+            && *rev == self.data_rev
+        {
+            return view.clone();
+        }
+        let view = Rc::new(self.compute_facts_view(title, cx));
+        *memo = Some((self.data_rev, view.clone()));
+        view
+    }
+
+    fn compute_facts_view(&self, title: &BrowseTitle, cx: &App) -> FactsView {
+        #[cfg(all(test, feature = "ui-probe-test"))]
+        super::work::count(super::work::Section::FactsModel, 1);
         let facts = self.title_facts(cx);
         let mut view = FactsView {
             tagline: facts

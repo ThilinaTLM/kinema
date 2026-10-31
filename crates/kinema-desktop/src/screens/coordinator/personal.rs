@@ -362,6 +362,34 @@ impl AppCoordinator {
         self.apply_personal_event(event);
         cx.notify();
     }
+    /// Test-only: force one episode's load state, pending flag and "no stored
+    /// row" mark, then notify like a real personal event would.
+    #[cfg(all(test, feature = "ui-probe-test"))]
+    pub(crate) fn fixture_episode_state(
+        &mut self,
+        reference: &EpisodeRef,
+        state: PersonalLoad<PersonalEpisode>,
+        pending: bool,
+        unmapped: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let key = episode_key(reference);
+        self.personal_state
+            .episode_states
+            .insert(key.clone(), state);
+        let subject = self.personal_state.canonical_subject(key.clone());
+        if pending {
+            self.personal_state.pending.insert(subject, 1);
+        } else {
+            self.personal_state.pending.remove(&subject);
+        }
+        if unmapped {
+            self.personal_state.episode_unmapped.insert(key);
+        } else {
+            self.personal_state.episode_unmapped.remove(&key);
+        }
+        cx.notify();
+    }
     pub(crate) fn personal(&self, title: &BrowseTitle) -> PersonalView {
         let key = title_key(&title_ref(title));
         let canonical = self

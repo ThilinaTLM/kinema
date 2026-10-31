@@ -481,3 +481,158 @@ fn failed_debrid_switch_is_saved_again_on_the_next_play(cx: &mut TestAppContext)
     let retry = activate(cx).unwrap_or_else(|| panic!("retry skipped the save"));
     assert_eq!(saves(cx), [retry]);
 }
+
+/// Scroll-wheel redraws must not recompute derived data models. Counts are
+/// per-section work units from `work`, measured over a fixed scroll sequence.
+fn scroll_work(title: BrowseTitle, cx: &mut TestAppContext) -> [usize; 4] {
+    use super::work::{self, Section};
+    cx.update(|cx| {
+        tokens::init(cx);
+        tokens::set_reduce_motion(true, cx);
+    });
+    let coordinator = cx.new(|cx| AppCoordinator::fixture(vec![title.clone()], None, cx));
+    let window = cx.add_window(|_, cx| Detail::fixture(coordinator, title, false, None, cx));
+    let mut visual = VisualTestContext::from_window(window.into(), cx);
+    visual.simulate_resize(size(px(1280.), px(800.)));
+    draw(window, cx);
+    let offset = |cx: &mut TestAppContext| {
+        window
+            .read_with(cx, |d, _| d.scroll.offset().y)
+            .unwrap_or_else(|e| panic!("offset:{e}"))
+    };
+    work::reset();
+    for _ in 0..10 {
+        visual.simulate_event(ScrollWheelEvent {
+            position: point(px(640.), px(500.)),
+            delta: ScrollDelta::Pixels(point(px(0.), px(-40.))),
+            ..Default::default()
+        });
+        draw(window, cx);
+    }
+    assert!(offset(cx) < px(0.), "the wheel must actually scroll");
+    [
+        work::get(Section::Overview),
+        work::get(Section::FactsModel),
+        work::get(Section::EpisodeList),
+        work::get(Section::EpisodeCards),
+    ]
+}
+#[gpui::test]
+fn wheel_scroll_does_not_recompute_series_data_models(cx: &mut TestAppContext) {
+    let w = scroll_work(title(true), cx);
+    eprintln!("series work [overview, facts, episode lists, cards] = {w:?}");
+    assert_eq!(w[1], 0, "facts model recomputed while scrolling");
+    assert_eq!(w[2], 0, "episode list recomputed while scrolling");
+}
+#[gpui::test]
+fn wheel_scroll_does_not_recompute_movie_data_models(cx: &mut TestAppContext) {
+    let w = scroll_work(tmdb_movie(), cx);
+    eprintln!("movie work [overview, facts, episode lists, cards] = {w:?}");
+    assert_eq!(w[1], 0, "facts model recomputed while scrolling");
+}
+/// Cinemeta series window with the memos warmed by two steady draws.
+fn warmed_series(cx: &mut TestAppContext) -> (WindowHandle<Detail>, Entity<AppCoordinator>) {
+    cx.update(|cx| {
+        tokens::init(cx);
+        tokens::set_reduce_motion(true, cx);
+    });
+    let title = title(false);
+    let coordinator = cx.new(|cx| AppCoordinator::fixture(vec![title.clone()], None, cx));
+    let window =
+        cx.add_window(|_, cx| Detail::fixture(coordinator.clone(), title, false, None, cx));
+    draw(window, cx);
+    draw(window, cx);
+    (window, coordinator)
+}
+#[gpui::test]
+fn derived_models_present_new_values_after_the_coordinator_changes(cx: &mut TestAppContext) {
+    use super::work::{self, Section};
+    let (window, coordinator) = warmed_series(cx);
+    let presented = |cx: &mut TestAppContext| {
+        window
+            .read_with(cx, |d, cx| {
+                (
+                    d.facts_view(&d.display_title(cx), cx).tagline.clone(),
+                    d.episodes(cx)[1].name.clone(),
+                )
+            })
+            .unwrap_or_else(|e| panic!("read:{e}"))
+    };
+    let (tagline, name) = presented(cx);
+    assert_eq!(
+        tagline.as_deref(),
+        Some("The signal was never meant to be answered.")
+    );
+    assert_eq!(name.as_deref(), Some("The Signal"));
+    work::reset();
+    draw(window, cx);
+    assert_eq!(work::get(Section::FactsModel), 0, "steady repaint reuses");
+    assert_eq!(work::get(Section::EpisodeList), 0, "steady repaint reuses");
+    // A real metadata update, delivered through the coordinator's own notify.
+    coordinator.update(cx, |c, cx| {
+        let mut details = c
+            .details
+            .value()
+            .cloned()
+            .unwrap_or_else(|| panic!("fixture details"));
+        details.facts.tagline = Some("A different tagline.".into());
+        if let Some(ep) = details
+            .episodes
+            .iter_mut()
+            .find(|e| e.season == 1 && e.number == 2)
+        {
+            ep.name = Some("Renamed Episode".into());
+        }
+        let generation = c.details.begin(true);
+        c.details.fetched(generation, details, 1);
+        cx.notify();
+    });
+    draw(window, cx);
+    let (tagline, name) = presented(cx);
+    assert_eq!(tagline.as_deref(), Some("A different tagline."));
+    assert_eq!(name.as_deref(), Some("Renamed Episode"));
+    assert_eq!(
+        work::get(Section::FactsModel),
+        1,
+        "one recompute per change"
+    );
+    assert_eq!(
+        work::get(Section::EpisodeList),
+        1,
+        "one recompute per change"
+    );
+    draw(window, cx);
+    assert_eq!(work::get(Section::FactsModel), 1, "no recompute afterwards");
+}
+#[gpui::test]
+fn episode_memo_follows_the_selected_season(cx: &mut TestAppContext) {
+    use super::work::{self, Section};
+    let (window, _) = warmed_series(cx);
+    let listed = |cx: &mut TestAppContext| {
+        window
+            .read_with(cx, |d, cx| (d.season, d.episodes(cx).len()))
+            .unwrap_or_else(|e| panic!("read:{e}"))
+    };
+    assert_eq!(listed(cx), (Some(1), 8));
+    work::reset();
+    window
+        .update(cx, |d, _, cx| {
+            d.season_chosen = true; // an explicit pick, as the season tiles do
+            d.select_season(2, cx)
+        })
+        .unwrap_or_else(|e| panic!("season:{e}"));
+    draw(window, cx);
+    assert_eq!(listed(cx), (Some(2), 3), "season 2 must not show season 1");
+    let recomputed = work::get(Section::EpisodeList);
+    assert!(recomputed >= 1);
+    draw(window, cx);
+    assert_eq!(work::get(Section::EpisodeList), recomputed, "then reused");
+    window
+        .update(cx, |d, _, cx| {
+            d.season_chosen = true;
+            d.select_season(1, cx)
+        })
+        .unwrap_or_else(|e| panic!("season:{e}"));
+    draw(window, cx);
+    assert_eq!(listed(cx), (Some(1), 8));
+}

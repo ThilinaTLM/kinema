@@ -163,12 +163,11 @@ pub(super) fn episode_overview(ep: &CatalogEpisode) -> Option<String> {
 use kinema_core::artwork::{ArtState, resolve};
 pub(super) type DetailArtState = ArtState<std::sync::Arc<gpui::RenderImage>>;
 
+/// Candidate URL, its kind and (probe fixtures only) a lazily built fixture key.
+type ArtChoice<'a> = (Option<&'a str>, ArtworkKind, &'a dyn Fn() -> String);
+
 impl Detail {
-    fn art_chain(
-        &self,
-        choices: &[(Option<&str>, ArtworkKind, String)],
-        cx: &mut App,
-    ) -> DetailArtState {
+    fn art_chain(&self, choices: &[ArtChoice<'_>], cx: &mut App) -> DetailArtState {
         resolve(choices.iter().map(|(url, kind, fixture)| {
             let Some(url) = url else {
                 return ArtState::Missing;
@@ -176,13 +175,15 @@ impl Detail {
             #[cfg(feature = "ui-probe")]
             if self.coordinator.read(cx).detail_is_fixture() {
                 return self
-                    .image(Some(url), *kind, fixture, cx)
+                    .image(Some(url), *kind, &fixture(), cx)
                     .map_or(ArtState::Missing, ArtState::Ready);
             }
             let _ = fixture;
             let Some(key) = ArtworkKey::new(*kind, url) else {
                 return ArtState::Missing;
             };
+            #[cfg(all(test, feature = "ui-probe-test"))]
+            super::work::count(super::work::Section::ArtLookup, 1);
             if let Some(image) = artwork::get(&key, cx) {
                 return ArtState::Ready(image);
             }
@@ -203,8 +204,8 @@ impl Detail {
         let show = self.display_title(cx);
         self.art_chain(
             &[
-                (poster, ArtworkKind::Poster, format!("season:{season}")),
-                (show.poster_url(), ArtworkKind::Poster, self.title.key()),
+                (poster, ArtworkKind::Poster, &|| format!("season:{season}")),
+                (show.poster_url(), ArtworkKind::Poster, &|| self.title.key()),
             ],
             cx,
         )
@@ -219,77 +220,94 @@ impl Detail {
         }
     }
 
-    pub(super) fn episode_art_state(&self, ep: &CatalogEpisode, cx: &mut App) -> DetailArtState {
-        let season = self.season_poster(ep.season, cx);
-        let backdrop = self.episode_series_backdrop(cx);
-        let season_backdrop = self.local_detail(cx).and_then(|detail| {
-            detail
-                .seasons
-                .iter()
-                .find(|s| s.number == ep.season)?
-                .text("backdrop_url")
-                .map(str::to_owned)
-        });
+    /// Inputs shared by every episode of one season, gathered once per
+    /// section build. Artwork results themselves are not cached: they are
+    /// looked up per card so completed loads show on the next repaint.
+    pub(super) fn episode_art_ctx(&self, season: u32, cx: &App) -> EpisodeArtCtx {
+        EpisodeArtCtx {
+            season,
+            poster: self.season_poster(season, cx),
+            series_backdrop: self.episode_series_backdrop(cx),
+            season_backdrop: self.local_detail(cx).and_then(|detail| {
+                detail
+                    .seasons
+                    .iter()
+                    .find(|s| s.number == season)?
+                    .text("backdrop_url")
+                    .map(str::to_owned)
+            }),
+        }
+    }
+
+    pub(super) fn episode_art_state(
+        &self,
+        art: &EpisodeArtCtx,
+        ep: &CatalogEpisode,
+        cx: &mut App,
+    ) -> DetailArtState {
+        let season = art.season;
         // TMDB exposes no season backdrop: prefer the series landscape before
         // the season portrait. Never use the series portrait as an episode still.
         self.art_chain(
             &[
+                (ep.still_url.as_deref(), ArtworkKind::Still, &|| {
+                    format!("episode:{}:{}", ep.season, ep.number)
+                }),
                 (
-                    ep.still_url.as_deref(),
-                    ArtworkKind::Still,
-                    format!("episode:{}:{}", ep.season, ep.number),
-                ),
-                (
-                    season_backdrop.as_deref(),
+                    art.season_backdrop.as_deref(),
                     ArtworkKind::Backdrop,
-                    format!("season:{}:backdrop", ep.season),
+                    &|| format!("season:{season}:backdrop"),
                 ),
                 (
-                    backdrop.as_deref(),
+                    art.series_backdrop.as_deref(),
                     ArtworkKind::Backdrop,
-                    format!("{}:backdrop", self.title.key()),
+                    &|| format!("{}:backdrop", self.title.key()),
                 ),
-                (
-                    season.as_deref(),
-                    ArtworkKind::Poster,
-                    format!("season:{}", ep.season),
-                ),
+                (art.poster.as_deref(), ArtworkKind::Poster, &|| {
+                    format!("season:{season}")
+                }),
             ],
             cx,
         )
     }
 }
 
+/// See [`Detail::episode_art_ctx`].
+pub(super) struct EpisodeArtCtx {
+    season: u32,
+    poster: Option<String>,
+    series_backdrop: Option<String>,
+    season_backdrop: Option<String>,
+}
+
 impl Detail {
     /// Whether any artwork behind this episode's chain has waited long enough
     /// to deserve a skeleton.
-    fn episode_skeleton_due(&self, ep: &CatalogEpisode, cx: &mut App) -> bool {
-        let season_backdrop = self.local_detail(cx).and_then(|d| {
-            d.seasons
-                .iter()
-                .find(|s| s.number == ep.season)?
-                .text("backdrop_url")
-                .map(str::to_owned)
-        });
+    fn episode_skeleton_due(&self, art: &EpisodeArtCtx, ep: &CatalogEpisode, cx: &mut App) -> bool {
         [
-            (ep.still_url.clone(), ArtworkKind::Still),
-            (self.episode_series_backdrop(cx), ArtworkKind::Backdrop),
-            (season_backdrop, ArtworkKind::Backdrop),
-            (self.season_poster(ep.season, cx), ArtworkKind::Poster),
+            (ep.still_url.as_deref(), ArtworkKind::Still),
+            (art.series_backdrop.as_deref(), ArtworkKind::Backdrop),
+            (art.season_backdrop.as_deref(), ArtworkKind::Backdrop),
+            (art.poster.as_deref(), ArtworkKind::Poster),
         ]
         .into_iter()
         .any(|(url, kind)| {
-            url.as_deref()
-                .and_then(|u| ArtworkKey::new(kind, u))
+            url.and_then(|u| ArtworkKey::new(kind, u))
                 .is_some_and(|key| artwork::skeleton_due(&key, cx))
         })
     }
 
     /// The episode still as a [`ThumbState`] (label `E03` when nothing exists).
-    fn episode_thumb_state(&self, ep: &CatalogEpisode, cx: &mut App) -> ThumbState {
-        let art = self.episode_art_state(ep, cx);
-        let due = matches!(art, ArtState::Loading { .. }) && self.episode_skeleton_due(ep, cx);
-        thumb_state(art, due, format!("E{:02}", ep.number))
+    fn episode_thumb_state(
+        &self,
+        art: &EpisodeArtCtx,
+        ep: &CatalogEpisode,
+        cx: &mut App,
+    ) -> ThumbState {
+        let state = self.episode_art_state(art, ep, cx);
+        let due =
+            matches!(state, ArtState::Loading { .. }) && self.episode_skeleton_due(art, ep, cx);
+        thumb_state(state, due, format!("E{:02}", ep.number))
     }
 
     /// A season poster as a [`ThumbState`] (label is the season number).
@@ -318,6 +336,8 @@ impl Detail {
 
     /// Every episode the provider has listed so far, across seasons.
     pub(super) fn all_episodes(&self, cx: &App) -> Vec<CatalogEpisode> {
+        #[cfg(all(test, feature = "ui-probe-test"))]
+        super::work::count(super::work::Section::AllEpisodes, 1);
         let c = self.coordinator.read(cx);
         match &self.title {
             BrowseTitle::Cinemeta(_) => c
@@ -331,11 +351,7 @@ impl Detail {
                 .filter(|s| s.series_id == t.id)
                 .map(|s| s.episodes.clone())
                 .unwrap_or_default(),
-            BrowseTitle::Local(_) => self
-                .season_options
-                .iter()
-                .flat_map(|(n, _)| self.local_season_episodes(*n, cx))
-                .collect(),
+            BrowseTitle::Local(_) => self.local_all_episodes(cx),
         }
     }
 
@@ -347,10 +363,13 @@ impl Detail {
     }
     /// Continue / Next up target (resumed episode first) against explicit `(season, episode_count)` options.
     pub(super) fn next_up_in(&self, options: &[(u32, u32)], cx: &App) -> Option<(u32, u32)> {
+        if options == self.season_options.as_slice() {
+            return self.show_snapshot(cx).next_up;
+        }
         self.continue_target_in(options, cx)
     }
 
-    fn season_poster(&self, season: u32, cx: &App) -> Option<String> {
+    pub(super) fn season_poster(&self, season: u32, cx: &App) -> Option<String> {
         let c = self.coordinator.read(cx);
         match &self.title {
             BrowseTitle::Tmdb(_) | BrowseTitle::Local(_) => c
@@ -390,7 +409,7 @@ impl Detail {
             .map(|o| o.replace('\n', " "))
     }
 
-    fn season_years(&self, season: u32, cx: &App) -> Option<String> {
+    pub(super) fn season_years(&self, season: u32, cx: &App) -> Option<String> {
         let episodes = self.all_episodes(cx);
         year_span(
             episodes
@@ -422,8 +441,8 @@ impl Detail {
             .map(|(number, count)| SeasonTile {
                 number,
                 count,
-                year: self.season_years(number, cx),
-                poster: self.season_poster(number, cx),
+                year: self.season_years_cached(number, cx),
+                poster: self.season_poster_cached(number, cx),
                 tally: watch_progress::season_tally(marks, number, count),
                 next_up: next.is_some_and(|(s, _)| s == number),
             })
@@ -670,7 +689,7 @@ impl Detail {
             .map_or(0, |(_, c)| *c);
         let tally = watch_progress::season_tally(marks, season, count);
         let mut meta = Vec::new();
-        meta.extend(self.season_years(season, cx));
+        meta.extend(self.season_years_cached(season, cx));
         meta.push(format!(
             "{count} {}",
             if count == 1 { "episode" } else { "episodes" }
@@ -683,7 +702,7 @@ impl Detail {
         let pending = self.season_request_busy()
             || self.episodes(cx).iter().any(|e| {
                 matches!(
-                    self.episode_status(e.season, e.number, cx),
+                    self.episode_view(e.season, e.number, cx).status,
                     ToggleStatus::Known { pending: true, .. }
                 )
             });
@@ -707,7 +726,7 @@ impl Detail {
         } else if tally.is_none() {
             toggle = toggle.unavailable("Watched status for this season isn\u{2019}t known yet.");
         }
-        let poster = self.season_poster(season, cx);
+        let poster = self.season_poster_cached(season, cx);
         let poster = Thumb::new(
             self.season_thumb_state(season, poster.as_deref(), cx),
             POSTER_RATIO,
@@ -849,11 +868,14 @@ impl Detail {
             .flex_col()
             .gap(s::S12)
             .child(header);
-        let marks = self.episode_marks(&self.season_options, cx);
-        let next = self.next_up(cx);
+        let snapshot = self.show_snapshot(cx);
+        let marks = &snapshot.marks;
+        let next = snapshot.next_up;
         if self.season.is_some() && !self.season_options.is_empty() {
             let season = self.season.unwrap_or_default();
-            column = column.child(self.season_selector(season, width, &marks, next, cx));
+            #[cfg(all(test, feature = "ui-probe-test"))]
+            let _watch = super::work::stopwatch(super::work::Timed::SeasonSelector);
+            column = column.child(self.season_selector(season, width, marks, next, cx));
         }
         if let Some(season) = self.season {
             // 20 px gap, a hairline, 24 px to the header, 20 px to the grid.
@@ -870,7 +892,7 @@ impl Detail {
                         .w_full()
                         .mt(s::S12)
                         .pb(s::S8)
-                        .child(self.season_header(season, &marks, cx)),
+                        .child(self.season_header(season, marks, cx)),
                 );
         }
         if self.episode_streams_unavailable(cx) {
@@ -895,10 +917,16 @@ impl Detail {
             view = view.hint(error.clone());
         }
         if sel.state == ViewState::Content {
+            #[cfg(all(test, feature = "ui-probe-test"))]
+            super::work::count(super::work::Section::EpisodeCards, episodes.len());
             let tile = fit.tile;
+            #[cfg(all(test, feature = "ui-probe-test"))]
+            let _watch = super::work::stopwatch(super::work::Timed::CardLoop);
+            let art = self.episode_art_ctx(self.season.unwrap_or_default(), cx);
             let cards: Vec<_> = episodes
-                .into_iter()
-                .map(|ep| self.episode_card(ep, tile, next, cx))
+                .iter()
+                .cloned()
+                .map(|ep| self.episode_card(ep, tile, next, &art, cx))
                 .collect();
             view = view.content(
                 div()
@@ -917,6 +945,7 @@ impl Detail {
         ep: CatalogEpisode,
         tile: Pixels,
         next: Option<(u32, u32)>,
+        art: &EpisodeArtCtx,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let p = *tokens::palette(cx);
@@ -932,17 +961,12 @@ impl Detail {
         let enter = ep.clone();
         let find = cx.entity().downgrade();
         let id = ep.number as usize;
-        let watched_now = matches!(
-            self.episode_status(ep.season, ep.number, cx),
-            ToggleStatus::Known { on: true, .. }
-        );
+        let view = self.episode_view(ep.season, ep.number, cx);
+        let watched_now = matches!(view.status, ToggleStatus::Known { on: true, .. });
         let is_next = next == Some((ep.season, ep.number));
-        let state = self.episode_thumb_state(&ep, cx);
+        let state = self.episode_thumb_state(art, &ep, cx);
         let mark = self.episode_mark(ep.season, ep.number, cx);
-        let writable = matches!(
-            self.episode_status(ep.season, ep.number, cx),
-            ToggleStatus::Known { pending: false, .. }
-        );
+        let writable = matches!(view.status, ToggleStatus::Known { pending: false, .. });
         let write_ref = Some(self.episode_ref(ep.season, ep.number));
         let season = ep.season;
         let key_rest = episode_meta(&ep);
