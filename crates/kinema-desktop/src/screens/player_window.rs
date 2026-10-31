@@ -33,7 +33,7 @@ use super::{
         self as dock, Scrub, VOLUME_STEP, chapter_index, chapter_label, chapter_ticks,
         displayed_position, displayed_volume, format_clock, format_remaining, ratio_in_span,
         scrub_settled, speed_label, step_volume, subtitle_position, track_label, volume_at,
-        volume_fraction, volume_settled,
+        volume_fraction, volume_rail_height, volume_settled,
     },
 };
 use crate::widgets::{
@@ -214,7 +214,12 @@ const DOCK_BOTTOM_INSET: Pixels = px(23.);
 /// Height of the transparent-to-scrim fade above the dock backing (decoration only).
 const DOCK_FADE: Pixels = px(72.);
 const TOP_FADE: Pixels = px(48.);
-const VOLUME_RAIL_HEIGHT: Pixels = px(128.);
+/// Shortcut help column width (label + keycaps).
+const HELP_COLUMN: Pixels = px(300.);
+/// Volume panel chrome around the rail: padding, label, gaps, mute, border.
+const VOLUME_PANEL_EXTRA: Pixels = px(84.);
+/// Top title row height (padding + 32 px control) the volume panel clears.
+const TOP_BAR_HEIGHT: Pixels = px(48.);
 const VOLUME_TRACK: Pixels = px(12.);
 const VOLUME_THUMB: Pixels = px(18.);
 const DOCK_ESTIMATE: Pixels = px(148.);
@@ -1394,70 +1399,181 @@ impl PlayerWindow {
             .focus(window, cx);
         self.activity(cx);
     }
-    fn shortcut_help(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn shortcut_help(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = Palette::dark();
+        let groups = shortcuts::reference_groups();
+        let width = window.viewport_size().width;
+        let columns = if width >= HELP_COLUMN * 3. + s::S24 * 2. + s::S48 * 2. {
+            3
+        } else if width >= HELP_COLUMN * 2. + s::S24 + s::S48 * 2. {
+            2
+        } else {
+            1
+        };
+        // Title row + one row per entry, so column heights balance visually.
+        let sizes: Vec<usize> = groups.iter().map(|g| g.entries.len() + 2).collect();
+        let keycap = |text: &'static str| {
+            div()
+                .flex_none()
+                .px(s::S6)
+                .h(px(20.))
+                .flex()
+                .items_center()
+                .rounded(radius::SM)
+                .bg(p.bg_raised)
+                .border_1()
+                .border_color(p.line_control)
+                .type_style(t::SMALL_MEDIUM)
+                .text_color(p.text_primary)
+                .whitespace_nowrap()
+                .child(text)
+        };
+        let group_view = |group: &'static shortcuts::ReferenceGroup| {
+            div()
+                .flex()
+                .flex_col()
+                .gap(s::S6)
+                .child(
+                    div()
+                        .pb(s::S2)
+                        .type_style(t::CAPTION)
+                        .text_color(p.text_muted)
+                        .child(group.title.to_uppercase()),
+                )
+                .children(group.entries.iter().map(move |entry| {
+                    let mouse = entry.bindings.is_empty();
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(s::S12)
+                        .min_h(px(24.))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .type_style(t::SMALL)
+                                .text_color(p.text_secondary)
+                                .child(entry.label),
+                        )
+                        .child(if mouse {
+                            div()
+                                .flex_none()
+                                .max_w(px(132.))
+                                .text_right()
+                                .type_style(t::SMALL_MEDIUM)
+                                .text_color(p.text_primary)
+                                .child(entry.keys)
+                        } else {
+                            div()
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .gap(s::S4)
+                                .children(entry.keys.split(" / ").map(keycap))
+                        })
+                }))
+        };
         div()
             .id("player-shortcut-overlay")
             .absolute()
             .inset_0()
-            .bg(p.scrim_max)
+            .bg(p.dialog_scrim)
             .flex()
-            .flex_col()
+            .items_center()
+            .justify_center()
             .p(s::S24)
-            .gap(s::S12)
             .track_focus(self.help_focus.as_ref().unwrap_or(&self.surface_focus))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
             .child(
                 div()
-                    .type_style(t::TITLE)
-                    .child("Embedded player — Keyboard & Mouse"),
-            )
-            .child(div().type_style(t::SMALL).child(shortcuts::FOCUS_NOTE))
-            .child(
-                div()
-                    .id("player-shortcut-scroll")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .children(shortcuts::reference_groups().iter().map(|group| {
+                    .id("player-shortcut-card")
+                    .flex()
+                    .flex_col()
+                    .w_full()
+                    .max_w(
+                        HELP_COLUMN * columns as f32 + s::S32 * (columns as f32 - 1.) + s::S24 * 2.,
+                    )
+                    .max_h_full()
+                    .bg(p.bg_overlay)
+                    .border_1()
+                    .border_color(p.line_subtle)
+                    .rounded(radius::LG)
+                    .overflow_hidden()
+                    .child(
                         div()
                             .flex()
-                            .flex_col()
-                            .gap(s::S8)
-                            .mb(s::S16)
-                            .child(div().type_style(t::BODY).child(group.title))
-                            .children(group.entries.iter().map(|entry| {
+                            .items_center()
+                            .gap(s::S12)
+                            .pl(s::S24)
+                            .pr(s::S12)
+                            .py(s::S12)
+                            .border_b_1()
+                            .border_color(p.line_subtle)
+                            .child(
+                                Icon::new(IconName::Keyboard)
+                                    .size(px(18.))
+                                    .color(p.text_secondary),
+                            )
+                            .child(
                                 div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .type_style(t::HEADING)
+                                    .child("Keyboard & mouse shortcuts"),
+                            )
+                            .child({
+                                let mut close = Button::new("player-shortcut-dismiss", "")
+                                    .variant(ButtonVariant::Ghost)
+                                    .icon(IconName::Close)
+                                    .focus_handle(self.help_dismiss_focus.clone())
+                                    .on_click(cx.listener(|view, _, window, cx| {
+                                        view.close_help(window, cx)
+                                    }));
+                                close.square = true;
+                                close.tooltip = Some("Close (Escape)".into());
+                                close
+                            }),
+                    )
+                    .child(
+                        div()
+                            .id("player-shortcut-scroll")
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .px(s::S24)
+                            .py(s::S16)
+                            .child(
+                                div().flex().items_start().gap(s::S32).children(
+                                    dock::balance_columns(&sizes, columns).into_iter().map(
+                                        |range| {
+                                            div()
+                                                .flex_1()
+                                                .min_w_0()
+                                                .flex()
+                                                .flex_col()
+                                                .gap(s::S20)
+                                                .children(groups[range].iter().map(group_view))
+                                        },
+                                    ),
+                                ),
+                            )
+                            // Notes scroll with the list so short windows keep it readable.
+                            .child(
+                                div()
+                                    .mt(s::S20)
+                                    .pt(s::S12)
                                     .flex()
-                                    .flex_wrap()
-                                    .gap(s::S12)
-                                    .child(
-                                        div()
-                                            .min_w(px(150.))
-                                            .type_style(t::SMALL)
-                                            .child(entry.keys),
-                                    )
-                                    .child(
-                                        div()
-                                            .type_style(t::SMALL)
-                                            .text_color(p.text_secondary)
-                                            .child(entry.label),
-                                    )
-                            }))
-                    })),
-            )
-            .child(
-                div()
-                    .type_style(t::SMALL)
-                    .text_color(p.text_secondary)
-                    .child("Scroll for more shortcuts"),
-            )
-            .child(div().type_style(t::SMALL).child(shortcuts::MEDIA_NOTE))
-            .child(
-                Button::new("player-shortcut-dismiss", "Close (Escape)")
-                    .focus_handle(self.help_dismiss_focus.clone())
-                    .on_click(cx.listener(|view, _, window, cx| view.close_help(window, cx))),
+                                    .flex_col()
+                                    .gap(s::S4)
+                                    .border_t_1()
+                                    .border_color(p.line_subtle)
+                                    .type_style(t::SMALL)
+                                    .text_color(p.text_muted)
+                                    .child(shortcuts::FOCUS_NOTE)
+                                    .child(shortcuts::MEDIA_NOTE),
+                            ),
+                    ),
             )
             .into_any_element()
     }
@@ -2686,8 +2802,20 @@ impl PlayerWindow {
         button.toggled = active;
         button.disabled(!control_enabled(index, availability))
     }
-    fn volume_panel(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn volume_panel(&self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
         let p = Palette::dark();
+        let viewport = window.viewport_size().height;
+        let rail = px(volume_rail_height(f32::from(viewport)));
+        let dock = if self.dock_height > Pixels::default() {
+            self.dock_height
+        } else {
+            DOCK_ESTIMATE
+        };
+        let panel_top = px(dock::centered_top(
+            f32::from(TOP_BAR_HEIGHT + s::S8),
+            f32::from(viewport - dock - s::S8),
+            f32::from(rail + VOLUME_PANEL_EXTRA),
+        ));
         let entity = cx.entity();
         let enabled = self.backend_available();
         let volume = displayed_volume(self.volume_requested, self.state.volume, Instant::now());
@@ -2710,7 +2838,7 @@ impl PlayerWindow {
             .tab_stop(enabled)
             .relative()
             .w(s::S32)
-            .h(VOLUME_RAIL_HEIGHT)
+            .h(rail)
             .flex()
             .justify_center()
             .rounded(radius::SM)
@@ -2786,9 +2914,8 @@ impl PlayerWindow {
             .occlude()
             .absolute()
             .right(s::S24)
-            .top(relative(0.5))
-            // Half the panel height, nudged up for minimum-window dock clearance.
-            .mt(-(VOLUME_RAIL_HEIGHT / 2. + s::S48 + s::S8))
+            // Centred in the band between the title row and the measured dock.
+            .top(panel_top)
             .flex()
             .flex_col()
             .items_center()
@@ -2806,7 +2933,8 @@ impl PlayerWindow {
             }))
             .child(
                 div()
-                    .w(s::S32)
+                    .min_w(s::S32)
+                    .whitespace_nowrap()
                     .text_center()
                     .type_style(t::SMALL_MEDIUM)
                     .font_features(FontFeatures(vec![("tnum".into(), 1)].into()))
@@ -3440,7 +3568,7 @@ impl PlayerWindow {
                     ),
             )
             // After the bottom scrim/fade so the floating volume paints and hit-tests above it.
-            .child(self.volume_panel(cx))
+            .child(self.volume_panel(window, cx))
             .when_some(self.menu.as_ref(), |el, open| {
                 el.child(
                     deferred(
@@ -3559,7 +3687,7 @@ impl Render for PlayerWindow {
                     .child(Button::new("progress-retry-saving", "Retry saving").on_click(cx.listener(|view, _, _, cx| view.retry_progress_ready(cx))))
                     .child(Button::new("progress-untracked", "Play without saving").on_click(cx.listener(|view, _, _, cx| view.play_without_saving(cx)))))
             })
-            .when(self.help_focus.is_some(), |el| el.child(self.shortcut_help(cx)))
+            .when(self.help_focus.is_some(), |el| el.child(self.shortcut_help(window, cx)))
             // Opt-in diagnostics only: no handlers, id or focus, so it never takes input.
             .when_some(self.cadence_text.clone(), |el, text| {
                 el.child(
