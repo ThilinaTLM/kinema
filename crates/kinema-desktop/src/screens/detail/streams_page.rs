@@ -384,7 +384,7 @@ impl Detail {
         }
         let visible = visible_rows.len();
 
-        let hero = self.streams_hero(&title, sources.as_ref(), busy, wide, viewport.width, cx);
+        let hero = self.streams_hero(&title, sources.as_ref(), busy, wide, cx);
 
         // List heading: count plus the quiet notes that used to crowd the control box.
         let has_accounts = !self.stream_page.accounts.is_empty();
@@ -511,7 +511,7 @@ impl Detail {
                 ),
             );
         }
-        let gutter = gutter(viewport.width);
+        let gutter = GUTTER;
         let dock = (!wide)
             .then_some(selected.as_ref())
             .flatten()
@@ -567,7 +567,6 @@ impl Detail {
         sources: Option<&crate::metadata_bridge::SourceSet>,
         busy: bool,
         wide: bool,
-        viewport: Pixels,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let p = self.tinted_palette(cx);
@@ -588,7 +587,7 @@ impl Detail {
             .fade_into(p.bg_canvas)
             .min_height(px(0.))
             .top_inset(s::TOOLBAR_HEIGHT)
-            .frame(gutter(viewport), geometry::PAGE_MAX_WIDTH)
+            .frame(GUTTER, geometry::PAGE_MAX_WIDTH)
             .sizing(
                 if wide {
                     geometry::STREAMS_POSTER_WIDTH

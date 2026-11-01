@@ -399,7 +399,7 @@ impl RenderOnce for MediaHero {
                         .flex()
                         .gap(space::S24)
                         .px(self.gutter)
-                        .pt(space::S24 + self.top_inset)
+                        .pt(space::PAGE_INSET + self.top_inset)
                         .pb(space::S24)
                         .when(self.stack_aside, |el| el.flex_col())
                         .when(!self.stack_aside, |el| el.items_end())

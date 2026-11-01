@@ -264,24 +264,15 @@ fn fit_grid(available: Pixels, min: Pixels, max: Pixels, gap: Pixels) -> GridFit
         tile: px(tile),
     }
 }
-/// Side gutter of the page frame by window width.
-fn gutter(viewport: Pixels) -> Pixels {
-    let w = f32::from(viewport);
-    px(match w {
-        w if w < 720. => 12.,
-        w if w < 1100. => 20.,
-        w if w < 1500. => 28.,
-        w if w < 2100. => 40.,
-        _ => 48.,
-    })
-}
+/// Side gutter of the page frame: the same inset as every main-window page.
+const GUTTER: Pixels = s::PAGE_INSET;
 /// Left edge shared by the detail content and its floating toolbar.
 pub(super) fn page_inset(viewport: Pixels) -> Pixels {
-    (viewport - viewport.min(geometry::PAGE_MAX_WIDTH)) / 2. + gutter(viewport)
+    (viewport - viewport.min(geometry::PAGE_MAX_WIDTH)) / 2. + GUTTER
 }
 /// Width of page content inside the shared frame for a window of `viewport`.
 fn content_width(viewport: Pixels) -> Pixels {
-    viewport.min(geometry::PAGE_MAX_WIDTH) - gutter(viewport) * 2.
+    viewport.min(geometry::PAGE_MAX_WIDTH) - GUTTER * 2.
 }
 
 pub(crate) struct Detail {

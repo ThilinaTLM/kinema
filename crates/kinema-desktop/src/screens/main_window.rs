@@ -789,7 +789,7 @@ impl Render for MainWindow {
         let inset = if in_detail {
             super::detail::page_inset(window.viewport_size().width)
         } else {
-            s::S20
+            s::PAGE_INSET
         };
         let compact = window.viewport_size().width < filters::COMPACT_BELOW;
         let toolbar = if in_detail {
@@ -942,7 +942,7 @@ impl Render for MainWindow {
                             .anchor(Anchor::TopRight)
                             .position(point(
                                 window.viewport_size().width - inset,
-                                s::TOOLBAR_HEIGHT,
+                                s::TOOLBAR_HEIGHT + s::S8,
                             ))
                             .child(menu),
                     )

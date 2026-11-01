@@ -1,8 +1,8 @@
 //! Pure presentation policies.
 
 use super::{
-    GridFit, Quality, StreamBadges, age_label, air_date, choose_season, content_width,
-    default_season, fit_grid, gutter, layout::hero_layout, page_inset, quality, rating_label,
+    GUTTER, GridFit, Quality, StreamBadges, age_label, air_date, choose_season, content_width,
+    default_season, fit_grid, layout::hero_layout, page_inset, quality, rating_label,
     stream_badges, stream_summary,
 };
 use kinema_core::{
@@ -123,10 +123,14 @@ fn hero_and_body_share_one_frame() {
     for w in [640., 960., 1280., 1530., 1920., 2560., 3840.] {
         let v = px(w);
         let content = content_width(v);
-        assert!(content + gutter(v) * 2. <= v.max(px(1.)));
-        assert!(content <= px(2400.) - gutter(v) * 2.);
+        assert!(content + GUTTER * 2. <= v.max(px(1.)));
+        assert!(content <= px(2400.) - GUTTER * 2.);
         assert_eq!(page_inset(v), (v - content) / 2.);
         assert!(hero_layout(v).poster >= px(160.));
     }
-    assert!(gutter(px(960.)) < gutter(px(1920.)));
+    // Detail pages share the browse page inset.
+    assert_eq!(
+        page_inset(px(1280.)),
+        crate::widgets::tokens::space::PAGE_INSET
+    );
 }

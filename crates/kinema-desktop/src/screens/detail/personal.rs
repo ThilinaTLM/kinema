@@ -362,11 +362,7 @@ impl Detail {
 
     /// Error / undo notices below the hero. Unknown or failed reads are never
     /// hidden: a failed personal read offers Retry without hiding metadata.
-    pub(super) fn personal_notices(
-        &self,
-        viewport: Pixels,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    pub(super) fn personal_notices(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         use crate::widgets::notice::{Notice, NoticeKind};
         let c = self.coordinator.read(cx);
         let view = c.personal(&self.title);
@@ -420,7 +416,7 @@ impl Detail {
         }
         // Commit failures, success and Undo use the shared MainWindow toast, so they
         // are never duplicated here.
-        any.then(|| hero::body_shell(viewport, stack).into_any_element())
+        any.then(|| hero::body_shell(stack).into_any_element())
     }
 
     // ── season bulk actions ──────────────────────────────────────────────

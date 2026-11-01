@@ -2,7 +2,7 @@
 //!
 //! One design language for all toolbar content (desktop-v3 §4 "Toolbar"):
 //!
-//! - [`Toolbar`]: the 48 px row with fixed slots — *leading* (context: scope,
+//! - [`Toolbar`]: the header row with fixed slots — *leading* (context: scope,
 //!   kind, back), *center* (search or nothing), *trailing* (view tools, then the
 //!   global group). It owns pointer hit-testing so clicks never fall through to
 //!   the page scrolling beneath, while the wheel still scrolls that page.
@@ -71,7 +71,7 @@ impl Toolbar {
             leading: Vec::new(),
             center: None,
             trailing: Vec::new(),
-            inset: space::S20,
+            inset: space::PAGE_INSET,
             center_width: px(440.),
             center_min_width: px(180.),
         }
@@ -118,6 +118,7 @@ impl RenderOnce for Toolbar {
             .left_0()
             .right_0()
             .h(space::TOOLBAR_HEIGHT)
+            .pt(space::TOOLBAR_TOP)
             // The row floats over scrolling content: it must own clicks and
             // hover across its full height, but let the wheel scroll the page.
             .block_mouse_except_scroll()
