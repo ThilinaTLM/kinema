@@ -60,9 +60,18 @@ a seek thumbnail. Custom pointer hiding remains a separate follow-up.
   hover/drag time/chapter preview and release-to-seek, same-size ghost transport,
   middle-right vertical volume with mute/percentage and keyboard adjustment, and
   real audio/subtitle/chapter/speed menus. Utility controls use definite-width
-  slots; popups anchor above the dock in viewport coordinates. The 100 px volume
-  rail is offset upward for minimum-window clearance. Timeline and volume have
-  explicit accessibility labels.
+  slots; popups anchor above the dock in viewport coordinates. The volume rail
+  (12 px track) is a quarter of the viewport height, bounded to 128–220 px, and is
+  centred between the title row and the measured dock. It spans 0–150% via mpv
+  `volume-max=150`, defaults to 100%, and marks the 100% detent. Timeline and
+  volume have explicit accessibility labels.
+- Chrome polish (2026-11-01): the top title row has no product label and fades
+  into the video like the dock. The dock status is compact icon + short text
+  (notices, buffer-ahead, in-progress download only; complete downloads are
+  omitted) with full wording in a tooltip and the timeline label. Shortcut help is
+  a 32 px ghost keyboard icon leading the right utility cluster. The help overlay is a
+  centred card with up to three balanced columns of labelled keycaps; the
+  focus/media notes scroll with the list.
 - Backend source supplies observed chapters/tracks/speed/buffered ranges, bounded
   metadata parsing, and real seek/selection/speed commands. Availability flags
   distinguish unknown metadata from known-empty lists; disabled tooltips explain
@@ -171,7 +180,7 @@ Shortcut design contract (current implementation requires native review):
 | --- | --- |
 | Space or K | Toggle user play/pause intent |
 | Left / Right | Seek −/+10 seconds, clamped to available timeline bounds |
-| Up / Down | Volume +/−5 percentage points, clamped 0–100 |
+| Up / Down | Volume +/−5 percentage points, clamped 0–150 |
 | M | Mute/unmute without losing the prior volume |
 | F or double-click video | Toggle fullscreen |
 | Escape | Dismiss an open menu first, otherwise leave fullscreen; never close playback |

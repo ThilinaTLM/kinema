@@ -22,6 +22,9 @@ use std::{
     time::Duration,
 };
 
+/// Upper bound for `volume`; mpv amplifies (softvol) above 100.
+pub const MAX_VOLUME: f64 = 150.0;
+
 #[derive(Clone, Debug)]
 pub struct Config {
     /// Presentation-device context for default GPU-resident SDR playback with
@@ -251,6 +254,7 @@ impl Player {
             ("terminal", "no".into()),
             ("input-default-bindings", "no".into()),
             ("osd-level", "0".into()),
+            ("volume-max", MAX_VOLUME.to_string()),
             ("volume", config.initial_volume.to_string()),
             ("hwdec", effective_hwdec.into()),
         ] {
@@ -652,7 +656,7 @@ impl Player {
         let value = id.map_or_else(|| "no".to_owned(), |id| id.to_string());
         self.command(&["set", property, &value])
     }
-    /// Set a finite volume percentage in 0..=100.
+    /// Set a finite volume percentage in `0..=MAX_VOLUME`.
     pub fn set_volume(&self, volume: f64) -> Result<()> {
         validate_volume(volume)?;
         self.command(&["set", "volume", &volume.to_string()])
@@ -923,9 +927,9 @@ fn scripting_option_absent(code: i32) -> bool {
     code == -5
 }
 fn validate_volume(volume: f64) -> Result<()> {
-    if !volume.is_finite() || !(0.0..=100.0).contains(&volume) {
+    if !volume.is_finite() || !(0.0..=MAX_VOLUME).contains(&volume) {
         Err(Error::InvalidInput(
-            "volume must be finite and between 0 and 100",
+            "volume must be finite and between 0 and 150",
         ))
     } else {
         Ok(())
@@ -2284,11 +2288,12 @@ mod tests {
     }
     #[test]
     fn volume_validation() {
-        for invalid in [f64::NAN, f64::INFINITY, -1.0, 101.0] {
+        for invalid in [f64::NAN, f64::INFINITY, -1.0, MAX_VOLUME + 1.0] {
             assert!(validate_volume(invalid).is_err());
         }
         assert!(validate_volume(0.0).is_ok());
         assert!(validate_volume(100.0).is_ok());
+        assert!(validate_volume(MAX_VOLUME).is_ok());
     }
     #[test]
     fn mailbox_replaces_and_takes() {

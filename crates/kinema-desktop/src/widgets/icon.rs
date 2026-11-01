@@ -59,6 +59,8 @@ pub enum IconName {
     Zap,
     ArrowUp,
     Sort,
+    Keyboard,
+    Timer,
 }
 
 impl IconName {
@@ -115,6 +117,8 @@ impl IconName {
             IconName::Zap => "icons/zap.svg",
             IconName::ArrowUp => "icons/arrow-up.svg",
             IconName::Sort => "icons/arrow-down-wide-narrow.svg",
+            IconName::Keyboard => "icons/keyboard.svg",
+            IconName::Timer => "icons/timer.svg",
         }
     }
 
@@ -169,6 +173,8 @@ impl IconName {
         IconName::Zap,
         IconName::ArrowUp,
         IconName::Sort,
+        IconName::Keyboard,
+        IconName::Timer,
     ];
 }
 

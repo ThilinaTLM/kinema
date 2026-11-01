@@ -2,7 +2,7 @@
 //! chapter lookup and label formatting. No GPUI types, so they are unit-tested.
 use std::time::{Duration, Instant};
 
-use kinema_mpv::{Chapter, Track};
+use kinema_mpv::{Chapter, MAX_VOLUME, Track};
 
 /// Volume change for the Up/Down keys.
 pub const VOLUME_STEP: f64 = 5.;
@@ -19,14 +19,66 @@ pub fn ratio_in_span(pos: f32, start: f32, len: f32) -> f32 {
     ((pos - start) / len).clamp(0., 1.)
 }
 
-/// Whole-percent volume for a vertical slider whose top is 100%.
+/// Whole-percent volume for a vertical slider whose top is `MAX_VOLUME`.
 pub fn volume_at(y: f32, top: f32, height: f32) -> f64 {
-    (f64::from(1. - ratio_in_span(y, top, height)) * 100.).round()
+    (f64::from(1. - ratio_in_span(y, top, height)) * MAX_VOLUME).round()
+}
+
+/// Vertical volume rail length: a quarter of the viewport height, bounded so the
+/// minimum window keeps dock clearance and large windows gain precision.
+pub fn volume_rail_height(viewport_height: f32) -> f32 {
+    if viewport_height.is_finite() {
+        (viewport_height * 0.25).clamp(128., 220.)
+    } else {
+        128.
+    }
+}
+
+/// Top of a floating panel centred in the free band between `top` and `bottom`,
+/// never above `top`.
+pub fn centered_top(top: f32, bottom: f32, panel: f32) -> f32 {
+    ((top + bottom - panel) / 2.).max(top)
+}
+
+/// Contiguous split of ordered group sizes into at most `columns` columns,
+/// minimising the tallest column (brute force; the catalog is tiny).
+pub fn balance_columns(sizes: &[usize], columns: usize) -> Vec<std::ops::Range<usize>> {
+    fn best(sizes: &[usize], start: usize, columns: usize) -> (usize, Vec<std::ops::Range<usize>>) {
+        let rest: usize = sizes[start..].iter().sum();
+        if columns <= 1 || sizes.len() - start <= 1 {
+            return (rest, std::iter::once(start..sizes.len()).collect());
+        }
+        let mut answer = (rest, std::iter::once(start..sizes.len()).collect());
+        let mut height = 0;
+        for end in start + 1..sizes.len() {
+            height += sizes[end - 1];
+            let (tail, mut ranges) = best(sizes, end, columns - 1);
+            let tallest = height.max(tail);
+            if tallest < answer.0 {
+                ranges.insert(0, start..end);
+                answer = (tallest, ranges);
+            }
+        }
+        answer
+    }
+    if sizes.is_empty() {
+        return Vec::new();
+    }
+    best(sizes, 0, columns.max(1)).1
+}
+
+/// Slider fill fraction for a volume in `0..=MAX_VOLUME`.
+pub fn volume_fraction(volume: f64) -> f32 {
+    if volume.is_finite() {
+        (volume / MAX_VOLUME).clamp(0., 1.) as f32
+    } else {
+        0.
+    }
 }
 
 pub fn step_volume(volume: f64, delta: f64) -> f64 {
     if volume.is_finite() {
-        (volume + delta).clamp(0., 100.).round()
+        (volume + delta).clamp(0., MAX_VOLUME).round()
     } else {
         0.
     }
@@ -193,14 +245,31 @@ mod tests {
     }
     #[test]
     fn vertical_volume_is_top_down_and_whole_percent() {
-        assert_eq!(volume_at(0., 0., 100.), 100.);
-        assert_eq!(volume_at(100., 0., 100.), 0.);
-        assert_eq!(volume_at(25., 0., 100.), 75.);
-        assert_eq!(volume_at(-40., 0., 100.), 100.);
+        assert_eq!(volume_at(0., 0., 150.), 150.);
+        assert_eq!(volume_at(150., 0., 150.), 0.);
+        assert_eq!(volume_at(50., 0., 150.), 100.);
+        assert_eq!(volume_at(-40., 0., 150.), 150.);
+        assert_eq!(volume_fraction(150.), 1.);
+        assert_eq!(volume_fraction(75.), 0.5);
+        assert_eq!(volume_fraction(f64::NAN), 0.);
+        assert_eq!(volume_rail_height(440.), 128.);
+        assert_eq!(volume_rail_height(800.), 200.);
+        assert_eq!(volume_rail_height(1600.), 220.);
+        assert_eq!(volume_rail_height(f32::NAN), 128.);
+        assert_eq!(centered_top(48., 328., 212.), 82.);
+        assert_eq!(centered_top(48., 200., 212.), 48.);
+        assert_eq!(
+            balance_columns(&[7, 4, 5, 5, 8, 3], 3),
+            vec![0..2, 2..4, 4..6]
+        );
+        assert_eq!(balance_columns(&[7, 4, 5, 5, 8, 3], 1), vec![0..6]);
+        assert_eq!(balance_columns(&[3], 3), vec![0..1]);
+        assert!(balance_columns(&[], 2).is_empty());
     }
     #[test]
     fn volume_steps_stay_in_range() {
-        assert_eq!(step_volume(98., VOLUME_STEP), 100.);
+        assert_eq!(step_volume(98., VOLUME_STEP), 103.);
+        assert_eq!(step_volume(148., VOLUME_STEP), 150.);
         assert_eq!(step_volume(3., -VOLUME_STEP), 0.);
         assert_eq!(step_volume(f64::NAN, VOLUME_STEP), 0.);
     }
