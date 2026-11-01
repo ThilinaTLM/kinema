@@ -395,7 +395,7 @@ in `kinema-core`; widgets must not own provider, storage or playback policy.
 | `Menu` / `ContextMenu` | Shared item model (see §3.1); anchored or at-pointer; keyboard navigation; submenus one level max |
 | `Select` | Trigger + Menu with check marker; type-ahead |
 | `Popover` | Anchored nonmodal panel; Esc/outside click dismiss; repositions within window; start/end alignment; open-aware trigger; content can dismiss itself via `PopoverHandle` |
-| `Toolbar` | Floating 48 px header row with leading / center / trailing slots; owns pointer hits across its height (clicks never reach the page beneath) while the wheel still scrolls the page |
+| `Toolbar` | Floating 52 px header row (20 px top padding + 32 px controls) with leading / center / trailing slots; owns pointer hits across its height (clicks never reach the page beneath) while the wheel still scrolls the page |
 | `ToolbarGroup` | One glass capsule of equal icon targets with optional hairline dividers (back; transfers · settings · overflow) |
 | `ToolbarChip` | Glass popover-trigger face: icon, label, active-count badge, chevron; icon-only below 1100 px |
 | `ChoiceTile` | Large icon-led choice (title, description, check) for popover pickers such as Discover / Library |
@@ -461,8 +461,10 @@ Fixture data only. Primary review size 1280 × 800; minimum 960 × 600.
 ```
 
 The toolbar is a transparent overlay: no bar fill or bottom border; it floats
-over the page (grid, or the detail hero art). Pages inset their content by the
-48 px toolbar height so nothing hides under it at scroll top; once content
+over the page (grid, or the detail hero art). Every main-window page uses one
+20 px page inset: content starts 72 px down (toolbar height + 20 px), so the
+header controls have 20 px above and 20 px below them at scroll top, and the
+sides match the same 20 px; once content
 scrolls beneath, a canvas-colored top scrim (≈92 % → 0, fades in over 24 px of
 scroll) keeps the controls legible in both themes.
 
@@ -590,8 +592,8 @@ and protected files, never deletes original local files. Rows have context menus
 ### 4.5 Detail page (movie and series)
 
 Implemented in `screens/detail*`. One scrolling page (`ScrollArea`). The hero and
-every body section share **one frame**: responsive side gutters (12 / 20 / 28 / 40 /
-48 px below 720 / 1100 / 1500 / 2100 / wider) and a 1800 px maximum content width,
+every body section share **one frame**: the shared 20 px page inset (same as
+Browse) and a 2400 px maximum content width,
 centred only beyond it, so everything has the same left edge. Poster width and
 overview measure scale with the window (140–232 px, 560–920 px).
 

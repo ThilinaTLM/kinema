@@ -756,11 +756,7 @@ impl Render for Browse {
         let is_list = !(count == 0 && !busy);
         let stale = !self.cells.is_empty() && error.is_some();
         // A stale strip sits directly under the header and pushes the grid down.
-        let top_inset = if stale {
-            s::GRID_INSET
-        } else {
-            s::TOOLBAR_HEIGHT + s::GRID_INSET
-        };
+        let top_inset = if stale { s::GRID_INSET } else { s::PAGE_TOP };
         let content = if count == 0 && !busy {
             let coordinator = self.coordinator.clone();
             let weak_retry = cx.entity().downgrade();
@@ -996,7 +992,7 @@ impl Render for Browse {
                 .size_full()
                 .px(s::GRID_INSET)
                 .pb(s::GRID_INSET)
-                .pt(s::TOOLBAR_HEIGHT + s::GRID_INSET)
+                .pt(s::PAGE_TOP)
                 .child(content)
                 .into_any_element()
         };

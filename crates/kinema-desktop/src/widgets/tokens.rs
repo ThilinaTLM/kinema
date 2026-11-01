@@ -251,7 +251,15 @@ pub mod space {
     pub const S32: Pixels = px(32.0);
     pub const S48: Pixels = px(48.0);
 
-    pub const TOOLBAR_HEIGHT: Pixels = px(48.0);
+    /// Side, top and bottom inset of every main-window page.
+    pub const PAGE_INSET: Pixels = px(20.0);
+    /// Space above the floating-header controls; matches the gap below them
+    /// to page content ([`PAGE_INSET`]) so the header row reads balanced.
+    pub const TOOLBAR_TOP: Pixels = PAGE_INSET;
+    /// Floating header: top padding plus one control row.
+    pub const TOOLBAR_HEIGHT: Pixels = px(52.0);
+    /// Where page content starts beneath the floating header.
+    pub const PAGE_TOP: Pixels = px(72.0);
     pub const CONTROL_HEIGHT: Pixels = px(28.0);
     pub const CONTROL_HEIGHT_LARGE: Pixels = px(32.0);
     /// Every floating-header control (chips, segmented, search, icon groups).
@@ -261,7 +269,7 @@ pub mod space {
     pub const ROW: Pixels = px(32.0);
     pub const ROW_TWO_LINE: Pixels = px(56.0);
     pub const CHIP_HEIGHT: Pixels = px(20.0);
-    pub const GRID_INSET: Pixels = px(20.0);
+    pub const GRID_INSET: Pixels = PAGE_INSET;
     pub const GRID_GAP: Pixels = px(12.0);
     pub const HAIRLINE: Pixels = px(1.0);
     pub const FOCUS_RING: Pixels = px(2.0);
@@ -592,5 +600,14 @@ mod tests {
         assert_ne!(Palette::dark().bg_canvas, Palette::light().bg_canvas);
         // Artwork scrims are theme-independent by design.
         assert_eq!(Palette::dark().scrim_max, Palette::light().scrim_max);
+    }
+
+    #[test]
+    fn header_row_is_balanced_against_the_page_inset() {
+        use super::space::*;
+        assert_eq!(TOOLBAR_HEIGHT, TOOLBAR_TOP + TOOLBAR_CONTROL);
+        assert_eq!(PAGE_TOP, TOOLBAR_HEIGHT + PAGE_INSET);
+        // Same space above the header controls as between them and content.
+        assert_eq!(TOOLBAR_TOP, PAGE_TOP - TOOLBAR_HEIGHT);
     }
 }

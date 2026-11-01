@@ -8,12 +8,12 @@ use std::time::Duration;
 
 /// Wraps a page section in the shared frame: the same side gutters and
 /// maximum width as the hero content, centred only beyond that width.
-pub(super) fn body_shell(viewport: Pixels, child: impl IntoElement) -> Div {
+pub(super) fn body_shell(child: impl IntoElement) -> Div {
     div().w_full().flex().justify_center().child(
         div()
             .w_full()
             .max_w(geometry::PAGE_MAX_WIDTH)
-            .px(gutter(viewport))
+            .px(GUTTER)
             .child(child),
     )
 }
@@ -157,7 +157,7 @@ impl Detail {
             .fade_into(p.bg_canvas)
             .min_height(px(0.))
             .top_inset(s::TOOLBAR_HEIGHT)
-            .frame(gutter(viewport), geometry::PAGE_MAX_WIDTH)
+            .frame(GUTTER, geometry::PAGE_MAX_WIDTH)
             .sizing(hero_layout.poster, hero_layout.overview_max)
             .overview_loading(status.busy && !status.loaded)
             .primary(self.primary_button(cx));
@@ -214,13 +214,12 @@ impl Detail {
             .flex()
             .flex_col()
             .child(div().w_full().child(banner));
-        if let Some(notices) = self.personal_notices(viewport, cx) {
+        if let Some(notices) = self.personal_notices(cx) {
             section = section.child(notices);
         }
         if let Some(error) = status.error.clone() {
             let retry = cx.listener(|this, _, _, cx| this.retry_metadata(cx));
             section = section.child(body_shell(
-                viewport,
                 div().w_full().pt(s::S12).child(
                     crate::widgets::notice::Notice::new(
                         crate::widgets::notice::NoticeKind::Warning,
@@ -270,20 +269,14 @@ impl Detail {
             #[cfg(all(test, feature = "ui-probe-test"))]
             let _watch = super::work::stopwatch(super::work::Timed::EpisodesSection);
             let episodes = self.episodes_section(width, cx);
-            scroll = scroll
-                .child(body_shell(viewport, episodes))
-                .child(body_shell(viewport, facts));
+            scroll = scroll.child(body_shell(episodes)).child(body_shell(facts));
         } else {
-            scroll = scroll.child(body_shell(viewport, facts));
+            scroll = scroll.child(body_shell(facts));
         }
         div()
             .size_full()
             .bg(p.bg_canvas)
-            .child(
-                scroll
-                    .child(body_shell(viewport, similar))
-                    .child(body_shell(viewport, footer)),
-            )
+            .child(scroll.child(body_shell(similar)).child(body_shell(footer)))
             .into_any_element()
     }
 }
