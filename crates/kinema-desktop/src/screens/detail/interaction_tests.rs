@@ -305,7 +305,7 @@ fn column_counts_follow_the_window_width_on_every_resize(cx: &mut TestAppContext
     let window = cx.add_window(|_, cx| Detail::fixture(coordinator, title, false, None, cx));
     // The count is derived from the viewport inside the same render pass, so a
     // single draw after each resize already shows the new count (no stale frame).
-    for (width, cols) in [(520., 3), (1280., 6), (1920., 9), (2560., 11), (960., 5)] {
+    for (width, cols) in [(520., 3), (1280., 6), (1920., 9), (2560., 12), (960., 5)] {
         cx.simulate_window_resize(window.into(), size(px(width), px(900.)));
         draw(window, cx);
         window
