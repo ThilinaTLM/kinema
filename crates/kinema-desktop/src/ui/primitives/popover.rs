@@ -184,7 +184,7 @@ impl RenderOnce for Popover {
                 .role(Role::Button)
                 .aria_expanded(open)
                 .when_some(self.label, |el, label| el.aria_label(label))
-                .rounded(radius::MD)
+                .rounded(radius::LG)
                 .focus_visible(move |s| s.border(space::FOCUS_RING).border_color(p.focus_ring))
                 .on_click(move |_, window, cx| {
                     click_state.update(cx, |this, cx| {
@@ -214,10 +214,10 @@ impl RenderOnce for Popover {
                 .occlude()
                 .max_w(window.viewport_size().width - space::S16)
                 .bg(p.bg_overlay)
-                .rounded(radius::LG)
+                .rounded(radius::XL)
                 .border_1()
                 .border_color(p.line_subtle)
-                .shadow(elevation::overlay(&p))
+                .shadow(elevation::lg(&p))
                 .text_color(p.text_primary)
                 .max_h((window.viewport_size().height - space::S16).max(space::ROW))
                 .overflow_y_scroll()

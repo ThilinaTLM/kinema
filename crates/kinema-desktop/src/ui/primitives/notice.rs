@@ -68,7 +68,7 @@ impl RenderOnce for Notice {
         div()
             .flex()
             .items_center()
-            .rounded(radius::SM)
+            .rounded(radius::MD)
             .gap(space::S12)
             .px(space::S12)
             .py(if self.strip { space::S4 } else { space::S12 })

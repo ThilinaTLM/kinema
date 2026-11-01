@@ -13,10 +13,10 @@ impl Render for Tooltip {
         let p = palette(cx);
         div()
             .bg(p.bg_overlay)
-            .rounded(radius::SM)
+            .rounded(radius::MD)
             .border_1()
             .border_color(p.line_subtle)
-            .shadow(elevation::raised(p))
+            .shadow(elevation::sm(p))
             .px(space::S8)
             .py(space::S4)
             .type_style(typeface::SMALL)

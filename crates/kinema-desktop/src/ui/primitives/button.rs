@@ -67,7 +67,7 @@ pub(crate) fn on_colors(p: &Palette) -> (Hsla, Hsla, Hsla, Hsla) {
         a: (p.accent_tint.a * 1.4).min(1.0),
         ..p.accent_tint
     };
-    (p.accent_tint, hover, p.accent_text, p.accent.opacity(0.35))
+    (p.accent_tint, hover, p.accent_text, p.primary.opacity(0.35))
 }
 
 impl Button {
@@ -190,7 +190,7 @@ impl RenderOnce for Button {
         let blocked = self.disabled || self.busy;
         let (rest, hover, pressed, ink, border) = match self.variant {
             ButtonVariant::Primary => (
-                p.accent,
+                p.primary,
                 p.accent_hover,
                 p.accent_pressed,
                 p.on_accent,
@@ -260,7 +260,7 @@ impl RenderOnce for Button {
                 ButtonSize::Large => space::CONTROL_HEIGHT_LARGE,
             })
             .px(space::S12)
-            .rounded(radius::SM)
+            .rounded(radius::MD)
             .border(space::HAIRLINE)
             .border_color(border)
             .bg(rest)
@@ -332,7 +332,7 @@ impl RenderOnce for Button {
             .p(space::S2)
             .m(-space::S4)
             // Ring follows the host radius: face radius + gap + ring width.
-            .rounded(radius::SM + space::S4)
+            .rounded(radius::MD + space::S4)
             .role(Role::Button)
             .aria_label(
                 self.aria_name

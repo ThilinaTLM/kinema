@@ -37,7 +37,7 @@ impl RenderOnce for StatTile {
             .min_w_0()
             .px(space::S12 - space::S2)
             .py(space::S8)
-            .rounded(radius::MD)
+            .rounded(radius::LG)
             .bg(p.bg_raised)
             .border(space::HAIRLINE)
             .border_color(p.line_subtle)

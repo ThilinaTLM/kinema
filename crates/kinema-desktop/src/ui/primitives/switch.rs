@@ -56,7 +56,7 @@ impl RenderOnce for Checkbox {
                     .rounded_full()
                     .border(space::HAIRLINE)
                     .border_color(if self.checked && !self.disabled {
-                        p.accent
+                        p.primary
                     } else {
                         p.line_control
                     })
@@ -64,17 +64,17 @@ impl RenderOnce for Checkbox {
                         el.child(div().size(space::S6).rounded_full().bg(if self.disabled {
                             p.text_muted
                         } else {
-                            p.accent
+                            p.primary
                         }))
                     })
                     .into_any_element(),
                 _ => div()
                     .size(space::ICON)
                     .flex_none()
-                    .rounded(radius::XS)
+                    .rounded(radius::SM)
                     .border(space::HAIRLINE)
                     .border_color(if self.checked && !self.disabled {
-                        p.accent
+                        p.primary
                     } else {
                         p.line_control
                     })
@@ -109,7 +109,7 @@ impl RenderOnce for Checkbox {
             .border_color(transparent_black())
             .p(space::S2)
             .m(-space::S4)
-            .rounded(radius::SM + space::S4)
+            .rounded(radius::MD + space::S4)
             .role(self.role)
             .aria_label(self.label.clone())
             .aria_toggled(if self.checked {
@@ -179,12 +179,12 @@ fn switch_indicator(checked: bool, disabled: bool, cx: &App) -> AnyElement {
         .rounded_full()
         .border(space::HAIRLINE)
         .border_color(if checked && !disabled {
-            p.accent
+            p.primary
         } else {
             p.line_control
         })
         .bg(if checked && !disabled {
-            p.accent
+            p.primary
         } else {
             p.ctl_rest
         })

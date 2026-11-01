@@ -95,7 +95,7 @@ impl RenderOnce for Badge {
             .items_center()
             .gap(space::S4)
             .px(space::S6)
-            .rounded(radius::XS)
+            .rounded(radius::SM)
             .bg(fill)
             .text_color(ink)
             .type_style(typeface::CAPTION)

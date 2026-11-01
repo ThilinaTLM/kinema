@@ -501,7 +501,7 @@ fn selected_row(el: Stateful<Div>, palette: Palette) -> Stateful<Div> {
             .top_0()
             .bottom_0()
             .w(s::S2)
-            .bg(palette.accent),
+            .bg(palette.primary),
     )
 }
 const EPISODES: [(&str, &str, &str); 8] = [
@@ -1189,7 +1189,7 @@ impl Lab {
             ("text.primary", p.text_primary),
             ("text.secondary", p.text_secondary),
             ("text.muted", p.text_muted),
-            ("accent", p.accent),
+            ("accent", p.primary),
             ("accent.text", p.accent_text),
             ("focus.ring", p.focus_ring),
             ("rating", p.rating),
@@ -1956,7 +1956,7 @@ impl Lab {
                                 img(self.poster.clone())
                                     .w(s::S32)
                                     .h(s::S32)
-                                    .rounded(theme::radius::SM)
+                                    .rounded(theme::radius::MD)
                                     .object_fit(ObjectFit::Cover),
                             )
                             .trailing(Badge::new("1080p").uppercase(true))
@@ -2146,7 +2146,7 @@ impl Lab {
                 .bg(p.bg_surface)
                 .border_1()
                 .border_color(p.line_subtle)
-                .rounded(theme::radius::MD)
+                .rounded(theme::radius::LG)
                 .child(
                     div()
                         .type_style(t::SMALL)

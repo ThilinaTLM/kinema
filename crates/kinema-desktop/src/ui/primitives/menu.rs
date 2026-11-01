@@ -348,10 +348,10 @@ impl Menu {
             })
             .occlude()
             .bg(p.bg_overlay)
-            .rounded(radius::LG)
+            .rounded(radius::XL)
             .border_1()
             .border_color(p.line_subtle)
-            .shadow(elevation::overlay(&p))
+            .shadow(elevation::lg(&p))
             .p(space::S4)
             .type_style(typeface::BODY)
             .text_color(p.text_primary);
@@ -379,7 +379,7 @@ impl Menu {
                 .items_center()
                 .gap(space::S8)
                 .px(space::S8)
-                .rounded(radius::SM)
+                .rounded(radius::MD)
                 .text_color(if enabled {
                     p.text_primary
                 } else {
@@ -786,7 +786,7 @@ impl<T: Clone + PartialEq + 'static> Render for Select<T> {
             .focus_visible(move |s| s.border(space::FOCUS_RING).border_color(p.focus_ring))
             .tab_stop(true)
             .relative()
-            .rounded(if self.toolbar { radius::MD } else { radius::SM })
+            .rounded(if self.toolbar { radius::LG } else { radius::MD })
             .child({
                 let face = div()
                     .flex()
@@ -805,9 +805,9 @@ impl<T: Clone + PartialEq + 'static> Render for Select<T> {
                     .child(label)
                     .child(Icon::new(IconName::ChevronDown).color(p.text_secondary));
                 if self.toolbar {
-                    let (fill, hover, edge) = crate::ui::blocks::toolbar::glass(p);
+                    let (fill, hover, edge) = p.glass();
                     face.h(space::TOOLBAR_CONTROL)
-                        .rounded(radius::MD)
+                        .rounded(radius::LG)
                         .px(space::S12)
                         .bg(fill)
                         .border(space::HAIRLINE)
@@ -816,7 +816,7 @@ impl<T: Clone + PartialEq + 'static> Render for Select<T> {
                         .hover(move |s| s.bg(hover))
                 } else {
                     face.h(space::CONTROL_HEIGHT)
-                        .rounded(radius::SM)
+                        .rounded(radius::MD)
                         .px(space::S8)
                         .bg(p.ctl_rest)
                         .border_1()

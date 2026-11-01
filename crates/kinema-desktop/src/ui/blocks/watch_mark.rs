@@ -183,7 +183,7 @@ impl RenderOnce for WatchMark {
         match self.state {
             WatchMarkState::All => frame
                 .rounded_full()
-                .bg(p.accent)
+                .bg(p.primary)
                 .flex()
                 .items_center()
                 .justify_center()
@@ -192,11 +192,11 @@ impl RenderOnce for WatchMark {
                         .size(px(g.check))
                         .color(p.on_accent),
                 ),
-            WatchMarkState::None => frame.child(ring(0., p.text_muted, p.accent, g)),
+            WatchMarkState::None => frame.child(ring(0., p.text_muted, p.primary, g)),
             WatchMarkState::Partial(f) => frame.child(ring(
                 f.clamp(0.01, 0.99),
                 p.text_muted.opacity(0.45),
-                p.accent,
+                p.primary,
                 g,
             )),
         }

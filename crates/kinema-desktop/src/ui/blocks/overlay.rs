@@ -41,7 +41,7 @@ impl RenderOnce for OverlayBadge {
         let dark = Palette::dark();
         let (bg, ink) = if self.accent {
             let p = palette(cx);
-            (p.accent, p.on_accent)
+            (p.primary, p.on_accent)
         } else {
             (dark.chip_over_art, dark.text_secondary)
         };
@@ -50,7 +50,7 @@ impl RenderOnce for OverlayBadge {
             .px(space::S6)
             .flex()
             .items_center()
-            .rounded(radius::XS)
+            .rounded(radius::SM)
             .bg(bg)
             .text_color(ink)
             .type_style(typeface::CAPTION)
@@ -121,7 +121,7 @@ impl RenderOnce for OverlayButton {
             .flex()
             .items_center()
             .justify_center()
-            .rounded(radius::SM)
+            .rounded(radius::MD)
             .bg(dark.chip_over_art)
             .children(self.child)
             // The card below never sees this activation.

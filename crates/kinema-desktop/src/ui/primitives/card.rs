@@ -81,7 +81,7 @@ impl RenderOnce for Card {
         };
         let hover_fill = p.bg_overlay;
         let rest_shadow = if self.raised {
-            elevation::raised(&p)
+            elevation::sm(&p)
         } else {
             Vec::new()
         };
@@ -90,7 +90,7 @@ impl RenderOnce for Card {
             .bg(rest_fill)
             .border(space::HAIRLINE)
             .border_color(p.line_subtle)
-            .rounded(radius::MD)
+            .rounded(radius::LG)
             .shadow(rest_shadow.clone())
             .children(self.children);
         let Some((id, handler)) = self.action else {
@@ -117,13 +117,13 @@ impl RenderOnce for Card {
             return face.into_any_element();
         }
         // Resting shadow for a flat card is the lifted one at zero alpha.
-        let mut from = elevation::raised(&p);
+        let mut from = elevation::sm(&p);
         if !self.raised {
             for shadow in &mut from {
                 shadow.color = shadow.color.opacity(0.0);
             }
         }
-        let to = elevation::card_hover(&p);
+        let to = elevation::md(&p);
         let apply = move |el: Stateful<Div>, t: f32| {
             el.bg(rest_fill.blend(hover_fill.opacity(t)))
                 .shadow(lerp_shadows(&from, &to, t))

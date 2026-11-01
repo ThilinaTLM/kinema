@@ -134,7 +134,7 @@ impl Detail {
                         Skeleton::block()
                             .w(fit.tile)
                             .h(fit.tile * POSTER_ASPECT)
-                            .rounded(radius::MD)
+                            .rounded(radius::LG)
                     })),
             )
             .message(if series {
@@ -191,18 +191,15 @@ impl Detail {
             .flex_none()
             .relative()
             .overflow_hidden()
-            .rounded(radius::MD)
+            .rounded(radius::LG)
             .bg(p.bg_placeholder)
             .border(s::HAIRLINE)
             .border_color(p.poster_edge)
-            .shadow(elevation::raised(&p))
+            .shadow(elevation::sm(&p))
             .focusable()
             .tab_stop(true)
             .cursor_pointer()
-            .hover(move |el| {
-                el.shadow(elevation::card_hover(&p))
-                    .border_color(p.line_control)
-            })
+            .hover(move |el| el.shadow(elevation::md(&p)).border_color(p.line_control))
             .focus_visible(move |el| el.shadow(vec![focus_ring(p.focus_ring)]))
             .tooltip(tooltip(title.name.clone()));
         if let Some(image) = self.image(

@@ -58,7 +58,7 @@ impl RenderOnce for QualityTile {
             .flex_col()
             .items_center()
             .justify_center()
-            .rounded(radius::SM)
+            .rounded(radius::MD)
             .bg(fill)
             .child(
                 div()

@@ -1,6 +1,5 @@
 //! Search editor with cancellable, generation-checked live queries.
 use crate::{
-    ui::blocks::toolbar,
     ui::primitives::icon::{Icon, IconName},
     ui::primitives::text_input::{TextInput, TextInputEvent},
     ui::theme::typography::TypeExt,
@@ -114,7 +113,7 @@ impl Render for SearchField {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = *palette(cx);
         let (fill, hover, edge) = if self.toolbar {
-            toolbar::glass(&p)
+            p.glass()
         } else {
             (p.ctl_rest, p.ctl_rest, p.line_control)
         };
@@ -138,13 +137,13 @@ impl Render for SearchField {
             .w_full()
             .pl(if self.toolbar { space::S12 } else { space::S8 })
             .pr(space::S2)
-            .rounded(if self.toolbar { radius::MD } else { radius::SM })
+            .rounded(if self.toolbar { radius::LG } else { radius::MD })
             .bg(fill)
             .when(self.toolbar && !focused, |el| {
                 el.hover(move |s| s.bg(hover))
             })
             .border(space::HAIRLINE)
-            .border_color(if focused { p.accent } else { edge })
+            .border_color(if focused { p.primary } else { edge })
             // Keyboard focus ring follows the host radius: 2 px gap, then 2 px ring.
             .when(ring, |el| {
                 el.shadow(vec![
@@ -165,7 +164,7 @@ impl Render for SearchField {
                             .h(space::CHIP_HEIGHT)
                             .flex()
                             .items_center()
-                            .rounded(radius::XS)
+                            .rounded(radius::SM)
                             .bg(p.ctl_hover)
                             .type_style(typeface::CAPTION)
                             .text_color(p.text_muted)
@@ -178,7 +177,7 @@ impl Render for SearchField {
                     div()
                         .id("clear-search")
                         .track_focus(&self.clear_focus)
-                        .rounded(radius::XS)
+                        .rounded(radius::SM)
                         .focus_visible(move |s| s.border_2().border_color(p.focus_ring))
                         .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                             if event.keystroke.key == "enter" || event.keystroke.key == "space" {

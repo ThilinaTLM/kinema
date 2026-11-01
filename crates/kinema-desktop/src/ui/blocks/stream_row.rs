@@ -126,7 +126,7 @@ impl StreamRow {
             .flex()
             .items_center()
             .gap(space::S16)
-            .rounded(radius::MD)
+            .rounded(radius::LG)
             .role(Role::ListItem)
             .aria_label(self.title.clone())
             .aria_selected(selected)
@@ -143,7 +143,7 @@ impl StreamRow {
                         .bottom(space::S12 - space::S2)
                         .w(space::S2)
                         .rounded_full()
-                        .bg(p.accent),
+                        .bg(p.primary),
                 )
             })
             .children(self.leading.map(|leading| div().flex_none().child(leading)))

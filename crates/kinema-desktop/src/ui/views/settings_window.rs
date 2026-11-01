@@ -1243,7 +1243,7 @@ impl Render for SettingsWindow {
                             .items_center()
                             .border_l(s::S2)
                             .border_color(if section == selected {
-                                p.accent
+                                p.primary
                             } else {
                                 transparent_black()
                             })

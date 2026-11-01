@@ -103,7 +103,7 @@ impl RenderOnce for ListRow {
             .items_center()
             .gap(space::S12)
             .px(space::S8)
-            .rounded(radius::SM)
+            .rounded(radius::MD)
             .role(Role::ListItem)
             .aria_label(self.title.clone())
             .when(interactive, |el| {
@@ -130,7 +130,7 @@ impl RenderOnce for ListRow {
                         .bottom(space::S8)
                         .w(space::S2)
                         .rounded_full()
-                        .bg(p.accent),
+                        .bg(p.primary),
                 )
             })
             .when_some(self.leading, |el, leading| {

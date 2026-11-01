@@ -778,13 +778,13 @@ impl Render for TextInput {
             .flex()
             .items_center()
             .when(!chromeless, |el| {
-                el.rounded(radius::SM)
+                el.rounded(radius::MD)
                     .bg(p.ctl_rest)
                     .border_1()
                     .border_color(if self.invalid {
                         p.status_error
                     } else if focused {
-                        p.accent
+                        p.primary
                     } else {
                         p.line_control
                     })
@@ -904,7 +904,7 @@ impl Render for TextInput {
                                     p.focus_ring,
                                     BorderStyle::Solid,
                                 )
-                                .corner_radii(radius::SM + space::FOCUS_RING * 2.)
+                                .corner_radii(radius::MD + space::FOCUS_RING * 2.)
                                 .border_widths(space::FOCUS_RING),
                             );
                         }

@@ -26,7 +26,7 @@ impl RenderOnce for SkeletonCard {
         let sheen = div()
             .absolute()
             .inset_0()
-            .rounded(radius::MD)
+            .rounded(radius::LG)
             .bg(p.ctl_hover);
         let sheen = if motion::reduced(cx) {
             sheen.opacity(0.35).into_any_element()
@@ -48,14 +48,14 @@ impl RenderOnce for SkeletonCard {
             .h(px(self.width * 1.5))
             .flex_none()
             .relative()
-            .rounded(radius::MD)
+            .rounded(radius::LG)
             .bg(p.bg_placeholder)
             .child(sheen)
             .child(
                 div()
                     .absolute()
                     .inset_0()
-                    .rounded(radius::MD)
+                    .rounded(radius::LG)
                     .border_1()
                     .border_color(p.poster_edge),
             )

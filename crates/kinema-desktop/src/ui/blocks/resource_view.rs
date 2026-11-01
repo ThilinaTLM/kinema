@@ -244,7 +244,7 @@ fn refresh_bar(cx: &App) -> AnyElement {
                 .h_full()
                 .w(relative(0.25))
                 .rounded_full()
-                .bg(p.accent)
+                .bg(p.primary)
                 .with_animation(
                     "refresh-sweep",
                     Animation::new(duration * REFRESH_CYCLES).repeat(),

@@ -121,7 +121,7 @@ fn episode_skeleton(fit: GridFit) -> AnyElement {
                     Skeleton::block()
                         .w(tile)
                         .h(tile * 9. / 16.)
-                        .rounded(radius::SM),
+                        .rounded(radius::MD),
                 )
                 .child(Skeleton::line().w(relative(0.6)))
                 .child(Skeleton::line().w(relative(0.9)))
@@ -557,7 +557,7 @@ impl Detail {
         let poster = Thumb::new(
             self.season_thumb_state(n, tile.poster.as_deref(), cx),
             POSTER_RATIO,
-            radius::XS,
+            radius::SM,
         )
         .width(SEASON_POSTER_W);
         // 2 px accent progress line.
@@ -569,7 +569,7 @@ impl Detail {
                 .rounded(s::S2)
                 .bg(p.line_subtle)
                 .overflow_hidden()
-                .child(div().h_full().w(relative(t.fraction())).bg(p.accent))
+                .child(div().h_full().w(relative(t.fraction())).bg(p.primary))
         });
         let hover = p.ctl_hover;
         div()
@@ -593,9 +593,9 @@ impl Detail {
             .py(s::S8)
             .pl(s::S8)
             .pr(s::S12)
-            .rounded(radius::MD)
+            .rounded(radius::LG)
             .border_1()
-            .border_color(if selected { p.accent } else { p.line_subtle })
+            .border_color(if selected { p.primary } else { p.line_subtle })
             .bg(if selected {
                 p.accent_tint
             } else if special {
@@ -731,7 +731,7 @@ impl Detail {
         let poster = Thumb::new(
             self.season_thumb_state(season, poster.as_deref(), cx),
             POSTER_RATIO,
-            radius::SM,
+            radius::MD,
         )
         .width(SEASON_HEADER_POSTER_W);
         let open = self.season_overview_open == Some(season);
@@ -1058,7 +1058,7 @@ impl Detail {
             .aria_label(format!("{marker} {name}"))
             .w(tile)
             .flex_none()
-            .rounded(radius::MD)
+            .rounded(radius::LG)
             .cursor_pointer()
             .focus_visible(move |el| el.shadow(vec![ring.clone()]))
             .on_mouse_down(MouseButton::Left, move |_, window, cx| {

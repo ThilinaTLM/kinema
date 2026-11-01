@@ -241,7 +241,7 @@ impl Browse {
             .inset_0()
             .overflow_hidden()
             .bg(p.bg_canvas)
-            .child(glow(135., p.accent, amber, 0.62))
+            .child(glow(135., p.primary, amber, 0.62))
             .child(glow(315., violet_hue, violet, 0.62))
     }
     #[cfg(all(test, feature = "ui-probe-test"))]

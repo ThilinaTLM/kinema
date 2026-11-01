@@ -1,4 +1,4 @@
-//! Hero-style action button: one 32 px box, radius `SM`, three variants.
+//! Hero-style action button: one 32 px box, radius `MD`, three variants.
 //!
 //! A typed front for [`Button`] (which owns hover, focus, busy and disabled
 //! rendering) so hero, season header and drawer actions share one face.
@@ -196,7 +196,7 @@ mod tests {
             assert!(hover.a > rest.a, "hover must deepen the tint");
             assert_eq!(
                 (edge.h, edge.s, edge.l),
-                (p.accent.h, p.accent.s, p.accent.l)
+                (p.primary.h, p.primary.s, p.primary.l)
             );
             assert!(edge.a > 0.0 && edge.a < 1.0);
         }

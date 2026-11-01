@@ -76,7 +76,7 @@ mod tests {
     #[test]
     fn shadow_lerp_hits_both_ends() {
         let p = Palette::dark();
-        let (a, b) = (elevation::raised(&p), elevation::card_hover(&p));
+        let (a, b) = (elevation::sm(&p), elevation::md(&p));
         let start = lerp_shadows(&a, &b, 0.0);
         let end = lerp_shadows(&a, &b, 1.0);
         assert_eq!(start[0].offset, a[0].offset);

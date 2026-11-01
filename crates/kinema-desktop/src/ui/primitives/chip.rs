@@ -96,7 +96,7 @@ impl RenderOnce for Chip {
         };
         div()
             .h(space::CHIP_HEIGHT)
-            .rounded(radius::XS)
+            .rounded(radius::SM)
             .px(space::S6)
             .flex()
             .items_center()

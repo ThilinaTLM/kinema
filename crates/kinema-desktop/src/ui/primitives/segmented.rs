@@ -1,6 +1,5 @@
 //! Controlled segmented selection, with wraparound arrow-key navigation.
 use crate::{
-    ui::blocks::toolbar,
     ui::motion,
     ui::primitives::Icon,
     ui::primitives::IconName,
@@ -61,7 +60,7 @@ impl<T: Clone + PartialEq + 'static> Segmented<T> {
         self.counts = counts.into_iter().collect();
         self
     }
-    /// Floating-header geometry and glass material (see [`toolbar`]).
+    /// Floating-header geometry and glass material (see `Palette::glass`).
     pub fn toolbar(mut self) -> Self {
         self.toolbar = true;
         self
@@ -87,15 +86,15 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for Segmented<T> {
         let muted = p.text_muted;
         let in_toolbar = self.toolbar;
         let (track, track_edge, height, outer, inner) = if in_toolbar {
-            let (fill, _, edge) = toolbar::glass(&p);
-            (fill, edge, space::TOOLBAR_CONTROL, radius::MD, radius::SM)
+            let (fill, _, edge) = p.glass();
+            (fill, edge, space::TOOLBAR_CONTROL, radius::LG, radius::MD)
         } else {
             (
                 p.ctl_rest,
                 p.line_subtle,
                 space::CONTROL_HEIGHT,
+                radius::MD,
                 radius::SM,
-                radius::XS,
             )
         };
         let content = move |index: usize, label: SharedString, ink: Hsla| {
@@ -167,7 +166,7 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for Segmented<T> {
                                 .justify_center()
                                 .rounded(inner)
                                 .type_style(typeface::SMALL_MEDIUM)
-                                .when(active, |el| el.shadow(elevation::raised(&p)))
+                                .when(active, |el| el.shadow(elevation::sm(&p)))
                                 .child(content(
                                     index,
                                     label.clone(),

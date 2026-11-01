@@ -1397,7 +1397,7 @@ impl PlayerWindow {
         self.activity(cx);
     }
     fn shortcut_help(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = Palette::dark();
+        let p = Palette::cinema();
         let groups = shortcuts::reference_groups();
         let width = window.viewport_size().width;
         let columns = if width >= HELP_COLUMN * 3. + s::S24 * 2. + s::S48 * 2. {
@@ -1416,7 +1416,7 @@ impl PlayerWindow {
                 .h(px(20.))
                 .flex()
                 .items_center()
-                .rounded(radius::SM)
+                .rounded(radius::MD)
                 .bg(p.bg_raised)
                 .border_1()
                 .border_color(p.line_control)
@@ -1495,7 +1495,7 @@ impl PlayerWindow {
                     .bg(p.bg_overlay)
                     .border_1()
                     .border_color(p.line_subtle)
-                    .rounded(radius::LG)
+                    .rounded(radius::XL)
                     .overflow_hidden()
                     .child(
                         div()
@@ -2800,7 +2800,7 @@ impl PlayerWindow {
         button.disabled(!control_enabled(index, availability))
     }
     fn volume_panel(&self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
-        let p = Palette::dark();
+        let p = Palette::cinema();
         let viewport = window.viewport_size().height;
         let rail = px(volume_rail_height(f32::from(viewport)));
         let dock = if self.dock_height > Pixels::default() {
@@ -2822,7 +2822,7 @@ impl PlayerWindow {
         let fill = if self.state.muted {
             p.text_muted
         } else {
-            p.accent
+            p.primary
         };
         let slider = div()
             .id("player-volume").occlude()
@@ -2838,7 +2838,7 @@ impl PlayerWindow {
             .h(rail)
             .flex()
             .justify_center()
-            .rounded(radius::SM)
+            .rounded(radius::MD)
             .cursor(if enabled {
                 CursorStyle::PointingHand
             } else {
@@ -2920,7 +2920,7 @@ impl PlayerWindow {
             .px(s::S6)
             .pt(s::S12)
             .pb(s::S6)
-            .rounded(radius::LG)
+            .rounded(radius::XL)
             .bg(p.scrim_max)
             .border_1()
             .border_color(p.line_subtle)
@@ -2958,7 +2958,7 @@ impl PlayerWindow {
             )
     }
     fn timeline(&self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
-        let p = Palette::dark();
+        let p = Palette::cinema();
         let entity = cx.entity();
         let seekable = self.can_seek();
         let duration = self.state.duration.filter(|d| *d > 0.).unwrap_or(0.);
@@ -3006,7 +3006,7 @@ impl PlayerWindow {
                 .h_full()
                 .w(relative(fraction))
                 .rounded_full()
-                .bg(p.accent),
+                .bg(p.primary),
         );
         for tick in chapter_ticks(&self.state.chapters, duration) {
             track = track.child(
@@ -3039,7 +3039,7 @@ impl PlayerWindow {
             .h(s::S32)
             .flex()
             .items_center()
-            .rounded(radius::SM)
+            .rounded(radius::MD)
             .cursor(if seekable {
                 CursorStyle::PointingHand
             } else {
@@ -3058,7 +3058,7 @@ impl PlayerWindow {
                         .rounded_full()
                         .bg(p.text_primary)
                         .border_2()
-                        .border_color(p.accent),
+                        .border_color(p.primary),
                 )
             })
             .when_some(preview.filter(|_| duration > 0.), |el, ratio| {
@@ -3079,7 +3079,7 @@ impl PlayerWindow {
                         .flex()
                         .flex_col()
                         .items_center()
-                        .rounded(radius::SM)
+                        .rounded(radius::MD)
                         .bg(p.scrim_max)
                         .border_1()
                         .border_color(p.line_subtle)
@@ -3197,7 +3197,7 @@ impl PlayerWindow {
     }
 
     fn chrome(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let p = Palette::dark();
+        let p = Palette::cinema();
         let fullscreen = window.is_fullscreen();
         let seekable = self.can_seek();
         let duration = self.state.duration.filter(|d| *d > 0.);
@@ -3587,7 +3587,7 @@ impl Render for PlayerWindow {
         if let Some(meter) = self.cadence.as_mut() {
             meter.render_called(Instant::now());
         }
-        let p = Palette::dark();
+        let p = Palette::cinema();
         let visible = self.chrome_visible(window);
         self.chrome_was_visible = visible;
         let failed = terminal_failure(self.error.is_some(), &self.state);
@@ -3696,7 +3696,7 @@ impl Render for PlayerWindow {
                         .px(s::S8)
                         .py(s::S4)
                         .truncate()
-                        .rounded(radius::SM)
+                        .rounded(radius::MD)
                         .bg(p.scrim_max.opacity(0.7))
                         .type_style(t::MONO)
                         .text_color(p.text_secondary)
@@ -3891,10 +3891,11 @@ struct ProbeProxy {
 impl Render for ProbeProxy {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         self.paints += 1;
+        let p = Palette::cinema();
         div()
             .size_full()
-            .bg(rgb(0x16202a))
-            .text_color(rgb(0xe0e0e0))
+            .bg(p.surface)
+            .text_color(p.foreground)
             .child("Offline auxiliary surface — no settings or services")
     }
 }

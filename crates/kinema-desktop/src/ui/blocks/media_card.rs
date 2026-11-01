@@ -1,6 +1,6 @@
 //! `MediaCard`: the raised, clipped container for media tiles.
 //!
-//! Raised fill, `MD` radius, `line_subtle` edge. On hover the card lifts 3 px,
+//! Raised fill, `LG` radius, `line_subtle` edge. On hover the card lifts 3 px,
 //! gains the `card_hover` shadow and a brighter edge, driven by the same
 //! [`CardHover`] tween as the poster card (reduced motion snaps). The card
 //! fills its host, which owns identity, focus, clicks and context menus, so
@@ -92,7 +92,7 @@ impl RenderOnce for MediaCard {
             window.request_animation_frame();
         }
         let edge = if self.accent_edge {
-            p.accent.opacity(ACCENT_EDGE_ALPHA)
+            p.primary.opacity(ACCENT_EDGE_ALPHA)
         } else {
             lifted_edge(p.line_subtle, lift)
         };
@@ -104,11 +104,11 @@ impl RenderOnce for MediaCard {
             .flex()
             .flex_col()
             .overflow_hidden()
-            .rounded(radius::MD)
+            .rounded(radius::LG)
             .bg(p.bg_raised)
             .border(space::HAIRLINE)
             .border_color(edge)
-            .shadow(lift_shadow(theme::elevation::card_hover(&p), lift))
+            .shadow(lift_shadow(theme::elevation::md(&p), lift))
             .on_hover(move |hovered, window, cx| {
                 state.update(cx, |s, _| s.hovered = *hovered);
                 window.refresh();
@@ -135,7 +135,7 @@ mod tests {
 
     #[test]
     fn shadow_fades_with_hover() {
-        let shadow = theme::elevation::card_hover(&Palette::dark());
+        let shadow = theme::elevation::md(&Palette::dark());
         let a = shadow[0].color.a;
         assert_eq!(lift_shadow(shadow.clone(), 0.)[0].color.a, 0.);
         // Matches the PosterCard lift exactly (alpha scaled by itself, then hover).

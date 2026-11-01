@@ -35,7 +35,7 @@ impl Progress {
 impl RenderOnce for Progress {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let p = *palette(cx);
-        let fill = div().absolute().h_full().rounded_full().bg(p.accent);
+        let fill = div().absolute().h_full().rounded_full().bg(p.primary);
         let fill = match self.value {
             Some(value) => fill.w(relative(value)).into_any_element(),
             None => {

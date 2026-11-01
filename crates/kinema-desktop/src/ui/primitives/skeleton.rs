@@ -22,7 +22,7 @@ const LAST_LINE_FRACTION: f32 = 0.6;
 pub enum SkeletonShape {
     /// Card/poster-like surface (radius MD).
     Block,
-    /// Text line (radius XS, full width).
+    /// Text line (radius SM, full width).
     Line,
     /// Avatar or icon placeholder.
     Circle,
@@ -38,8 +38,8 @@ impl Skeleton {
     pub fn new(shape: SkeletonShape) -> Self {
         let base = div().flex_none();
         let base = match shape {
-            SkeletonShape::Block => base.rounded(radius::MD).w_full().h(space::S48),
-            SkeletonShape::Line => base.rounded(radius::XS).w_full().h(LINE_HEIGHT),
+            SkeletonShape::Block => base.rounded(radius::LG).w_full().h(space::S48),
+            SkeletonShape::Line => base.rounded(radius::SM).w_full().h(LINE_HEIGHT),
             SkeletonShape::Circle => base.rounded_full().size(CIRCLE_SIZE),
         };
         Self { base }

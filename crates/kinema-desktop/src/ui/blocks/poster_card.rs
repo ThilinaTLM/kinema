@@ -131,7 +131,7 @@ impl Render for PosterCard {
             .justify_center()
             .items_center()
             .p(s::S12)
-            .rounded(radius::MD)
+            .rounded(radius::LG)
             .bg(p.bg_placeholder)
             .when(self.image.is_none(), |el| {
                 el.child(
@@ -148,7 +148,7 @@ impl Render for PosterCard {
         let artwork = self.image.as_ref().map(|image| {
             let image = img(image.clone())
                 .object_fit(ObjectFit::Cover)
-                .rounded(radius::MD)
+                .rounded(radius::LG)
                 .size_full();
             // `img` measures to its natural size even when absolutely positioned,
             // so pin it with a fixed-bounds wrapper instead of insets on the image.
@@ -206,14 +206,14 @@ impl Render for PosterCard {
             .px(s::S12)
             .pb(s::S12)
             .pt(s::S32)
-            .rounded_b(radius::MD)
+            .rounded_b(radius::LG)
             .text_color(dark.text_primary)
             .child(
                 // Scrim fades on its own so the text rows can rise independently.
                 div()
                     .absolute()
                     .inset_0()
-                    .rounded_b(radius::MD)
+                    .rounded_b(radius::LG)
                     .opacity(hover.scrim)
                     .bg(linear_gradient(
                         180.,
@@ -256,7 +256,7 @@ impl Render for PosterCard {
                     r_synopsis,
                 ))
             });
-        let shadow = theme::elevation::card_hover(&p);
+        let shadow = theme::elevation::md(&p);
         let panel_visible = hover.scrim > 0. || hover.rows.iter().any(|v| *v > 0.);
         let style_lift = |el: Div, value: f32| {
             el.top(px(-hv::LIFT_PX * value))
@@ -269,7 +269,7 @@ impl Render for PosterCard {
         let lift = div()
             .size_full()
             .relative()
-            .rounded(radius::MD)
+            .rounded(radius::LG)
             .child(placeholder)
             .children(artwork)
             .when(panel_visible, |el| el.child(panel))
@@ -320,7 +320,7 @@ impl Render for PosterCard {
                 div()
                     .absolute()
                     .inset_0()
-                    .rounded(radius::MD)
+                    .rounded(radius::LG)
                     .border_1()
                     .border_color(p.poster_edge),
             )
@@ -329,7 +329,7 @@ impl Render for PosterCard {
                     div()
                         .absolute()
                         .inset_0()
-                        .rounded(radius::MD)
+                        .rounded(radius::LG)
                         .border(s::FOCUS_RING)
                         .border_color(p.focus_ring),
                 )

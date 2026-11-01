@@ -326,12 +326,12 @@ impl RenderOnce for MediaHero {
                 .flex_none()
                 .w(self.poster_width)
                 .h(self.poster_width * POSTER_ASPECT)
-                .rounded(radius::MD)
+                .rounded(radius::LG)
                 .overflow_hidden()
                 .bg(p.bg_placeholder)
                 .border(space::HAIRLINE)
                 .border_color(p.poster_edge)
-                .shadow(elevation::overlay(&p))
+                .shadow(elevation::lg(&p))
                 .child(div().size_full().child(poster))
         });
 

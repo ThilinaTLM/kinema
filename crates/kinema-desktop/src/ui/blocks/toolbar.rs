@@ -6,14 +6,14 @@
 //!   kind, back), *center* (search or nothing), *trailing* (view tools, then the
 //!   global group). It owns pointer hit-testing so clicks never fall through to
 //!   the page scrolling beneath, while the wheel still scrolls that page.
-//! - [`glass`]: the single translucent material every header control uses, so
+//! - [`Palette::glass`]: the single translucent material every header control uses, so
 //!   controls stay legible over posters, hero art and either theme.
 //! - [`ToolbarGroup`] + [`ToolbarDivider`]: one glass capsule holding icon
 //!   buttons (back, transfers, settings, overflow).
 //! - [`ToolbarChip`]: the visual face of a popover trigger — icon, label,
 //!   optional count and chevron — that collapses to icon-only when narrow.
 //!
-//! Every control is [`space::TOOLBAR_CONTROL`] tall with [`radius::MD`] corners.
+//! Every control is [`space::TOOLBAR_CONTROL`] tall with [`radius::LG`] corners.
 use crate::{
     ui::primitives::Icon,
     ui::primitives::IconName,
@@ -22,30 +22,11 @@ use crate::{
 };
 use gpui::{prelude::*, *};
 
-/// Glass fill opacity: opaque enough for text over bright art, light enough to
-/// read as floating rather than as a bar.
-const GLASS_ALPHA: f32 = 0.78;
-
-/// The header material: (fill, hover fill, edge).
-pub fn glass(p: &Palette) -> (Hsla, Hsla, Hsla) {
-    (
-        Hsla {
-            a: GLASS_ALPHA,
-            ..p.bg_overlay
-        },
-        Hsla {
-            a: GLASS_ALPHA,
-            ..p.ctl_hover
-        },
-        p.line_subtle,
-    )
-}
-
 /// Apply the header material and geometry to a control surface.
 pub fn glass_surface<E: Styled>(el: E, p: &Palette) -> E {
-    let (fill, _, edge) = glass(p);
+    let (fill, _, edge) = p.glass();
     el.h(space::TOOLBAR_CONTROL)
-        .rounded(radius::MD)
+        .rounded(radius::LG)
         .bg(fill)
         .border(space::HAIRLINE)
         .border_color(edge)
@@ -271,7 +252,7 @@ impl ToolbarChip {
 impl RenderOnce for ToolbarChip {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let p = *palette(cx);
-        let (_, hover, _) = glass(&p);
+        let (_, hover, _) = p.glass();
         let active = self.count > 0;
         let ink = if active {
             p.accent_text
@@ -318,8 +299,8 @@ impl RenderOnce for ToolbarChip {
                         .flex()
                         .items_center()
                         .justify_center()
-                        .rounded(radius::LG)
-                        .bg(p.accent)
+                        .rounded(radius::XL)
+                        .bg(p.primary)
                         .type_style(typeface::CAPTION)
                         .text_color(p.on_accent)
                         .child(self.count.to_string()),
@@ -429,7 +410,7 @@ impl RenderOnce for TransferStatus {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         use kinema_core::transfer_rate::TransferSummary as S;
         let p = *palette(cx);
-        let (_, hover, _) = glass(&p);
+        let (_, hover, _) = p.glass();
         let description = self.description();
         let mut face = div()
             .id("transfers-status")
@@ -441,7 +422,7 @@ impl RenderOnce for TransferStatus {
             .gap(space::S8)
             .pl(space::S8)
             .pr(space::S12)
-            .rounded(radius::SM)
+            .rounded(radius::MD)
             .cursor_pointer()
             .text_color(p.text_secondary)
             .type_style(typeface::SMALL)
@@ -482,7 +463,7 @@ impl RenderOnce for TransferStatus {
                         .rounded(px(1.))
                         .bg(p.line_subtle)
                         .overflow_hidden()
-                        .child(div().h_full().w(relative(fraction)).bg(p.accent)),
+                        .child(div().h_full().w(relative(fraction)).bg(p.primary)),
                 );
             }
         }

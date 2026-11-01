@@ -332,7 +332,7 @@ impl Detail {
                 .bottom_0()
                 .h(s::S2)
                 .bg(p.line_subtle)
-                .child(div().h_full().w(relative(fraction)).bg(p.accent)),
+                .child(div().h_full().w(relative(fraction)).bg(p.primary)),
         )
     }
 }
