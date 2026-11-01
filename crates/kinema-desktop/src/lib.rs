@@ -3,7 +3,7 @@
 pub mod artwork;
 #[cfg(all(feature = "ui-probe", not(target_family = "wasm")))]
 pub mod design_lab;
-pub mod widgets;
+pub mod ui;
 
 // Shared service registration lets the offline probe mount production screens.
 #[cfg(not(target_family = "wasm"))]
@@ -21,6 +21,8 @@ mod catalog;
 #[cfg(not(target_family = "wasm"))]
 mod catalog_worker;
 #[cfg(not(target_family = "wasm"))]
+pub mod controllers;
+#[cfg(not(target_family = "wasm"))]
 pub mod credentials;
 #[cfg(not(target_family = "wasm"))]
 pub mod desktop_integration;
@@ -37,8 +39,6 @@ pub mod paths;
 pub mod player;
 #[cfg(not(target_family = "wasm"))]
 pub mod providers;
-#[cfg(not(target_family = "wasm"))]
-pub mod screens;
 #[cfg(not(target_family = "wasm"))]
 pub mod settings;
 #[cfg(not(target_family = "wasm"))]

@@ -1,6 +1,6 @@
 use std::{cell::Cell, process::ExitCode, rc::Rc};
 
-use kinema_desktop::screens;
+use kinema_desktop::controllers;
 
 fn main() -> ExitCode {
     let _logging_guard = match kinema_desktop::logging::init() {
@@ -16,17 +16,17 @@ fn main() -> ExitCode {
 
 fn run_desktop() -> ExitCode {
     use ::gpui::{AppContext, px, size};
-    use kinema_desktop::widgets;
+    use kinema_desktop::ui;
     let failed = Rc::new(Cell::new(false));
     let startup_failed = failed.clone();
-    let application = gpui_platform::application().with_assets(widgets::assets::Assets);
-    application.on_reopen(screens::lifecycle::show_main);
+    let application = gpui_platform::application().with_assets(ui::primitives::assets::Assets);
+    application.on_reopen(controllers::lifecycle::show_main);
     application.run(move |cx| {
-        widgets::assets::init(cx);
-        widgets::text_input::bind_keys(cx);
-        widgets::menu::bind_keys(cx);
-        screens::main_window::bind_keys(cx);
-        screens::player_window::bind_keys(cx);
+        ui::primitives::assets::init(cx);
+        ui::primitives::text_input::bind_keys(cx);
+        ui::primitives::menu::bind_keys(cx);
+        ui::views::main_window::bind_keys(cx);
+        ui::views::player_window::bind_keys(cx);
         // MainWindow installs the strong app-global coordinator owner and
         // separate Main-close / explicit-Quit routes. Settings stays independent.
         let options = gpui::WindowOptions {
@@ -51,11 +51,11 @@ fn run_desktop() -> ExitCode {
             ..Default::default()
         };
         match cx.open_window(options, |window, cx| {
-            cx.new(|cx| screens::main_window::MainWindow::new(window, cx))
+            cx.new(|cx| ui::views::main_window::MainWindow::new(window, cx))
         }) {
             Ok(main) => {
                 let _ = main.update(cx, |_, window, cx| {
-                    screens::lifecycle::start_runtime(window, cx)
+                    controllers::lifecycle::start_runtime(window, cx)
                 });
                 cx.activate(true);
             }

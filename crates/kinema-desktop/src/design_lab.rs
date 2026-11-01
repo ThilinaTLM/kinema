@@ -1,36 +1,43 @@
 //! Offline v3 native design lab. No application services or legacy presentation.
-use crate::{app_state::Resource, screens::settings_window};
+use crate::{app_state::Resource, ui, ui::views::settings_window};
 use std::{rc::Rc, sync::Arc};
 
 use gpui::{prelude::*, *};
 
-use crate::widgets::{
-    self,
-    button::{Button, ButtonSize, ButtonVariant},
-    chip::{Chip, StatusKind},
-    choice_card::ChoiceTile,
-    icon::{Icon, IconName},
-    icon_button::IconButton,
-    menu::{ContextMenuExt, Menu, MenuItem, Select},
-    notice::{Notice, NoticeKind},
-    patterns::{
-        Badge, BadgeTone, Card, Carousel, ListRow, MediaHero, ResourceView, Section, Skeleton,
-        SkeletonText, StateView, ViewState,
-    },
-    popover::Popover,
-    poster_card::{CardOpened, MembershipRequested, PosterCard},
-    progress::Progress,
-    scroll_area::ScrollArea,
-    search_field::SearchField,
-    segmented::Segmented,
-    sheet::Sheet,
-    state_toggle::{StateToggle, ToggleKind, ToggleStatus},
-    switch::{Checkbox, Radio, Switch},
-    text::TypeExt,
-    text_input::TextInput,
-    tokens::{self, Mode, Palette, space as s, typeface as t},
-    toolbar::{Toolbar, ToolbarChip, ToolbarGroup},
-    tooltip::tooltip,
+use crate::{
+    ui::blocks::MediaHero,
+    ui::blocks::ResourceView,
+    ui::blocks::StateView,
+    ui::blocks::ViewState,
+    ui::blocks::poster_card::{CardOpened, MembershipRequested, PosterCard},
+    ui::blocks::state_toggle::{StateToggle, ToggleKind, ToggleStatus},
+    ui::blocks::toolbar::{Toolbar, ToolbarChip, ToolbarGroup},
+    ui::primitives::Badge,
+    ui::primitives::BadgeTone,
+    ui::primitives::Card,
+    ui::primitives::Carousel,
+    ui::primitives::ListRow,
+    ui::primitives::Section,
+    ui::primitives::Skeleton,
+    ui::primitives::SkeletonText,
+    ui::primitives::button::{Button, ButtonSize, ButtonVariant},
+    ui::primitives::chip::{Chip, StatusKind},
+    ui::primitives::choice_card::ChoiceTile,
+    ui::primitives::icon::{Icon, IconName},
+    ui::primitives::icon_button::IconButton,
+    ui::primitives::menu::{ContextMenuExt, Menu, MenuItem, Select},
+    ui::primitives::notice::{Notice, NoticeKind},
+    ui::primitives::popover::Popover,
+    ui::primitives::progress::Progress,
+    ui::primitives::scroll_area::ScrollArea,
+    ui::primitives::search_field::SearchField,
+    ui::primitives::segmented::Segmented,
+    ui::primitives::sheet::Sheet,
+    ui::primitives::switch::{Checkbox, Radio, Switch},
+    ui::primitives::text_input::TextInput,
+    ui::primitives::tooltip::tooltip,
+    ui::theme::typography::TypeExt,
+    ui::theme::{self, Mode, Palette, space as s, typeface as t},
 };
 
 actions!(design_lab, [NextFocus, PreviousFocus]);
@@ -121,18 +128,18 @@ pub fn run_native() {
         })
         .unwrap_or((1280., 800.));
     gpui_platform::application()
-        .with_assets(widgets::assets::Assets)
+        .with_assets(ui::primitives::assets::Assets)
         .run(move |cx| {
-            widgets::assets::init(cx);
-            widgets::text_input::bind_keys(cx);
-            widgets::menu::bind_keys(cx);
-            crate::screens::main_window::bind_keys(cx);
+            ui::primitives::assets::init(cx);
+            ui::primitives::text_input::bind_keys(cx);
+            ui::primitives::menu::bind_keys(cx);
+            crate::ui::views::main_window::bind_keys(cx);
             cx.bind_keys([
                 KeyBinding::new("tab", NextFocus, Some("KinemaLab")),
                 KeyBinding::new("shift-tab", PreviousFocus, Some("KinemaLab")),
             ]);
-            tokens::set_mode(if light { Mode::Light } else { Mode::Dark }, cx);
-            tokens::set_reduce_motion(reduce, cx);
+            theme::set_mode(if light { Mode::Light } else { Mode::Dark }, cx);
+            theme::set_reduce_motion(reduce, cx);
             cx.on_window_closed(|cx, _| {
                 if cx.windows().is_empty() {
                     cx.quit();
@@ -166,10 +173,10 @@ pub fn run_native() {
             } else if scene.starts_with("library-live") {
                 cx.open_window(options, |window, cx| {
                     cx.new(|cx| {
-                        use crate::screens::{
-                            browse::LibraryFilters,
-                            coordinator::{AppCoordinator, BrowseTitle, LocalBrowseTitle},
+                        use crate::controllers::coordinator::{
+                            AppCoordinator, BrowseTitle, LocalBrowseTitle,
                         };
+                        use crate::ui::views::browse::LibraryFilters;
                         use kinema_core::{
                             MediaKind,
                             catalog_normalized::{CanonicalTitle, ExternalIdentifier, FieldValue},
@@ -238,7 +245,7 @@ pub fn run_native() {
                                     ratings: Vec::new(),
                                     updated_at: 0,
                                 };
-                                let personal = crate::screens::coordinator::PersonalTitle {
+                                let personal = crate::controllers::coordinator::PersonalTitle {
                                     title_id: TitleId::new(id)
                                         .unwrap_or_else(|| panic!("fixture id")),
                                     kind: metadata.kind,
@@ -294,7 +301,7 @@ pub fn run_native() {
                             }
                             c
                         });
-                        let main = crate::screens::main_window::MainWindow::with_coordinator(
+                        let main = crate::ui::views::main_window::MainWindow::with_coordinator(
                             coordinator,
                             window,
                             cx,
@@ -314,7 +321,7 @@ pub fn run_native() {
                 cx.open_window(options, |window, cx| {
                     cx.new(|cx| {
                         let coordinator = cx.new(|cx| {
-                            use crate::screens::coordinator::{AppCoordinator, BrowseTitle};
+                            use crate::controllers::coordinator::{AppCoordinator, BrowseTitle};
                             use kinema_core::{
                                 MediaKind,
                                 catalog::{CatalogDisplay, CatalogTitle, ImdbId, ImdbRating},
@@ -392,7 +399,7 @@ pub fn run_native() {
                             }
                             coordinator
                         });
-                        crate::screens::main_window::MainWindow::with_coordinator(
+                        crate::ui::views::main_window::MainWindow::with_coordinator(
                             coordinator,
                             window,
                             cx,
@@ -866,7 +873,7 @@ impl Lab {
             .child(ScrollArea::new("grid", self.scroll.clone()).child(rows))
     }
     fn play_sheet(&self, cx: &mut Context<Self>) -> Sheet {
-        let p = *tokens::palette(cx);
+        let p = *theme::palette(cx);
         let weak = cx.entity().downgrade();
         let mut files = col().gap_0();
         for (i, (name, size)) in [
@@ -979,7 +986,7 @@ impl Lab {
             })
     }
     fn components(&self, window: &Window, cx: &mut Context<Self>) -> Div {
-        let p = *tokens::palette(cx);
+        let p = *theme::palette(cx);
         let weak = cx.entity().downgrade();
         let mut buttons = col().child(heading("Buttons · rest / disabled / busy"));
         for (i, (name, variant)) in [
@@ -1228,7 +1235,7 @@ impl Lab {
             .child(self.patterns(window, cx))
     }
     fn menus(&self, cx: &mut Context<Self>) -> Div {
-        let p = *tokens::palette(cx);
+        let p = *theme::palette(cx);
         col()
             .p(s::S32)
             .gap(s::S24)
@@ -1343,7 +1350,7 @@ impl Lab {
     }
 
     fn hero(&self, window: &Window, series: bool, cx: &mut Context<Self>) -> Div {
-        let p = *tokens::palette(cx);
+        let p = *theme::palette(cx);
         let dark = Palette::dark();
         let band_height = f32::from(window.viewport_size().height) * 0.60;
         let width = f32::from(window.viewport_size().width) - f32::from(action_column(window));
@@ -1492,7 +1499,7 @@ impl Lab {
     }
 
     fn streams(&self, window: &Window, series: bool, cx: &mut Context<Self>) -> Div {
-        let p = *tokens::palette(cx);
+        let p = *theme::palette(cx);
         let mut streams = col()
             .gap_0()
             .w(action_column(window))
@@ -1593,7 +1600,7 @@ impl Lab {
     }
 
     fn episodes(&self, window: &Window, cx: &mut Context<Self>) -> Div {
-        let p = *tokens::palette(cx);
+        let p = *theme::palette(cx);
         let mut column = col()
             .gap_0()
             .w(action_column(window))
@@ -1688,7 +1695,7 @@ impl Lab {
     }
 
     fn detail(&self, window: &Window, cx: &mut Context<Self>) -> Div {
-        let p = *tokens::palette(cx);
+        let p = *theme::palette(cx);
         let series = self.scene.starts_with("series");
         let title = if series {
             "North Harbor"
@@ -1741,7 +1748,7 @@ impl Lab {
     }
 
     fn states(&self, window: &Window, cx: &mut Context<Self>) -> Div {
-        let p = *tokens::palette(cx);
+        let p = *theme::palette(cx);
         let width = (f32::from(window.viewport_size().width)
             - 2. * f32::from(s::GRID_INSET)
             - f32::from(s::GRID_GAP))
@@ -1881,7 +1888,7 @@ impl Lab {
 
     /// Skeleton, badge, row, card, carousel and hero specimens (pattern layer).
     fn patterns(&self, window: &Window, cx: &mut Context<Self>) -> Div {
-        let p = *tokens::palette(cx);
+        let p = *theme::palette(cx);
         let label = |text: &'static str| {
             div()
                 .type_style(t::SMALL)
@@ -1949,7 +1956,7 @@ impl Lab {
                                 img(self.poster.clone())
                                     .w(s::S32)
                                     .h(s::S32)
-                                    .rounded(tokens::radius::SM)
+                                    .rounded(theme::radius::SM)
                                     .object_fit(ObjectFit::Cover),
                             )
                             .trailing(Badge::new("1080p").uppercase(true))
@@ -2085,7 +2092,7 @@ impl Lab {
     /// Loading, error, empty, refreshing and stale-failure specimens driven by
     /// real `Resource` values through `ResourceView`, plus an enum-driven `StateView`.
     fn pattern_states(&self, cx: &mut Context<Self>) -> Div {
-        let p = *tokens::palette(cx);
+        let p = *theme::palette(cx);
         let titles = || {
             vec![
                 "North Harbor",
@@ -2139,7 +2146,7 @@ impl Lab {
                 .bg(p.bg_surface)
                 .border_1()
                 .border_color(p.line_subtle)
-                .rounded(tokens::radius::MD)
+                .rounded(theme::radius::MD)
                 .child(
                     div()
                         .type_style(t::SMALL)
@@ -2198,7 +2205,7 @@ impl Lab {
 
 impl Render for Lab {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let p = *tokens::palette(cx);
+        let p = *theme::palette(cx);
         let content = match self.scene.as_str() {
             "browse" | "library" | "sheet" | "sheet-ready" => {
                 self.browse(window, cx).into_any_element()
@@ -2255,7 +2262,7 @@ fn open_settings_fixture(
     cx: &mut App,
 ) {
     use crate::{
-        screens::coordinator::AppCoordinator,
+        controllers::coordinator::AppCoordinator,
         settings::{MotionChoice, Settings, ThemeChoice},
     };
     use settings_window::{Section, SettingsWindow};
@@ -2320,7 +2327,7 @@ fn open_settings_fixture(
 /// Offline fixture host: mounts production entities with no workers or services.
 struct ProductionScene {
     content: AnyView,
-    coordinator: Entity<crate::screens::coordinator::AppCoordinator>,
+    coordinator: Entity<crate::controllers::coordinator::AppCoordinator>,
     quit: bool,
     transfers: bool,
     _startup: Option<Task<()>>,
@@ -2328,12 +2335,11 @@ struct ProductionScene {
 }
 impl ProductionScene {
     fn new(scene: &str, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        use crate::screens::{
+        use crate::controllers::{
             coordinator::{AppCoordinator, BrowseTitle},
-            detail::Detail,
             play_session::PlaySession,
-            transfers::Transfers,
         };
+        use crate::ui::views::{detail::Detail, transfers::Transfers};
         use kinema_core::{
             MediaKind,
             catalog::{CatalogDisplay, CatalogTitle, ImdbId, ImdbRating},
@@ -2341,7 +2347,7 @@ impl ProductionScene {
         let series = scene.contains("series");
         let title=BrowseTitle::Cinemeta(CatalogTitle::new(ImdbId::new("tt1234567").unwrap_or_else(|e|panic!("fixture: {e}")),if series {MediaKind::Series}else{MediaKind::Movie},if series {"North Harbor"} else {"The Quiet Orbit"},Some("A drifting station's last engineer follows a mysterious signal across the silent ocean of space. A synthetic story, made only for this offline design fixture. Nothing here is real: the people, the station and the signal exist only so that long overviews wrap, clamp and expand the way they would for a real title with a generous synopsis.".into())).unwrap_or_else(|e|panic!("fixture: {e}")).with_display(CatalogDisplay{year:Some(2024),imdb_rating:ImdbRating::new(8.1),runtime_minutes:Some(118),genres:vec!["Drama".into(),"Sci-fi".into()],..Default::default()}));
         let title = if scene.contains("-local-") {
-            crate::screens::detail::local_fixture_title(series)
+            crate::ui::views::detail::local_fixture_title(series)
         } else if scene.contains("tmdb") {
             BrowseTitle::Tmdb(crate::tmdb::TmdbTitle {
                 id: 91,
@@ -2380,7 +2386,7 @@ impl ProductionScene {
         } else if scene.starts_with("transfers-live") {
             coordinator.update(cx, |c, _| {
                 c.sessions
-                    .push(crate::screens::coordinator::SessionSnapshot {
+                    .push(crate::controllers::coordinator::SessionSnapshot {
                         session: crate::media::PlaybackSession {
                             id: "offline-session".into(),
                             url: "http://127.0.0.1:1234/offline".into(),
@@ -2400,7 +2406,7 @@ impl ProductionScene {
                         can_reveal: true,
                     });
                 c.sessions
-                    .push(crate::screens::coordinator::SessionSnapshot {
+                    .push(crate::controllers::coordinator::SessionSnapshot {
                         session: crate::media::PlaybackSession {
                             id: "offline-local".into(),
                             url: "http://127.0.0.1:1234/media/offline-local".into(),
@@ -2469,14 +2475,14 @@ impl ProductionScene {
             if scene.starts_with("detail-live-window") {
                 let detail_route = detail.clone();
                 let main = cx.new(|cx| {
-                    crate::screens::main_window::MainWindow::with_coordinator(
+                    crate::ui::views::main_window::MainWindow::with_coordinator(
                         coordinator.clone(),
                         window,
                         cx,
                     )
                 });
                 main.update(cx, |m, _| {
-                    m.route = crate::screens::main_window::Route::Detail(detail_route)
+                    m.route = crate::ui::views::main_window::Route::Detail(detail_route)
                 });
                 main.into()
             } else {
@@ -2550,7 +2556,7 @@ impl ProductionScene {
 }
 impl Render for ProductionScene {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let p = *tokens::palette(cx);
+        let p = *theme::palette(cx);
         div()
             .size_full()
             .relative()
@@ -2588,7 +2594,7 @@ impl Render for ProductionScene {
                 )
             })
             .when(self.quit, |el| {
-                el.child(crate::screens::quit::confirmation(
+                el.child(crate::ui::views::quit::confirmation(
                     self.coordinator.clone(),
                     self.focus.clone(),
                 ))

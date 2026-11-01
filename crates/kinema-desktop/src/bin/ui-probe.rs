@@ -1,5 +1,5 @@
 //! Offline native v3 lab; see docs/design/ui-probe.md.
-use kinema_desktop::{player::PlayerChoice, screens::player_window};
+use kinema_desktop::{player::PlayerChoice, ui::views::player_window};
 
 #[derive(Debug, PartialEq)]
 struct PlayerProbeArgs {
