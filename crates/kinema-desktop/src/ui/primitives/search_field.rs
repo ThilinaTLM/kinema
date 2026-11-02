@@ -6,7 +6,6 @@ use crate::{
     ui::theme::{palette, radius, space, typeface},
 };
 use gpui::{prelude::*, *};
-use std::time::Duration;
 
 /// Live queries are delayed; submissions are immediate. Read the query via `text`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,7 +38,7 @@ impl SearchField {
                     let generation = this.generation;
                     this.debounce = Some(cx.spawn(async move |this, cx| {
                         cx.background_executor()
-                            .timer(Duration::from_millis(300))
+                            .timer(crate::ui::theme::motion::timing::SEARCH_DEBOUNCE)
                             .await;
                         let _ = this.update(cx, |this, cx| {
                             if this.generation == generation {

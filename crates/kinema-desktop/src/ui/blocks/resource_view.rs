@@ -9,11 +9,12 @@ use gpui::{prelude::*, *};
 
 use crate::{
     app_state::Resource,
-    ui::motion::{self, Motion},
+    ui::motion::{self, AnimateExt, transition::CROSSFADE},
     ui::primitives::Icon,
     ui::primitives::IconName,
     ui::primitives::button::Button,
     ui::primitives::notice::{Notice, NoticeKind},
+    ui::theme::motion::timing,
     ui::theme::typography::TypeExt,
     ui::theme::{palette, space, typeface},
 };
@@ -98,8 +99,6 @@ struct Transition {
 
 /// Indeterminate sweep height of the inline refresh indicator.
 const REFRESH_BAR: Pixels = space::S2;
-/// Sweep period in Disclose durations.
-const REFRESH_CYCLES: u32 = 6;
 
 #[derive(IntoElement)]
 pub struct StateView {
@@ -224,7 +223,6 @@ fn centered(icon: IconName, ink: Hsla, title: SharedString, hint: Option<SharedS
 
 fn refresh_bar(cx: &App) -> AnyElement {
     let p = palette(cx);
-    let duration = motion::duration(Motion::Disclose, cx);
     let track = div()
         .absolute()
         .top_0()
@@ -232,7 +230,7 @@ fn refresh_bar(cx: &App) -> AnyElement {
         .right_0()
         .h(REFRESH_BAR)
         .overflow_hidden();
-    if duration.is_zero() {
+    if motion::reduced(cx) {
         return track
             .child(div().size_full().bg(p.text_muted))
             .into_any_element();
@@ -245,11 +243,9 @@ fn refresh_bar(cx: &App) -> AnyElement {
                 .w(relative(0.25))
                 .rounded_full()
                 .bg(p.primary)
-                .with_animation(
-                    "refresh-sweep",
-                    Animation::new(duration * REFRESH_CYCLES).repeat(),
-                    |el, t| el.left(relative(t * 1.25 - 0.25)),
-                ),
+                .animate_loop("refresh-sweep", timing::SPIN_PERIOD, cx, |el, t| {
+                    el.left(relative(t * 1.25 - 0.25))
+                }),
         )
         .into_any_element()
 }
@@ -257,7 +253,7 @@ fn refresh_bar(cx: &App) -> AnyElement {
 impl RenderOnce for StateView {
     fn render(mut self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let p = *palette(cx);
-        let fade = motion::duration(Motion::Crossfade, cx);
+        let fade = motion::duration(CROSSFADE, cx);
         let transition = window.use_keyed_state((self.id.clone(), "transition"), cx, |_, _| {
             Transition::default()
         });
@@ -317,15 +313,12 @@ impl RenderOnce for StateView {
                         .into_any_element()
                 };
                 // Always the same wrapper so the content keeps its identity;
-                // a 1 ms fade is an instant switch.
-                let content_fade = if fade.is_zero() || settled.is_none() {
-                    std::time::Duration::from_millis(1)
-                } else {
-                    fade
-                };
-                let body = div().w_full().child(body).with_animation(
+                // without a loading-to-content switch it is an instant no-op.
+                let body = div().w_full().child(body).animate_stable(
                     (self.id.clone(), format!("fade-{epoch}")),
-                    Animation::new(content_fade).with_easing(motion::ease_out_cubic),
+                    CROSSFADE,
+                    settled.is_some(),
+                    cx,
                     |el, t| el.opacity(t),
                 );
                 base.when(self.stale_error && self.state == ViewState::Content, |el| {
@@ -359,10 +352,10 @@ impl RenderOnce for StateView {
                                     .right_0()
                                     .overflow_hidden()
                                     .child(skeleton)
-                                    .with_animation(
+                                    .animate_exit(
                                         (self.id.clone(), format!("skeleton-out-{epoch}")),
-                                        Animation::new(fade).with_easing(motion::ease_out_cubic),
-                                        |el, t| el.opacity(1.0 - t),
+                                        CROSSFADE,
+                                        cx,
                                     )
                             }))
                         }),

@@ -200,7 +200,7 @@ impl Detail {
             .tab_stop(true)
             .cursor_pointer()
             .hover(move |el| el.shadow(elevation::md(&p)).border_color(p.line_control))
-            .focus_visible(move |el| el.shadow(vec![focus_ring(p.focus_ring)]))
+            .focus_visible(move |el| el.shadow(vec![focus_ring(&p)]))
             .tooltip(tooltip(title.name.clone()));
         if let Some(image) = self.image(
             title.poster_url(),

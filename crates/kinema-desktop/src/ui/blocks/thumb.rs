@@ -6,14 +6,13 @@
 //! fallback dimmed under the pulsing skeleton. Reduced motion makes the pulse
 //! static. Overlays (badges, buttons) are added with [`Thumb::overlay`].
 use crate::{
-    ui::motion,
+    ui::motion::{self, AnimateExt},
+    ui::theme::motion::timing,
     ui::theme::typography::TypeExt,
     ui::theme::{Palette, palette, space, typeface},
 };
 use gpui::{prelude::*, *};
-use std::{sync::Arc, time::Duration};
-
-const PULSE: Duration = Duration::from_millis(1600);
+use std::sync::Arc;
 
 /// What a thumb shows. Generic over the image handle so the rules are testable.
 #[derive(Clone, Debug, PartialEq)]
@@ -167,11 +166,9 @@ impl RenderOnce for Thumb {
             frame = frame.child(if motion::reduced(cx) {
                 sheen.opacity(STATIC_PULSE).into_any_element()
             } else {
-                sheen
-                    .with_animation("thumb-pulse", Animation::new(PULSE).repeat(), |el, t| {
-                        el.opacity(pulse_opacity(t))
-                    })
-                    .into_any_element()
+                sheen.animate_loop("thumb-pulse", timing::PULSE_PERIOD, cx, |el, t| {
+                    el.opacity(pulse_opacity(t))
+                })
             });
         }
         if let Some(label) = layers.label {

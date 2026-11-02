@@ -133,7 +133,7 @@ impl StreamRow {
             .cursor_pointer()
             .when(selected, |el| el.bg(p.accent_tint))
             .when(!selected, |el| el.hover(move |s| s.bg(p.bg_surface)))
-            .focus_visible(move |s| s.shadow(vec![focus_ring(p.focus_ring)]))
+            .focus_visible(move |s| s.shadow(vec![focus_ring(&p)]))
             .when(selected, |el| {
                 el.child(
                     div()

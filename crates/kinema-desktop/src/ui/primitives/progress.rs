@@ -1,6 +1,7 @@
 //! Thin rounded progress bars and a deliberately quiet busy indicator.
 use crate::{
-    ui::motion::{self, Motion},
+    ui::motion::{self, AnimateExt},
+    ui::theme::motion::timing,
     ui::theme::{palette, space},
 };
 use gpui::{prelude::*, *};
@@ -40,16 +41,12 @@ impl RenderOnce for Progress {
             Some(value) => fill.w(relative(value)).into_any_element(),
             None => {
                 let fill = fill.w(relative(0.25));
-                let duration = motion::duration(Motion::Disclose, cx);
-                if duration.is_zero() {
+                if motion::reduced(cx) {
                     fill.left(relative(0.375)).into_any_element()
                 } else {
-                    fill.with_animation(
-                        self.id.clone(),
-                        Animation::new(duration * 6).repeat(),
-                        |el, t| el.left(relative(t * 1.25 - 0.25)),
-                    )
-                    .into_any_element()
+                    fill.animate_loop(self.id.clone(), timing::SPIN_PERIOD, cx, |el, t| {
+                        el.left(relative(t * 1.25 - 0.25))
+                    })
                 }
             }
         };

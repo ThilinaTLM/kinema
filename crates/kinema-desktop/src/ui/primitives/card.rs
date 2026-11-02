@@ -4,12 +4,13 @@ use std::rc::Rc;
 use gpui::{prelude::*, *};
 
 use crate::{
-    ui::motion::{self, Motion},
+    ui::motion::{
+        interaction::{focus_ring, lerp_shadows, state_spring},
+        transition::HOVER,
+    },
     ui::primitives::button::ClickHandler,
     ui::theme::{elevation, palette, radius, space},
 };
-
-use crate::ui::motion::interaction::{focus_ring, lerp_shadows, spring_config};
 
 #[derive(IntoElement)]
 pub struct Card {
@@ -98,14 +99,13 @@ impl RenderOnce for Card {
         };
         let hovered = window.use_keyed_state(id.clone(), cx, |_, _| false);
         let target = self.lift && *hovered.read(cx);
-        let duration = motion::duration(Motion::Hover, cx);
         let face = face
             .id(id.clone())
             .role(Role::Button)
             .focusable()
             .tab_stop(true)
             .cursor_pointer()
-            .focus_visible(move |s| s.shadow(vec![focus_ring(p.focus_ring)]))
+            .focus_visible(move |s| s.shadow(vec![focus_ring(&p)]))
             .on_hover(move |value, _, cx| {
                 hovered.update(cx, |state, cx| {
                     *state = *value;
@@ -128,14 +128,6 @@ impl RenderOnce for Card {
             el.bg(rest_fill.blend(hover_fill.opacity(t)))
                 .shadow(lerp_shadows(&from, &to, t))
         };
-        if duration.is_zero() {
-            return apply(face, if target { 1.0 } else { 0.0 }).into_any_element();
-        }
-        face.with_spring(
-            (id, "lift"),
-            SpringAnimation::new(spring_config(duration)).to(if target { 1.0_f32 } else { 0.0 }),
-            move |el, t| apply(el, t.clamp(0.0, 1.0)),
-        )
-        .into_any_element()
+        state_spring(face, (id, "lift"), target, HOVER, cx, apply)
     }
 }

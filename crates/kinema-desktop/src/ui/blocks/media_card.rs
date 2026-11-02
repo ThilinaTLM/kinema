@@ -100,7 +100,7 @@ impl RenderOnce for MediaCard {
             .id(self.id)
             .size_full()
             .relative()
-            .top(px(-hv::LIFT_PX * lift))
+            .top(-hv::LIFT * lift)
             .flex()
             .flex_col()
             .overflow_hidden()
@@ -144,6 +144,6 @@ mod tests {
 
     #[test]
     fn lift_distance_is_the_poster_card_lift() {
-        assert_eq!(hv::LIFT_PX, 3.);
+        assert_eq!(hv::LIFT, px(4.));
     }
 }

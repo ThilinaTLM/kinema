@@ -1,6 +1,6 @@
 //! Controlled segmented selection, with wraparound arrow-key navigation.
 use crate::{
-    ui::motion,
+    ui::motion::{interaction::state_spring, transition::FEEDBACK},
     ui::primitives::Icon,
     ui::primitives::IconName,
     ui::theme::typography::TypeExt,
@@ -78,7 +78,6 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for Segmented<T> {
             .iter()
             .position(|(value, _)| value == &self.selected)
             .unwrap_or(0);
-        let duration = motion::duration(motion::Motion::Feedback, cx);
         let options = self.options.clone();
         let keyboard_handler = self.on_change.clone();
         let icons = self.icons;
@@ -177,31 +176,17 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for Segmented<T> {
                                     },
                                 ));
                             // Selected state is a raised pill that cross-fades, not an underline.
-                            let face = if duration.is_zero() {
-                                face.bg(if active { pill } else { transparent_black() })
-                                    .text_color(if active { active_ink } else { inactive_ink })
-                                    .into_any_element()
-                            } else {
-                                face.with_spring(
-                                    "segment-pill",
-                                    SpringAnimation::new(SpringConfig::new(
-                                        (6.0 / duration.as_secs_f32()).powi(2),
-                                        12.0 / duration.as_secs_f32(),
-                                        1.0,
-                                    ))
-                                    .to(if active {
-                                        1.0_f32
-                                    } else {
-                                        0.0
-                                    }),
-                                    move |el, t| {
-                                        let t = t.clamp(0.0, 1.0);
-                                        el.bg(pill.opacity(t))
-                                            .text_color(inactive_ink.blend(active_ink.opacity(t)))
-                                    },
-                                )
-                                .into_any_element()
-                            };
+                            let face = state_spring(
+                                face,
+                                "segment-pill",
+                                active,
+                                FEEDBACK,
+                                cx,
+                                move |el, t| {
+                                    el.bg(pill.opacity(t))
+                                        .text_color(inactive_ink.blend(active_ink.opacity(t)))
+                                },
+                            );
                             div()
                                 .id(("segment", index))
                                 .relative()

@@ -89,7 +89,7 @@ impl RenderOnce for ChoiceCard {
             .aria_label(label)
             .aria_selected(selected)
             .when(!selected, |el| el.hover(move |s| s.bg(p.ctl_hover)))
-            .focus_visible(move |s| s.shadow(vec![focus_ring(p.focus_ring)]))
+            .focus_visible(move |s| s.shadow(vec![focus_ring(&p)]))
             .child(mark)
             .child(
                 div()
@@ -196,7 +196,7 @@ impl RenderOnce for ChoiceChip {
             .aria_label(label)
             .aria_selected(selected)
             .when(!selected, |el| el.hover(move |s| s.bg(p.ctl_hover)))
-            .focus_visible(move |s| s.shadow(vec![focus_ring(p.focus_ring)]))
+            .focus_visible(move |s| s.shadow(vec![focus_ring(&p)]))
             .when(self.multi && selected, |el| {
                 el.pl(space::S8).child(
                     Icon::new(IconName::Check)
@@ -317,7 +317,7 @@ impl RenderOnce for ChoiceTile {
             .aria_label(label)
             .aria_selected(selected)
             .when(!selected, |el| el.hover(move |s| s.bg(p.ctl_hover)))
-            .focus_visible(move |s| s.shadow(vec![focus_ring(p.focus_ring)]))
+            .focus_visible(move |s| s.shadow(vec![focus_ring(&p)]))
             .child(
                 div()
                     .flex()

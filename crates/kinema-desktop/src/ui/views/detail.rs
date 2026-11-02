@@ -8,7 +8,10 @@ use crate::{
     ui::blocks::StateView,
     ui::blocks::ViewSelection,
     ui::blocks::select_view,
-    ui::motion::{self, Motion},
+    ui::motion::{
+        AnimateExt,
+        transition::{COLUMN, CONTENT},
+    },
     ui::primitives::Badge,
     ui::primitives::BadgeTone,
     ui::primitives::Section,
@@ -1173,19 +1176,19 @@ impl Render for Detail {
             Page::Streams => self.streams_page(window, cx),
         };
         self.apply_pending_focus(window, cx);
-        let duration = motion::duration(Motion::Column, cx);
         let direction = self.page_direction;
         // Overview content runs under the transparent header (hero art reaches
         // the window top). The Streams page paints its own background to y=0 and
         // insets its content, so the header blends without a seam.
         let page = div().relative().size_full().child(page);
-        let page = if self.page_generation > 0 && !duration.is_zero() {
-            page.with_animation(
+        let page = if self.page_generation > 0 {
+            let travel = COLUMN.effect.distance() * direction;
+            page.animate_with(
                 ("detail-page", self.page_generation),
-                Animation::new(duration).with_easing(motion::ease_out_cubic),
-                move |el, t| el.left(s::S24 * direction * (1. - t)).opacity(t),
+                COLUMN,
+                cx,
+                move |el, t| el.left(travel * (1. - t)).opacity(t),
             )
-            .into_any_element()
         } else {
             page.into_any_element()
         };
@@ -1194,18 +1197,7 @@ impl Render for Detail {
             .relative()
             .size_full()
             .child(page);
-        let duration = motion::duration(Motion::Content, cx);
-        let content = if duration.is_zero() {
-            content.into_any_element()
-        } else {
-            content
-                .with_animation(
-                    "detail-open",
-                    Animation::new(duration).with_easing(motion::ease_out_cubic),
-                    |el, t| el.opacity(t).top(s::S8 * (1. - t)),
-                )
-                .into_any_element()
-        };
+        let content = content.animate_enter("detail-open", CONTENT, cx);
         crate::ui::blocks::ambient_background::AmbientBackground::new(ambient, mode)
             .child(div().relative().size_full().child(content))
     }

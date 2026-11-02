@@ -3,19 +3,17 @@
 //! A window-keyed registry owns only a weak reference: opening a context menu
 //! dismisses the previous one without keeping an unmounted trigger alive.
 use crate::{
-    ui::motion::{self, Motion},
+    ui::motion::{
+        Closed, Presence,
+        transition::{POPUP_IN, POPUP_OUT},
+    },
     ui::primitives::icon::{Icon, IconName},
     ui::primitives::tooltip::tooltip,
     ui::theme::typography::TypeExt,
     ui::theme::{elevation, palette, radius, space, typeface},
 };
 use gpui::{prelude::*, *};
-use std::{
-    cell::Cell,
-    collections::HashMap,
-    rc::Rc,
-    time::{Duration, Instant},
-};
+use std::{collections::HashMap, rc::Rc, time::Instant};
 
 pub type MenuHandler = Rc<dyn Fn(&mut Window, &mut App)>;
 
@@ -131,10 +129,7 @@ pub struct Menu {
     focus: FocusHandle,
     previous: Option<FocusHandle>,
     last_type: Option<Instant>,
-    closing: bool,
-    close_task: Option<Task<()>>,
-    progress: Rc<Cell<f32>>,
-    close_from: f32,
+    presence: Entity<Presence>,
     scroll: ScrollHandle,
     child_scroll: ScrollHandle,
     _window_subscriptions: Vec<Subscription>,
@@ -185,6 +180,7 @@ impl Menu {
         }) {
             nav.selected = Some(index);
         }
+        let presence = cx.new(|_| Presence::opened(POPUP_IN, POPUP_OUT));
         let initial_size = window.viewport_size();
         let mut was_active = window.is_window_active();
         Self {
@@ -195,13 +191,12 @@ impl Menu {
             focus,
             previous,
             last_type: None,
-            closing: false,
-            close_task: None,
-            progress: Rc::new(Cell::new(0.)),
-            close_from: 1.,
+            presence: presence.clone(),
             scroll: ScrollHandle::new(),
             child_scroll: ScrollHandle::new(),
             _window_subscriptions: vec![
+                cx.observe(&presence, |_, _, cx| cx.notify()),
+                cx.subscribe(&presence, |_, _, _: &Closed, cx| cx.emit(DismissEvent)),
                 cx.observe_window_bounds(window, move |this, window, cx| {
                     if window.viewport_size() != initial_size {
                         this.dismiss(window, cx);
@@ -225,28 +220,23 @@ impl Menu {
         }
         &self.items
     }
+    /// Open and accepting input (not playing its exit).
+    fn is_open(&self, cx: &App) -> bool {
+        self.presence.read(cx).is_open()
+    }
     pub fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.closing {
+        if !self.is_open(cx) {
             return;
         }
-        self.close_from = self.progress.get();
-        self.closing = true;
         if let Some(previous) = &self.previous {
             previous.focus(window, cx);
         }
-        let delay = motion::duration(Motion::PopupOut, cx);
-        if delay.is_zero() {
-            cx.emit(DismissEvent);
-        } else {
-            self.close_task = Some(cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(delay).await;
-                let _ = this.update(cx, |_, cx| cx.emit(DismissEvent));
-            }));
-        }
+        // `DismissEvent` follows once the exit has played.
+        self.presence.update(cx, |presence, cx| presence.close(cx));
         cx.notify();
     }
     fn activate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.closing {
+        if !self.is_open(cx) {
             return;
         }
         let Some(i) = self.nav.selected else {
@@ -271,7 +261,7 @@ impl Menu {
         }
     }
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if self.closing {
+        if !self.is_open(cx) {
             return;
         }
         let items = self.active_items().to_vec();
@@ -306,8 +296,10 @@ impl Menu {
                     self.nav.type_ahead(
                         &items,
                         text,
-                        self.last_type
-                            .is_none_or(|t| now.duration_since(t) > Duration::from_millis(700)),
+                        self.last_type.is_none_or(|t| {
+                            now.duration_since(t)
+                                > crate::ui::theme::motion::timing::TYPEAHEAD_RESET
+                        }),
                     );
                     self.last_type = Some(now);
                 } else {
@@ -447,7 +439,7 @@ impl Menu {
                     if let Some(reason) = disabled_reason {
                         row = row
                             .tooltip(tooltip(reason.clone()))
-                            .tooltip_show_delay(Duration::from_millis(500));
+                            .tooltip_show_delay(crate::ui::theme::motion::timing::TOOLTIP_DELAY);
                     }
                 }
                 MenuItem::Submenu { label, .. } => {
@@ -466,12 +458,6 @@ impl Menu {
 }
 impl Render for Menu {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.closing
-            && motion::duration(Motion::PopupOut, cx).is_zero()
-            && self.close_task.take().is_some()
-        {
-            cx.emit(DismissEvent);
-        }
         let mut panel = div()
             .id("menu")
             .key_context("KinemaMenu")
@@ -487,35 +473,7 @@ impl Render for Menu {
         {
             panel = panel.child(self.panel(items, true, window, cx));
         }
-        let closing = self.closing;
-        let token = if closing {
-            Motion::PopupOut
-        } else {
-            Motion::PopupIn
-        };
-        let duration = motion::duration(token, cx);
-        let progress_value = self.progress.clone();
-        let close_from = self.close_from;
-        if duration.is_zero() {
-            progress_value.set(1.);
-            panel.into_any_element()
-        } else {
-            panel
-                .with_animation(
-                    if closing { "menu-out" } else { "menu-in" },
-                    Animation::new(duration).with_easing(motion::ease_out_cubic),
-                    move |el, progress| {
-                        let t = if closing {
-                            close_from * (1. - progress)
-                        } else {
-                            progress
-                        };
-                        progress_value.set(t);
-                        el.opacity(t).relative().top(px(4. * (1. - t)))
-                    },
-                )
-                .into_any_element()
-        }
+        self.presence.read(cx).animate(panel, "menu", cx)
     }
 }
 
@@ -934,6 +892,7 @@ mod tests {
 mod interaction_tests {
     use super::*;
     use core::prelude::v1::test;
+    use std::cell::Cell;
 
     struct ContextFixture {
         root: FocusHandle,
@@ -1020,7 +979,7 @@ mod interaction_tests {
         cx.run_until_parked();
         cx.simulate_window_resize(handle.into(), size(px(640.), px(480.)));
         cx.run_until_parked();
-        let dismissed = handle.update(cx, |menu, _, _| assert!(menu.closing));
+        let dismissed = handle.update(cx, |menu, _, cx| assert!(!menu.is_open(cx)));
         assert!(dismissed.is_ok(), "menu update failed: {dismissed:?}");
     }
 
@@ -1040,9 +999,9 @@ mod interaction_tests {
         // Open after initial window setup/bounds notifications have settled,
         // as a user-opened menu would be.
         let menu = cx.update(|window, cx| cx.new(|cx| Menu::new(vec![], window, cx)));
-        cx.update(|_, cx| assert!(!menu.read(cx).closing));
+        cx.update(|_, cx| assert!(menu.read(cx).is_open(cx)));
         cx.deactivate_window();
-        cx.update(|_, cx| assert!(menu.read(cx).closing));
+        cx.update(|_, cx| assert!(!menu.read(cx).is_open(cx)));
     }
 
     #[gpui::test]

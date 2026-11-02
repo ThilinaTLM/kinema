@@ -1,6 +1,6 @@
 //! Controlled rounded boolean controls. Switch is for immediate settings only.
 use crate::{
-    ui::motion,
+    ui::motion::{interaction::state_spring, transition::FEEDBACK},
     ui::primitives::Icon,
     ui::primitives::IconName,
     ui::theme::typography::TypeExt,
@@ -139,7 +139,6 @@ impl RenderOnce for Checkbox {
 }
 fn switch_indicator(checked: bool, disabled: bool, cx: &App) -> AnyElement {
     let p = *palette(cx);
-    let duration = motion::duration(motion::Motion::Feedback, cx);
     let knob = div()
         .relative()
         .size(space::S12)
@@ -151,24 +150,10 @@ fn switch_indicator(checked: bool, disabled: bool, cx: &App) -> AnyElement {
         } else {
             p.text_secondary
         });
-    let target = if checked { 1.0_f32 } else { 0.0 };
-    let knob = if duration.is_zero() {
-        knob.left(space::HAIRLINE + space::S12 * target)
-            .into_any_element()
-    } else {
-        // Retarget from the current position when the setting changes mid-slide.
-        knob.with_spring(
-            "switch-knob",
-            SpringAnimation::new(SpringConfig::new(
-                (6.0 / duration.as_secs_f32()).powi(2),
-                12.0 / duration.as_secs_f32(),
-                1.0,
-            ))
-            .to(target),
-            |el, t| el.left(space::HAIRLINE + space::S12 * t.clamp(0.0, 1.0)),
-        )
-        .into_any_element()
-    };
+    // Retarget from the current position when the setting changes mid-slide.
+    let knob = state_spring(knob, "switch-knob", checked, FEEDBACK, cx, |el, t| {
+        el.left(space::HAIRLINE + space::S12 * t)
+    });
     div()
         .relative()
         .w(space::CONTROL_HEIGHT)

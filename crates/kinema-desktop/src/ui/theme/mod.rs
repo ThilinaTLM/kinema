@@ -9,6 +9,7 @@ use gpui::{App, Global};
 pub mod color;
 pub mod elevation;
 pub mod layout;
+pub mod motion;
 pub mod opacity;
 pub mod radius;
 pub mod size;

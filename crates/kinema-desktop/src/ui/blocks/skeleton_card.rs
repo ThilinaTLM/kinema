@@ -1,13 +1,11 @@
 //! Noninteractive loading placeholder using the poster card's geometry.
 //! A gentle pulse runs unless reduced motion is on, where it is static.
 use crate::{
-    ui::motion,
+    ui::motion::{self, AnimateExt},
+    ui::theme::motion::timing,
     ui::theme::{self, radius},
 };
 use gpui::{prelude::*, *};
-use std::time::Duration;
-
-const PULSE: Duration = Duration::from_millis(1600);
 
 #[derive(IntoElement)]
 pub struct SkeletonCard {
@@ -31,17 +29,11 @@ impl RenderOnce for SkeletonCard {
         let sheen = if motion::reduced(cx) {
             sheen.opacity(0.35).into_any_element()
         } else {
-            sheen
-                .with_animation(
-                    "skeleton-pulse",
-                    Animation::new(PULSE).repeat().with_easing(|t| {
-                        // 0 -> 1 -> 0 smooth triangle wave.
-                        let w = 1. - (2. * t - 1.).abs();
-                        w * w * (3. - 2. * w)
-                    }),
-                    |el, t| el.opacity(0.15 + 0.5 * t),
-                )
-                .into_any_element()
+            sheen.animate_loop("skeleton-pulse", timing::PULSE_PERIOD, cx, |el, t| {
+                // 0 -> 1 -> 0 smooth triangle wave.
+                let w = 1. - (2. * t - 1.).abs();
+                el.opacity(0.15 + 0.5 * (w * w * (3. - 2. * w)))
+            })
         };
         div()
             .w(px(self.width))

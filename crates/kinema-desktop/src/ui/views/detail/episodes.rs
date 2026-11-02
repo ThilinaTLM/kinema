@@ -605,7 +605,7 @@ impl Detail {
             })
             .cursor_pointer()
             .hover(move |el| if selected { el } else { el.bg(hover) })
-            .focus_visible(move |el| el.shadow(vec![focus_ring(p.focus_ring)]))
+            .focus_visible(move |el| el.shadow(vec![focus_ring(&p)]))
             .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                 click_focus.focus(window, cx)
             })
@@ -788,7 +788,7 @@ impl Detail {
                                 .pt(s::S4)
                                 .type_style(t::SMALL)
                                 .text_color(p.accent_text)
-                                .focus_visible(move |el| el.shadow(vec![focus_ring(p.focus_ring)]))
+                                .focus_visible(move |el| el.shadow(vec![focus_ring(&p)]))
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.season_overview_open = (!open).then_some(season);
                                     cx.notify();

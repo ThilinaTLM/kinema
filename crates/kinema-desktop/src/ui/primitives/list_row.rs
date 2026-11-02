@@ -5,13 +5,14 @@ use std::rc::Rc;
 use gpui::{prelude::*, *};
 
 use crate::{
-    ui::motion::{self, Motion},
+    ui::motion::{
+        interaction::{StateStyle, state_fill},
+        transition::FEEDBACK,
+    },
     ui::primitives::button::ClickHandler,
     ui::theme::typography::TypeExt,
     ui::theme::{palette, radius, space, typeface},
 };
-
-use crate::ui::motion::interaction::{fade_fill, focus_ring};
 
 /// Gap between the row highlight and the container edge.
 const INSET: Pixels = space::S4;
@@ -87,6 +88,7 @@ impl RenderOnce for ListRow {
         } else {
             (transparent_black(), p.ctl_hover)
         };
+        let state = StateStyle::new(&p, rest, hover, hover, p.text_primary);
         // The focus ring is an inset shadow: no border, so focus never shifts layout.
         let min_height = if self.subtitle.is_some() {
             space::ROW_TWO_LINE
@@ -107,10 +109,8 @@ impl RenderOnce for ListRow {
             .role(Role::ListItem)
             .aria_label(self.title.clone())
             .when(interactive, |el| {
-                el.focusable()
-                    .tab_stop(true)
-                    .cursor_pointer()
-                    .focus_visible(move |s| s.shadow(vec![focus_ring(p.focus_ring)]))
+                state
+                    .focus(el.focusable().tab_stop(true).cursor_pointer())
                     .on_hover(move |value, _, cx| {
                         hovered.update(cx, |state, cx| {
                             *state = *value;
@@ -164,13 +164,14 @@ impl RenderOnce for ListRow {
                 el.child(div().flex_none().child(trailing))
             });
         let key = (self.id, "fill");
-        div().w_full().px(INSET).child(fade_fill(
+        div().w_full().px(INSET).child(state_fill(
             face,
             ElementId::from(key),
             active,
             rest,
             hover,
-            motion::duration(Motion::Feedback, cx),
+            FEEDBACK,
+            cx,
         ))
     }
 }

@@ -1,16 +1,13 @@
 //! Loading placeholders. They pulse in phase with each other and are fully
 //! static when reduced motion is on.
-use std::time::Duration;
-
 use gpui::{prelude::*, *};
 
 use crate::{
-    ui::motion::{self, Motion},
+    ui::motion::{self, AnimateExt},
+    ui::theme::motion::timing,
     ui::theme::{palette, radius, space},
 };
 
-/// Pulse cycle length is this many Crossfade durations (1.2 s nominal).
-const PULSE_CYCLES: u32 = 5;
 const PULSE_MIN: f32 = 0.5;
 /// Default footprint of a [`SkeletonShape::Line`] / circle.
 const LINE_HEIGHT: Pixels = space::S12;
@@ -61,27 +58,16 @@ impl Styled for Skeleton {
     }
 }
 
-/// `None` means static (reduced motion).
-fn pulse_period(cx: &App) -> Option<Duration> {
-    let base = motion::duration(Motion::Crossfade, cx);
-    (!base.is_zero()).then(|| base * PULSE_CYCLES)
-}
-
 impl RenderOnce for Skeleton {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let el = self.base.bg(palette(cx).bg_placeholder);
-        match pulse_period(cx) {
-            None => el.into_any_element(),
-            Some(period) => el
-                .with_animation(
-                    "skeleton-pulse",
-                    Animation::new(period)
-                        .repeat_synced()
-                        .with_easing(pulsating_between(PULSE_MIN, 1.0)),
-                    |el, value| el.opacity(value),
-                )
-                .into_any_element(),
+        if motion::reduced(cx) {
+            return el.into_any_element();
         }
+        let pulse = pulsating_between(PULSE_MIN, 1.0);
+        el.animate_loop("skeleton-pulse", timing::PULSE_PERIOD, cx, move |el, t| {
+            el.opacity(pulse(t))
+        })
     }
 }
 

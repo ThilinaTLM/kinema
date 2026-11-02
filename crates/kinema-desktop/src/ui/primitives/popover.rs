@@ -1,56 +1,39 @@
 //! Anchored, nonmodal, focus-returning panels built directly on GPUI.
 use crate::{
-    ui::motion::{self, Motion},
+    ui::motion::{
+        Presence,
+        transition::{POPUP_IN, POPUP_OUT},
+    },
     ui::theme::{elevation, palette, radius, space},
 };
 use gpui::{prelude::*, *};
-use std::{cell::Cell, rc::Rc};
 
 struct PopoverState {
-    open: bool,
-    closing: bool,
+    presence: Entity<Presence>,
     focus: FocusHandle,
     trigger: FocusHandle,
-    task: Option<Task<()>>,
-    progress: Rc<Cell<f32>>,
-    from: f32,
-    generation: usize,
+    _presence: Subscription,
 }
 impl PopoverState {
+    fn is_open(&self, cx: &App) -> bool {
+        self.presence.read(cx).is_open()
+    }
+
     fn show(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.open && !self.closing {
+        if self.is_open(cx) {
             return;
         }
-        self.task = None;
-        self.from = if self.open { self.progress.get() } else { 0. };
-        self.generation = self.generation.wrapping_add(1);
-        self.open = true;
-        self.closing = false;
+        self.presence.update(cx, |presence, cx| presence.open(cx));
         self.focus.focus(window, cx);
         cx.notify();
     }
 
     fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.open || self.closing {
+        if !self.is_open(cx) {
             return;
         }
-        self.from = self.progress.get();
-        self.closing = true;
         self.trigger.focus(window, cx);
-        let delay = motion::duration(Motion::PopupOut, cx);
-        if delay.is_zero() {
-            self.open = false;
-            self.closing = false;
-        } else {
-            self.task = Some(cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(delay).await;
-                let _ = this.update(cx, |this, cx| {
-                    this.open = false;
-                    this.closing = false;
-                    cx.notify();
-                });
-            }));
-        }
+        self.presence.update(cx, |presence, cx| presence.close(cx));
         cx.notify();
     }
 }
@@ -61,7 +44,7 @@ pub struct PopoverHandle(Entity<PopoverState>);
 impl PopoverHandle {
     #[cfg(all(test, feature = "ui-probe-test"))]
     pub(crate) fn is_open(&self, cx: &App) -> bool {
-        self.0.read(cx).open && !self.0.read(cx).closing
+        self.0.read(cx).is_open(cx)
     }
 
     /// Open the existing panel and focus its content.
@@ -151,30 +134,23 @@ impl Popover {
 }
 impl RenderOnce for Popover {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let state = window.use_keyed_state(self.id.clone(), cx, |_, cx| PopoverState {
-            open: false,
-            closing: false,
-            focus: cx.focus_handle(),
-            trigger: cx.focus_handle().tab_stop(true),
-            task: None,
-            progress: Rc::new(Cell::new(0.)),
-            from: 0.,
-            generation: 0,
+        let state = window.use_keyed_state(self.id.clone(), cx, |_, cx| {
+            let presence = cx.new(|_| Presence::new(POPUP_IN, POPUP_OUT));
+            PopoverState {
+                _presence: cx.observe(&presence, |_, _, cx| cx.notify()),
+                presence,
+                focus: cx.focus_handle(),
+                trigger: cx.focus_handle().tab_stop(true),
+            }
         });
         if let Some(callback) = self.on_handle {
             callback(PopoverHandle(state.clone()));
         }
-        if state.read(cx).closing && motion::duration(Motion::PopupOut, cx).is_zero() {
-            state.update(cx, |this, _| {
-                this.task = None;
-                this.open = false;
-                this.closing = false;
-            });
-        }
         let p = *palette(cx);
         let click_state = state.clone();
         let key_state = state.clone();
-        let open = state.read(cx).open && !state.read(cx).closing;
+        let presence = state.read(cx).presence.clone();
+        let open = presence.read(cx).is_open();
         let trigger = self.trigger.map(|build| build(open));
         let mut root = div().id(self.id).relative().flex().flex_col().child(
             div()
@@ -188,7 +164,7 @@ impl RenderOnce for Popover {
                 .focus_visible(move |s| s.border(space::FOCUS_RING).border_color(p.focus_ring))
                 .on_click(move |_, window, cx| {
                     click_state.update(cx, |this, cx| {
-                        if this.open && !this.closing {
+                        if this.is_open(cx) {
                             this.dismiss(window, cx);
                         } else {
                             this.show(window, cx);
@@ -205,7 +181,7 @@ impl RenderOnce for Popover {
                 })
                 .children(trigger),
         );
-        if state.read(cx).open {
+        if presence.read(cx).is_visible() {
             let outside_state = state.clone();
             let key_state = state.clone();
             let panel = div()
@@ -235,41 +211,7 @@ impl RenderOnce for Popover {
                     self.content
                         .map(|build| build(PopoverHandle(state.clone()), window, cx)),
                 );
-            let closing = state.read(cx).closing;
-            let duration = motion::duration(
-                if closing {
-                    Motion::PopupOut
-                } else {
-                    Motion::PopupIn
-                },
-                cx,
-            );
-            let progress = state.read(cx).progress.clone();
-            let from = state.read(cx).from;
-            let generation = state.read(cx).generation;
-            let panel = if duration.is_zero() {
-                progress.set(1.);
-                panel.into_any_element()
-            } else {
-                panel
-                    .with_animation(
-                        (
-                            if closing { "popover-out" } else { "popover-in" },
-                            generation,
-                        ),
-                        Animation::new(duration).with_easing(motion::ease_out_cubic),
-                        move |el, t| {
-                            let t = if closing {
-                                from * (1. - t)
-                            } else {
-                                from + (1. - from) * t
-                            };
-                            progress.set(t);
-                            el.opacity(t).relative().top(px(4. * (1. - t)))
-                        },
-                    )
-                    .into_any_element()
-            };
+            let panel = presence.read(cx).animate(panel, "popover", cx);
             let (edge, corner) = match self.align {
                 PopoverAlign::Start => (div().absolute().top_full().left_0(), Anchor::TopLeft),
                 PopoverAlign::End => (div().absolute().top_full().right_0(), Anchor::TopRight),

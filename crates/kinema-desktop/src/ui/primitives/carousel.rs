@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use gpui::{prelude::*, *};
 
 use crate::{
-    ui::motion::{self, Motion},
+    ui::motion::{self, transition::COLUMN},
     ui::primitives::IconName,
     ui::primitives::icon_button::IconButton,
     ui::theme::{palette, space},
@@ -146,7 +146,7 @@ fn animate_page(
     offset.x = px(motion::lerp(
         f32::from(anim.from),
         f32::from(anim.to),
-        Motion::Column.ease(t),
+        COLUMN.ease.apply(t),
     ));
     handle.set_offset(offset);
     let written = handle.offset().x;
@@ -194,7 +194,7 @@ impl RenderOnce for Carousel {
         if !measured {
             window.request_animation_frame();
         }
-        let duration = motion::duration(Motion::Column, cx);
+        let duration = motion::duration(COLUMN, cx);
         let anim = window.use_keyed_state((self.id.clone(), "page"), cx, |_, _| None::<PageAnim>);
         animate_page(&anim, &handle, duration, window, cx);
         let (more_before, more_after) =

@@ -137,7 +137,7 @@ impl RenderOnce for OverlayButton {
                 .focusable()
                 .tab_stop(true)
                 .hover(move |el| el.bg(hover))
-                .focus_visible(move |el| el.shadow(vec![focus_ring(p.focus_ring)]))
+                .focus_visible(move |el| el.shadow(vec![focus_ring(&p)]))
                 .on_click(move |event, window, cx| {
                     cx.stop_propagation();
                     if let Some(handler) = &handler {

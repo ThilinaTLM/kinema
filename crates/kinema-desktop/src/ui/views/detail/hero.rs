@@ -4,7 +4,6 @@ use super::layout;
 use super::*;
 use crate::ui::blocks::{MediaHero, MetaItem, uses_over_art};
 use crate::ui::primitives::action_button::{ActionButton, ActionKind};
-use std::time::Duration;
 
 /// Wraps a page section in the shared frame: the same side gutters and
 /// maximum width as the hero content, centred only beyond that width.
@@ -281,9 +280,6 @@ impl Detail {
     }
 }
 
-/// How long the copy button shows its confirmation.
-const COPIED_FEEDBACK: Duration = Duration::from_millis(1500);
-
 /// Icon-only "Copy title" button beside the title; swaps to a check mark and
 /// a "Copied" tooltip label briefly after copying.
 #[derive(IntoElement)]
@@ -313,7 +309,9 @@ impl RenderOnce for CopyTitleButton {
                 let copied = copied.clone();
                 window
                     .spawn(cx, async move |cx| {
-                        cx.background_executor().timer(COPIED_FEEDBACK).await;
+                        cx.background_executor()
+                            .timer(crate::ui::theme::motion::timing::COPIED_FEEDBACK)
+                            .await;
                         copied.update(cx, |state, cx| {
                             *state = false;
                             cx.notify();

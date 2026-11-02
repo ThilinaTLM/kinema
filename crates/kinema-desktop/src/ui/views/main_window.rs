@@ -11,6 +11,7 @@ use crate::{
     ui::blocks::toolbar::{
         TRANSFER_DETAIL_MIN_WIDTH, Toolbar, ToolbarChip, ToolbarGroup, TransferStatus, icon_cell,
     },
+    ui::motion::{AnimateExt, transition::DISCLOSE},
     ui::primitives::button::Button,
     ui::primitives::icon::IconName,
     ui::primitives::icon_button::IconButton,
@@ -715,15 +716,13 @@ impl MainWindow {
         let speed = coordinator.transfer_bytes_per_second();
         let compact = window.viewport_size().width < TRANSFER_DETAIL_MIN_WIDTH;
         let transfer_trigger = div().child(TransferStatus::new(summary, speed, compact));
-        let pulse = crate::ui::motion::duration(crate::ui::motion::Motion::Feedback, cx);
-        let transfer_trigger = if self.launch_pulse > 0 && !pulse.is_zero() {
-            transfer_trigger
-                .with_animation(
-                    ("transfer-launch", self.launch_pulse),
-                    Animation::new(pulse * 2),
-                    |el, t| el.opacity(0.5 + 0.5 * t),
-                )
-                .into_any_element()
+        let transfer_trigger = if self.launch_pulse > 0 {
+            transfer_trigger.animate_with(
+                ("transfer-launch", self.launch_pulse),
+                DISCLOSE,
+                cx,
+                |el, t| el.opacity(0.5 + 0.5 * t),
+            )
         } else {
             transfer_trigger.into_any_element()
         };

@@ -1,6 +1,6 @@
 //! Modal sheet. Render above the screen; remove it in `on_dismiss`.
 use crate::{
-    ui::motion::{self, Motion},
+    ui::motion::{AnimateExt, Presence, transition::SHEET},
     ui::theme::typography::TypeExt,
     ui::theme::{elevation, palette, radius, space, typeface},
 };
@@ -8,6 +8,7 @@ use gpui::{prelude::*, *};
 use std::rc::Rc;
 type DismissHandler = Rc<dyn Fn(&mut Window, &mut App)>;
 struct SheetState {
+    presence: Entity<Presence>,
     root: FocusHandle,
     end: FocusHandle,
     previous: Option<FocusHandle>,
@@ -76,6 +77,7 @@ impl RenderOnce for Sheet {
             let target = initial.unwrap_or_else(|| root.clone());
             window.defer(cx, move |window, cx| target.focus(window, cx));
             SheetState {
+                presence: cx.new(|_| Presence::opened(SHEET, SHEET)),
                 root,
                 end,
                 previous,
@@ -126,28 +128,13 @@ impl RenderOnce for Sheet {
                     .tab_stop(false)
                     .size_0(),
             );
-        let duration = motion::duration(Motion::Sheet, cx);
+        let presence = state.read(cx).presence.clone();
         let scrim = div().absolute().inset_0().bg(p.dialog_scrim);
-        let (panel, scrim) = if duration.is_zero() {
-            (panel.into_any_element(), scrim.into_any_element())
-        } else {
-            (
-                panel
-                    .with_animation(
-                        "sheet-open",
-                        Animation::new(duration).with_easing(motion::ease_out_cubic),
-                        |el, t| el.opacity(t).top(space::S24 * (1.0 - t)),
-                    )
-                    .into_any_element(),
-                scrim
-                    .with_animation(
-                        "sheet-scrim",
-                        Animation::new(duration).with_easing(motion::ease_out_cubic),
-                        |el, t| el.opacity(t),
-                    )
-                    .into_any_element(),
-            )
-        };
+        // The owner removes the sheet to dismiss it, so only the enter plays.
+        let (panel, scrim) = (
+            presence.read(cx).animate(panel, "sheet-open", cx),
+            scrim.animate_enter("sheet-scrim", crate::ui::motion::transition::CROSSFADE, cx),
+        );
         div()
             .id(self.id)
             .absolute()

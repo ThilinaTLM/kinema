@@ -1,6 +1,6 @@
 //! Vertical scrolling with an overlay scrollbar and keyboard paging.
 use crate::{
-    ui::motion::{self, Motion},
+    ui::motion::{self, transition::CROSSFADE},
     ui::theme::{palette, space},
 };
 use gpui::{prelude::*, *};
@@ -74,7 +74,7 @@ impl RenderOnce for ScrollArea {
             .read(cx)
             .clone();
         let fade_drag = drag.clone();
-        let fade = motion::duration(Motion::Crossfade, cx);
+        let fade = motion::resolve(CROSSFADE, cx);
         let reduced = motion::reduced(cx);
         div()
             .id(self.id)
@@ -179,21 +179,22 @@ impl RenderOnce for ScrollArea {
                                 let alpha = if reduced || active {
                                     1.0
                                 } else {
-                                    let hold = std::time::Duration::from_millis(600);
+                                    let hold = crate::ui::theme::motion::timing::SCROLLBAR_IDLE;
                                     let elapsed = activity.get().1.elapsed();
                                     let t = if elapsed <= hold {
                                         window.request_animation_frame();
                                         0.0
-                                    } else if fade.is_zero() {
+                                    } else if fade.is_instant() {
                                         1.0
                                     } else {
+                                        // Fades over twice the preset duration.
                                         let t = ((elapsed - hold).as_secs_f32()
-                                            / (fade.as_secs_f32() * 2.0))
+                                            / (fade.duration.as_secs_f32() * 2.0))
                                             .min(1.0);
                                         if t < 1.0 {
                                             window.request_animation_frame();
                                         }
-                                        motion::ease_out_cubic(t)
+                                        fade.ease.apply(t)
                                     };
                                     1.0 - t * (1.0 - IDLE_ALPHA)
                                 };

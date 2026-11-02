@@ -4,9 +4,10 @@ use std::rc::Rc;
 use gpui::{prelude::*, *};
 
 use crate::{
-    ui::motion,
+    ui::motion::{self, AnimateExt, interaction::state_fill, transition::FEEDBACK},
     ui::primitives::Icon,
     ui::primitives::IconName,
+    ui::theme::motion::timing,
     ui::theme::typography::TypeExt,
     ui::theme::{Palette, palette, radius, space, typeface},
 };
@@ -159,19 +160,16 @@ fn disabled_colors(variant: ButtonVariant, p: &Palette) -> (Hsla, Hsla, Hsla) {
 }
 
 fn busy_bar(ink: Hsla, cx: &App) -> AnyElement {
-    let duration = motion::duration(motion::Motion::Disclose, cx);
     let line = div().absolute().h_full();
-    let line = if duration.is_zero() {
+    let line = if motion::reduced(cx) {
         line.w_full().bg(palette(cx).text_muted).into_any_element()
     } else {
-        line.w(relative(0.25))
-            .bg(ink)
-            .with_animation(
-                "button-busy-sweep",
-                Animation::new(duration * 6).repeat(),
-                |el, t| el.left(relative(t * 1.25 - 0.25)),
-            )
-            .into_any_element()
+        line.w(relative(0.25)).bg(ink).animate_loop(
+            "button-busy-sweep",
+            timing::SPIN_PERIOD,
+            cx,
+            |el, t| el.left(relative(t * 1.25 - 0.25)),
+        )
     };
     div()
         .absolute()
@@ -242,9 +240,8 @@ impl RenderOnce for Button {
         // A keyed spring retains interpolated progress when hover reverses.
         let hovered = window.use_keyed_state(self.id.clone(), cx, |_, _| false);
         let target = !blocked && *hovered.read(cx);
-        let duration = motion::duration(motion::Motion::Feedback, cx);
         let hover_state = hovered.clone();
-        let mut button = div()
+        let button = div()
             .id("button-face")
             .relative()
             .flex()
@@ -301,24 +298,10 @@ impl RenderOnce for Button {
             })
             // Absolute placement preserves label metrics and keeps the sweep inside.
             .when(self.busy, |el| el.child(busy_bar(ink, cx)));
-        let face = if duration.is_zero() || blocked {
-            if target {
-                button = button.bg(hover);
-            }
+        let face = if blocked {
             button.into_any_element()
         } else {
-            button
-                .with_spring(
-                    "button-feedback",
-                    SpringAnimation::new(SpringConfig::new(
-                        (6.0 / duration.as_secs_f32()).powi(2),
-                        12.0 / duration.as_secs_f32(),
-                        1.0,
-                    ))
-                    .to(if target { 1.0_f32 } else { 0.0 }),
-                    move |el, t| el.bg(rest.blend(hover.opacity(t.clamp(0.0, 1.0)))),
-                )
-                .into_any_element()
+            state_fill(button, "button-feedback", target, rest, hover, FEEDBACK, cx)
         };
         // Transparent, out-of-flow ring geometry avoids layout shifts on focus.
         // 2 px ring, 2 px gap, offset outwards by 4 px on each side.

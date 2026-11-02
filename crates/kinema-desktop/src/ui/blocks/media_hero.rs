@@ -12,7 +12,7 @@ use gpui::{prelude::*, *};
 
 use crate::{
     artwork::ArtworkState,
-    ui::motion::{self, Motion},
+    ui::motion::{self, AnimateExt, transition::CROSSFADE},
     ui::primitives::{Badge, SkeletonText},
     ui::theme::typography::TypeExt,
     ui::theme::{Mode, elevation, palette, radius, space, theme, typeface},
@@ -251,7 +251,7 @@ impl MediaHero {
 impl RenderOnce for MediaHero {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let p = *palette(cx);
-        let fade = motion::duration(Motion::Crossfade, cx);
+        let fade = motion::duration(CROSSFADE, cx);
 
         // Remember the previous image so a change crossfades image-to-image.
         let state = window.use_keyed_state((self.id.clone(), "backdrop"), cx, |_, _| {
@@ -282,17 +282,7 @@ impl RenderOnce for MediaHero {
         let backdrop = self.backdrop.clone().map(|image| {
             let key = Arc::as_ptr(&image) as *const () as usize;
             let layer = image_layer(image);
-            let layer = if fade.is_zero() {
-                layer.into_any_element()
-            } else {
-                layer
-                    .with_animation(
-                        ("hero-backdrop", key),
-                        Animation::new(fade).with_easing(motion::ease_out_cubic),
-                        |el, t| el.opacity(t),
-                    )
-                    .into_any_element()
-            };
+            let layer = layer.animate_enter(("hero-backdrop", key), CROSSFADE, cx);
             (!fade.is_zero())
                 .then_some(previous)
                 .flatten()

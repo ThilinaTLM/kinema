@@ -2,7 +2,7 @@
 //! Subscribe to `CardOpened` for the mouse-up / Enter open handler.
 use crate::{
     ui::blocks::state_toggle::{StateToggle, ToggleKind, ToggleStatus},
-    ui::motion::{self, CardHover, Motion, card_hover as hv},
+    ui::motion::{self, AnimateExt, CardHover, card_hover as hv, transition::CROSSFADE},
     ui::primitives::chip::{self, Chip},
     ui::primitives::menu::{ContextMenuExt, MenuItem},
     ui::theme::typography::TypeExt,
@@ -118,11 +118,6 @@ impl Render for PosterCard {
             // Frame-driven so a reversal mid-flight continues from the current value.
             window.request_animation_frame();
         }
-        let fade = if cx.reduce_motion() {
-            std::time::Duration::ZERO
-        } else {
-            motion::duration(Motion::Crossfade, cx)
-        };
         let w = self.width;
         let h = w * 1.5;
         let placeholder = col()
@@ -161,20 +156,17 @@ impl Render for PosterCard {
                     .child(child)
                     .into_any_element()
             };
-            if fade.is_zero() {
+            if reduced {
                 self.art_from = 1.;
                 frame(image.into_any_element())
             } else {
                 let art_from = self.art_from;
-                frame(
-                    image
-                        .with_animation(
-                            ("art-fade", self.art_generation),
-                            Animation::new(fade).with_easing(motion::ease_out_cubic),
-                            move |el, t| el.opacity(art_from + (1. - art_from) * t),
-                        )
-                        .into_any_element(),
-                )
+                frame(image.animate_with(
+                    ("art-fade", self.art_generation),
+                    CROSSFADE,
+                    cx,
+                    move |el, t| el.opacity(art_from + (1. - art_from) * t),
+                ))
             }
         });
         let meta = {
@@ -193,7 +185,7 @@ impl Render for PosterCard {
         };
         let row = |el: Div, value: f32| {
             el.relative()
-                .top(px(hv::ROW_RISE_PX * (1. - value)))
+                .top(hv::ROW_RISE * (1. - value))
                 .opacity(value)
         };
         let [r_title, r_meta, r_genres, r_synopsis] = hover.rows;
@@ -259,7 +251,7 @@ impl Render for PosterCard {
         let shadow = theme::elevation::md(&p);
         let panel_visible = hover.scrim > 0. || hover.rows.iter().any(|v| *v > 0.);
         let style_lift = |el: Div, value: f32| {
-            el.top(px(-hv::LIFT_PX * value))
+            el.top(-hv::LIFT * value)
                 .shadow(crate::ui::blocks::media_card::lift_shadow(
                     shadow.clone(),
                     value,
