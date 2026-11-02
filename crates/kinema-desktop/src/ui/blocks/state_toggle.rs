@@ -139,7 +139,8 @@ impl RenderOnce for StateToggle {
             })
             .icon(icon)
             .square(true)
-            .selected(on)
+            // Over artwork the dark chip stays neutral; the glyph carries the state.
+            .selected(on && !self.over_art)
             .tooltip(label)
             .disabled(disabled && !busy)
             .busy(busy)

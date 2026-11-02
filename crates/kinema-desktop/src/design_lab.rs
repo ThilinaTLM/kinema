@@ -1052,6 +1052,7 @@ impl Lab {
                     )
                     .child(
                         Button::icon_button("icon-toggled", IconName::Info, "Information")
+                            .selected(true)
                             .toggled(true),
                     ),
             )

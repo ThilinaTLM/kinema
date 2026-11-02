@@ -55,6 +55,13 @@ impl CardHover {
     /// Point every channel at the hovered/idle state. Enter: lift now, overlay
     /// after the intent delay, rows staggered. Exit: all together, no delay.
     pub fn set_hovered(&mut self, now: f32, hovered: bool, reduced: bool) {
+        self.set_target(now, hovered, false, reduced);
+    }
+
+    /// Like [`Self::set_hovered`]; `deliberate` (keyboard focus) skips the
+    /// hover-intent delay, since passing the pointer over a card is the only
+    /// accidental way to enter.
+    pub fn set_target(&mut self, now: f32, hovered: bool, deliberate: bool, reduced: bool) {
         let to = if hovered { 1. } else { 0. };
         if reduced {
             self.lift.snap(to);
@@ -64,7 +71,12 @@ impl CardHover {
         }
         let lift = ms(HOVER.duration);
         if hovered {
-            let (intent, rise) = (ms(CARD_OVERLAY.delay), ms(CARD_OVERLAY.duration));
+            let rise = ms(CARD_OVERLAY.duration);
+            let intent = if deliberate {
+                0.
+            } else {
+                ms(CARD_OVERLAY.delay)
+            };
             self.lift.retarget(now, to, ms(HOVER.delay), lift);
             self.scrim.retarget(now, to, intent, rise);
             for (i, row) in self.rows.iter_mut().enumerate() {
@@ -131,6 +143,17 @@ mod tests {
                 rows: [0.; 4]
             }
         );
+    }
+
+    #[test]
+    fn card_focus_discloses_without_hover_intent() {
+        let mut h = CardHover::default();
+        h.set_target(0., true, true, false);
+        assert!(h.values(30.).scrim > 0., "focus starts at once");
+        let mut hover = CardHover::default();
+        hover.set_hovered(0., true, false);
+        assert_eq!(hover.values(30.).scrim, 0.);
+        assert!(h.settled(400.));
     }
 
     #[test]

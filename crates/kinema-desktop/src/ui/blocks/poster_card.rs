@@ -110,10 +110,12 @@ impl Render for PosterCard {
         let p = *theme::palette(cx);
         let dark = Palette::dark();
         let focus = self.focus.clone();
-        let target = self.hovered || focus.is_focused(window);
+        let focused = focus.is_focused(window);
+        let target = self.hovered || focused;
         let now = self.origin.elapsed().as_secs_f32() * 1000.;
         let reduced = cx.reduce_motion() || motion::reduced(cx);
-        self.hover.set_hovered(now, target, reduced);
+        self.hover
+            .set_target(now, target, focused && !self.hovered, reduced);
         let hover = self.hover.values(now);
         if !self.hover.settled(now) {
             // Frame-driven so a reversal mid-flight continues from the current value.
