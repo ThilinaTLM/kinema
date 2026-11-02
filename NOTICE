@@ -55,7 +55,7 @@ External VLC/mpv executables, the native libmpv library, and online metadata,
 indexer, and debrid services are not bundled by this application. The TMDB attribution logo above is bundled separately.
 Integrations do not imply implementation, endorsement,
 or a grant of rights to service content or trademarks. Their software licenses
-and service terms apply independently. See docs/architecture.md for scope.
+and service terms apply independently. See docs/architecture/README.md for scope.
 
 Bundled desktop v3 fonts and icons
 ---------------------------------

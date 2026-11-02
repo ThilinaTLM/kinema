@@ -1,6 +1,6 @@
 //! Floating header primitives shared by every main-window view.
 //!
-//! One design language for all toolbar content (desktop-v3 §4 "Toolbar"):
+//! One design language for all toolbar content (docs/architecture/ui.md "Toolbar"):
 //!
 //! - [`Toolbar`]: the header row with fixed slots — *leading* (context: scope,
 //!   kind, back), *center* (search or nothing), *trailing* (view tools, then the

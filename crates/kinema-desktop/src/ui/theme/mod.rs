@@ -1,4 +1,4 @@
-//! Desktop v3 design tokens (see `docs/design/desktop-v3.md` §2).
+//! Desktop v3 design tokens (see `docs/architecture/design-system.md`).
 //!
 //! This is the only source of color, type and geometry for `ui` primitives, blocks
 //! and views. Views must not use raw color or size literals. Pure values and

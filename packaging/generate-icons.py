@@ -7,7 +7,7 @@ The app and player icons get PNGs at every size; 16px rasters come from the
 pixel-hinted `*-16.svg` sources. The symbolic icon is SVG-only because its
 colour is supplied by the desktop. ICO uses the Windows/Linux tile; ICNS uses
 the macOS-grid source (`*-macos.svg`). Tray glyphs (`*-tray-{dark,light}`) are
-derived from the app icon's glyph path, see `tray_svg`. See docs/design/brand.md.
+derived from the app icon's glyph path, see `tray_svg`. See docs/architecture/brand.md.
 """
 
 import io

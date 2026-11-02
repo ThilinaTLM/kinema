@@ -5,9 +5,9 @@ artwork lives in `crates/kinema-desktop/assets/brand/`. These are not a release
 packaging pipeline. The application ID is **dev.tlmtech.kinema**; Cargo's actual
 application executable is **kinema-desktop** (the implicit `src/main.rs` binary).
 The separate `ui-probe` executable is not installed.
-See the [cross-platform qualification matrix](../docs/validation/cross-platform.md)
-for executed versus configured evidence, Windows ANGLE runtime requirements,
-open native checks and distribution gaps. Integration assets do not establish
+See the [platform status](../docs/architecture/development.md#platform-status)
+and [desktop releases proposal](../docs/proposals/desktop-releases.md) for
+Windows ANGLE runtime requirements, open native checks and distribution gaps. Integration assets do not establish
 OS support or release qualification.
 
 ## Regenerate icons
@@ -22,7 +22,7 @@ python3 packaging/test_assets.py
 
 The SVGs are the editable sources for the Kinema K/play mark and retain
 Thilina Lakshan's copyright and Apache-2.0 SPDX headers.
-[Brand guidelines](../docs/design/brand.md) define geometry, colours and usage.
+[Brand guidelines](../docs/architecture/brand.md) define geometry, colours and usage.
 
 | Source | Used for |
 | --- | --- |
@@ -68,7 +68,7 @@ resolve the installed desktop entry/icon, so the distinct player icon is not
 promised there; Windows/macOS per-window icons remain unqualified. No notification
 service or mpv configuration files are shipped. Embedded MPV is the default
 player and loads a separately installed libmpv; external mpv/VLC remain explicit
-alternatives. See [playback prerequisites](../docs/development.md#embedded-mpv-prerequisites-and-validation-plan).
+alternatives. See [playback prerequisites](../docs/architecture/playback.md#native-libmpv).
 
 ```sh
 desktop-file-validate packaging/linux/dev.tlmtech.kinema.desktop

@@ -1,5 +1,5 @@
 //! Source scan enforcing the design-token and layer rules (see
-//! `docs/design/design-system.md`). Std only.
+//! `docs/architecture/design-system.md`). Std only.
 //!
 //! Scans `src/ui/{primitives,blocks,views,motion}`; raw style literals belong in
 //! `ui/theme`. A line may opt out with a same-line `// token-exempt: <reason>`.

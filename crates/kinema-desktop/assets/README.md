@@ -11,7 +11,7 @@ Pinned sources (downloaded 2026-10-18):
   retained as `fonts/OFL-JetBrainsMono.txt` (SIL OFL 1.1).
 - **Lucide 0.468.0**: https://github.com/lucide-icons/lucide/tree/0.468.0/icons
   Each SVG comes from `https://raw.githubusercontent.com/lucide-icons/lucide/0.468.0/icons/<filename>`.
-  SVG strokes use `stroke-width="1.5"` instead of upstream `2` for desktop-v3 §2.4.
+  SVG strokes use `stroke-width="1.5"` instead of upstream `2` for the compact desktop geometry (docs/architecture/design-system.md).
   `star-filled.svg` is derived from the same pinned `star.svg`, with
   `fill="currentColor"` instead of `none`; its stroke remains `currentColor`.
   `bookmark-filled.svg` is derived from the pinned `bookmark.svg` with

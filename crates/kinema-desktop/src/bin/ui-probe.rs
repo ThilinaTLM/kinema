@@ -1,4 +1,4 @@
-//! Offline native v3 lab; see docs/design/ui-probe.md.
+//! Offline native v3 lab; see docs/architecture/development.md.
 use kinema_desktop::{player::PlayerChoice, ui::views::player};
 
 #[derive(Debug, PartialEq)]
