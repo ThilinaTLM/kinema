@@ -1,0 +1,255 @@
+//! Search editor with cancellable, generation-checked live queries.
+//!
+//! Accessibility: the inner field is a `SearchInput` named "Search" (its
+//! placeholder may refine the hint). Tab moves from the field to the clear
+//! button, which appears only for non-empty text, is a named `Button`, and is
+//! activated with Enter/Space or a click; clearing returns focus to the field.
+//! Keyboard focus draws a ring that follows the field radius.
+use crate::{
+    ui::primitives::icon::{Icon, IconName},
+    ui::primitives::text_input::{TextInput, TextInputEvent},
+    ui::theme::typography::{TextSize, TypeExt, Weight},
+    ui::theme::{palette, radius, size, space},
+};
+use gpui::{prelude::*, *};
+
+/// Live queries are delayed; submissions are immediate. Read the query via `text`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SearchFieldEvent {
+    Changed,
+    Submitted,
+}
+impl EventEmitter<SearchFieldEvent> for SearchField {}
+
+pub struct SearchField {
+    input: Entity<TextInput>,
+    clear_focus: FocusHandle,
+    generation: u64,
+    debounce: Option<Task<()>>,
+    shortcut_hint: Option<SharedString>,
+    toolbar: bool,
+    _subscription: Subscription,
+}
+impl SearchField {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let input = cx.new(|cx| {
+            let mut input = TextInput::new(window, cx);
+            input.set_chromeless(true, cx);
+            input.set_search_role(true, cx);
+            input.set_label("Search", cx);
+            input
+        });
+        let subscription =
+            cx.subscribe_in(&input, window, |this, _, event, window, cx| match event {
+                TextInputEvent::Changed => {
+                    this.generation = this.generation.wrapping_add(1);
+                    let generation = this.generation;
+                    this.debounce = Some(cx.spawn(async move |this, cx| {
+                        cx.background_executor()
+                            .timer(crate::ui::theme::motion::timing::SEARCH_DEBOUNCE)
+                            .await;
+                        let _ = this.update(cx, |this, cx| {
+                            if this.generation == generation {
+                                cx.emit(SearchFieldEvent::Changed);
+                            }
+                        });
+                    }));
+                    cx.notify();
+                }
+                TextInputEvent::Submitted => {
+                    this.cancel_debounce();
+                    cx.emit(SearchFieldEvent::Submitted);
+                }
+                TextInputEvent::Cancelled => {
+                    this.input.update(cx, |input, cx| input.set_text("", cx));
+                    window.blur(cx);
+                }
+                _ => {}
+            });
+        Self {
+            input,
+            clear_focus: cx.focus_handle().tab_stop(true),
+            generation: 0,
+            debounce: None,
+            shortcut_hint: None,
+            toolbar: false,
+            _subscription: subscription,
+        }
+    }
+    /// Trailing key hint (e.g. "Ctrl K"), shown only while the field is empty.
+    pub fn shortcut_hint(mut self, hint: impl Into<SharedString>) -> Self {
+        self.shortcut_hint = Some(hint.into());
+        self
+    }
+    /// Floating-header geometry and glass material (see [`toolbar`]).
+    pub fn toolbar_style(mut self) -> Self {
+        self.toolbar = true;
+        self
+    }
+    pub fn set_shortcut_hint(&mut self, hint: Option<SharedString>, cx: &mut Context<Self>) {
+        self.shortcut_hint = hint;
+        cx.notify();
+    }
+    fn cancel_debounce(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
+        self.debounce = None;
+    }
+    pub fn text<'a>(&'a self, cx: &'a App) -> &'a str {
+        self.input.read(cx).text()
+    }
+    pub fn input(&self) -> Entity<TextInput> {
+        self.input.clone()
+    }
+    pub fn focus(&self, window: &mut Window, cx: &mut App) {
+        self.input.update(cx, |input, cx| input.focus(window, cx));
+    }
+    pub fn set_text(&mut self, text: impl Into<String>, cx: &mut Context<Self>) {
+        self.input.update(cx, |input, cx| input.set_text(text, cx));
+    }
+    pub fn set_placeholder(&mut self, text: impl Into<SharedString>, cx: &mut Context<Self>) {
+        self.input
+            .update(cx, |input, cx| input.set_placeholder(text, cx));
+    }
+}
+impl Focusable for SearchField {
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        self.input.read(cx).focus_handle(cx)
+    }
+}
+impl Render for SearchField {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = *palette(cx);
+        let (fill, hover, edge) = if self.toolbar {
+            p.glass()
+        } else {
+            (p.secondary, p.secondary, p.input)
+        };
+        let nonempty = !self.text(cx).is_empty();
+        let focus = self.input.read(cx).focus_handle(cx);
+        let focused = focus.is_focused(window);
+        let ring = focused && window.last_input_was_keyboard();
+        let gap_ring = |color: Hsla, spread: Pixels| {
+            BoxShadow::new(Pixels::ZERO, Pixels::ZERO, color).spread_radius(spread)
+        };
+        div()
+            .id("kinema-search-field")
+            .flex()
+            .items_center()
+            .gap(space::S4)
+            .h(if self.toolbar {
+                size::TOOLBAR_CONTROL
+            } else {
+                size::CONTROL_SM
+            })
+            .w_full()
+            .pl(if self.toolbar { space::S12 } else { space::S8 })
+            .pr(space::S2)
+            .rounded(if self.toolbar { radius::LG } else { radius::MD })
+            .bg(fill)
+            .when(self.toolbar && !focused, |el| {
+                el.hover(move |s| s.bg(hover))
+            })
+            .border(size::HAIRLINE)
+            .border_color(if focused { p.primary } else { edge })
+            // Keyboard focus ring follows the host radius: 2 px gap, then 2 px ring.
+            .when(ring, |el| {
+                el.shadow(vec![
+                    gap_ring(p.background, size::FOCUS_RING),
+                    gap_ring(p.ring, size::FOCUS_RING * 2.),
+                ])
+            })
+            .child(Icon::new(IconName::Search).color(p.muted_foreground))
+            .child(div().flex_1().min_w(Pixels::ZERO).child(self.input.clone()))
+            .when_some(
+                self.shortcut_hint.clone().filter(|_| !nonempty),
+                |s, hint| {
+                    s.child(
+                        div()
+                            .flex_none()
+                            .mr(space::S6)
+                            .px(space::S6)
+                            .h(size::CHIP)
+                            .flex()
+                            .items_center()
+                            .rounded(radius::SM)
+                            .bg(p.accent)
+                            .text(TextSize::Xs)
+                            .weight(Weight::Semibold)
+                            .text_color(p.subtle_foreground)
+                            .child(hint),
+                    )
+                },
+            )
+            .when(nonempty, |s| {
+                s.child(
+                    div()
+                        .id("clear-search")
+                        .role(Role::Button)
+                        .aria_label("Clear search")
+                        .tab_stop(true)
+                        .track_focus(&self.clear_focus)
+                        .rounded(radius::SM)
+                        .focus_visible(move |s| s.border_2().border_color(p.ring))
+                        .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                            if event.keystroke.key == "enter" || event.keystroke.key == "space" {
+                                this.input.update(cx, |input, cx| input.set_text("", cx));
+                                this.focus(window, cx);
+                                cx.stop_propagation();
+                            }
+                        }))
+                        .size(size::ICON_TARGET - space::S4)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .cursor_pointer()
+                        .hover(move |s| s.bg(p.accent).text_color(p.foreground))
+                        .child(Icon::new(IconName::Close).color(p.muted_foreground))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.input.update(cx, |input, cx| input.set_text("", cx));
+                            this.focus(window, cx);
+                        })),
+                )
+            })
+    }
+}
+
+#[cfg(all(test, feature = "ui-probe-test"))]
+#[allow(clippy::unwrap_used)]
+mod interaction_tests {
+    use super::{SearchField, SearchFieldEvent};
+    use gpui::TestAppContext;
+    use std::{cell::Cell, rc::Rc, time::Duration};
+
+    #[gpui::test]
+    fn debounce_supersedes(cx: &mut TestAppContext) {
+        cx.update(crate::ui::theme::init);
+        let handle = cx.add_window(SearchField::new);
+        let changed = Rc::new(Cell::new(0));
+        let subscription = cx.update(|cx| {
+            let count = changed.clone();
+            let root = handle.root(cx).unwrap();
+            cx.subscribe(&root, move |_, e: &SearchFieldEvent, _| {
+                if *e == SearchFieldEvent::Changed {
+                    count.set(count.get() + 1);
+                }
+            })
+        });
+        for text in ["one", "two"] {
+            handle
+                .update(cx, |field, _, cx| {
+                    field.set_text(text, cx);
+                })
+                .unwrap();
+            cx.run_until_parked();
+            cx.background_executor
+                .advance_clock(Duration::from_millis(200));
+        }
+        cx.run_until_parked();
+        assert_eq!(changed.get(), 0);
+        cx.background_executor
+            .advance_clock(Duration::from_millis(100));
+        cx.run_until_parked();
+        assert_eq!(changed.get(), 1);
+        drop(subscription);
+    }
+}

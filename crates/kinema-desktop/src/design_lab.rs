@@ -1,41 +1,49 @@
 //! Offline v3 native design lab. No application services or legacy presentation.
-use crate::{app_state::Resource, screens::settings_window};
+use crate::{app_state::Resource, ui, ui::views::settings};
+mod motion_scene;
+mod tokens_scene;
+
 use std::{rc::Rc, sync::Arc};
 
 use gpui::{prelude::*, *};
 
-use crate::widgets::{
-    self,
-    button::{Button, ButtonSize, ButtonVariant},
-    chip::{Chip, StatusKind},
-    choice_card::ChoiceTile,
-    icon::{Icon, IconName},
-    icon_button::IconButton,
-    menu::{ContextMenuExt, Menu, MenuItem, Select},
-    notice::{Notice, NoticeKind},
-    patterns::{
-        Badge, BadgeTone, Card, Carousel, ListRow, MediaHero, ResourceView, Section, Skeleton,
-        SkeletonText, StateView, ViewState,
-    },
-    popover::Popover,
-    poster_card::{CardOpened, MembershipRequested, PosterCard},
-    progress::Progress,
-    scroll_area::ScrollArea,
-    search_field::SearchField,
-    segmented::Segmented,
-    sheet::Sheet,
-    state_toggle::{StateToggle, ToggleKind, ToggleStatus},
-    switch::{Checkbox, Radio, Switch},
-    text::TypeExt,
-    text_input::TextInput,
-    tokens::{self, Mode, Palette, space as s, typeface as t},
-    toolbar::{Toolbar, ToolbarChip, ToolbarGroup},
-    tooltip::tooltip,
+use crate::{
+    ui::blocks::MediaHero,
+    ui::blocks::ResourceView,
+    ui::blocks::StateView,
+    ui::blocks::ViewState,
+    ui::blocks::poster_card::{CardOpened, MembershipRequested, PosterCard},
+    ui::blocks::state_toggle::{StateToggle, ToggleKind, ToggleStatus},
+    ui::blocks::toolbar::{Toolbar, ToolbarChip, ToolbarGroup},
+    ui::primitives::Badge,
+    ui::primitives::BadgeTone,
+    ui::primitives::Card,
+    ui::primitives::Carousel,
+    ui::primitives::ListRow,
+    ui::primitives::Section,
+    ui::primitives::Skeleton,
+    ui::primitives::SkeletonText,
+    ui::primitives::alert::{Alert, AlertTone},
+    ui::primitives::button::{Button, ButtonSize, ButtonVariant},
+    ui::primitives::choice_card::ChoiceTile,
+    ui::primitives::icon::{Icon, IconName},
+    ui::primitives::menu::{ContextMenuExt, Menu, MenuItem, Select},
+    ui::primitives::popover::Popover,
+    ui::primitives::progress::Progress,
+    ui::primitives::scroll_area::ScrollArea,
+    ui::primitives::search_field::SearchField,
+    ui::primitives::segmented::Segmented,
+    ui::primitives::sheet::Sheet,
+    ui::primitives::switch::{Checkbox, Radio, Switch},
+    ui::primitives::text_input::TextInput,
+    ui::primitives::tooltip::tooltip,
+    ui::theme::typography::{TextSize, TypeExt, Weight},
+    ui::theme::{self, Mode, Palette, layout, size, space as s},
 };
 
 actions!(design_lab, [NextFocus, PreviousFocus]);
 
-const SCENES: [&str; 52] = [
+const SCENES: [&str; 54] = [
     "patterns",
     "patterns-states",
     "detail-live-tmdb-movie",
@@ -90,6 +98,8 @@ const SCENES: [&str; 52] = [
     "series-streams",
     "library",
     "states",
+    "tokens",
+    "motion",
 ];
 
 /// Entry point deliberately branches before any Kit initialization.
@@ -121,18 +131,18 @@ pub fn run_native() {
         })
         .unwrap_or((1280., 800.));
     gpui_platform::application()
-        .with_assets(widgets::assets::Assets)
+        .with_assets(ui::primitives::assets::Assets)
         .run(move |cx| {
-            widgets::assets::init(cx);
-            widgets::text_input::bind_keys(cx);
-            widgets::menu::bind_keys(cx);
-            crate::screens::main_window::bind_keys(cx);
+            ui::primitives::assets::init(cx);
+            ui::primitives::text_input::bind_keys(cx);
+            ui::primitives::menu::bind_keys(cx);
+            crate::ui::views::main_window::bind_keys(cx);
             cx.bind_keys([
                 KeyBinding::new("tab", NextFocus, Some("KinemaLab")),
                 KeyBinding::new("shift-tab", PreviousFocus, Some("KinemaLab")),
             ]);
-            tokens::set_mode(if light { Mode::Light } else { Mode::Dark }, cx);
-            tokens::set_reduce_motion(reduce, cx);
+            theme::set_mode(if light { Mode::Light } else { Mode::Dark }, cx);
+            theme::set_reduce_motion(reduce, cx);
             cx.on_window_closed(|cx, _| {
                 if cx.windows().is_empty() {
                     cx.quit();
@@ -166,10 +176,10 @@ pub fn run_native() {
             } else if scene.starts_with("library-live") {
                 cx.open_window(options, |window, cx| {
                     cx.new(|cx| {
-                        use crate::screens::{
-                            browse::LibraryFilters,
-                            coordinator::{AppCoordinator, BrowseTitle, LocalBrowseTitle},
+                        use crate::controllers::coordinator::{
+                            AppCoordinator, BrowseTitle, LocalBrowseTitle,
                         };
+                        use crate::ui::views::browse::LibraryFilters;
                         use kinema_core::{
                             MediaKind,
                             catalog_normalized::{CanonicalTitle, ExternalIdentifier, FieldValue},
@@ -238,7 +248,7 @@ pub fn run_native() {
                                     ratings: Vec::new(),
                                     updated_at: 0,
                                 };
-                                let personal = crate::screens::coordinator::PersonalTitle {
+                                let personal = crate::controllers::coordinator::PersonalTitle {
                                     title_id: TitleId::new(id)
                                         .unwrap_or_else(|| panic!("fixture id")),
                                     kind: metadata.kind,
@@ -294,7 +304,7 @@ pub fn run_native() {
                             }
                             c
                         });
-                        let main = crate::screens::main_window::MainWindow::with_coordinator(
+                        let main = crate::ui::views::main_window::MainWindow::with_coordinator(
                             coordinator,
                             window,
                             cx,
@@ -314,7 +324,7 @@ pub fn run_native() {
                 cx.open_window(options, |window, cx| {
                     cx.new(|cx| {
                         let coordinator = cx.new(|cx| {
-                            use crate::screens::coordinator::{AppCoordinator, BrowseTitle};
+                            use crate::controllers::coordinator::{AppCoordinator, BrowseTitle};
                             use kinema_core::{
                                 MediaKind,
                                 catalog::{CatalogDisplay, CatalogTitle, ImdbId, ImdbRating},
@@ -392,7 +402,7 @@ pub fn run_native() {
                             }
                             coordinator
                         });
-                        crate::screens::main_window::MainWindow::with_coordinator(
+                        crate::ui::views::main_window::MainWindow::with_coordinator(
                             coordinator,
                             window,
                             cx,
@@ -417,7 +427,10 @@ fn col() -> Div {
     div().flex().flex_col().gap(s::S8)
 }
 fn heading(label: &'static str) -> Div {
-    div().type_style(t::HEADING).child(label)
+    div()
+        .text(TextSize::Lg)
+        .weight(Weight::Semibold)
+        .child(label)
 }
 fn action(label: &'static str, checked: bool) -> MenuItem {
     MenuItem::Action {
@@ -470,8 +483,8 @@ fn art(index: usize, width: u32, height: u32) -> Arc<RenderImage> {
 }
 
 fn grid(width: f32) -> (usize, f32) {
-    let available = (width - 2. * f32::from(s::GRID_INSET)).max(1.);
-    let gap = f32::from(s::GRID_GAP);
+    let available = (width - 2. * f32::from(size::PAGE_INSET)).max(1.);
+    let gap = f32::from(layout::GRID_GAP);
     let columns = ((available + gap) / (172. + gap)).floor().max(2.) as usize;
     (
         columns,
@@ -483,18 +496,18 @@ fn action_column(window: &Window) -> Pixels {
     if window.viewport_size().width < px(1100.) {
         px(340.)
     } else {
-        s::ACTION_COLUMN
+        size::ACTION_COLUMN
     }
 }
 fn selected_row(el: Stateful<Div>, palette: Palette) -> Stateful<Div> {
-    el.bg(palette.accent_tint).child(
+    el.bg(palette.selection).child(
         div()
             .absolute()
             .left_0()
             .top_0()
             .bottom_0()
             .w(s::S2)
-            .bg(palette.accent),
+            .bg(palette.primary),
     )
 }
 const EPISODES: [(&str, &str, &str); 8] = [
@@ -534,6 +547,7 @@ struct Lab {
     episode_watched: [bool; 8],
     checked: bool,
     scroll: ScrollHandle,
+    motion: Option<Entity<motion_scene::MotionScene>>,
     context: Option<Entity<Menu>>,
     _startup: Option<Task<()>>,
     focus: FocusHandle,
@@ -545,6 +559,7 @@ impl Lab {
                 cx.new(|cx| {
                     let mut input = TextInput::new(window, cx);
                     input.set_placeholder("Placeholder…", cx);
+                    input.set_label(format!("Fixture input {i}"), cx);
                     if i != 0 {
                         input.set_text(
                             if i == 4 {
@@ -715,6 +730,8 @@ impl Lab {
         } else {
             None
         };
+        let motion =
+            (scene == "motion").then(|| cx.new(|cx| motion_scene::MotionScene::new(window, cx)));
         let focus = cx.focus_handle();
         focus.focus(window, cx);
         Self {
@@ -743,6 +760,7 @@ impl Lab {
             episode_watched: [true, true, false, false, true, false, false, false],
             checked: true,
             scroll: ScrollHandle::new(),
+            motion,
             context,
         }
     }
@@ -822,7 +840,7 @@ impl Lab {
             this.kind = *value;
             cx.notify();
         }));
-        div().relative().flex_none().h(s::TOOLBAR_HEIGHT).child(
+        div().relative().flex_none().h(size::TOOLBAR_HEIGHT).child(
             Toolbar::new()
                 .leading(scope)
                 .leading(kind)
@@ -833,11 +851,16 @@ impl Lab {
                 .trailing(
                     ToolbarGroup::new()
                         .child(
-                            IconButton::new("transfers", IconName::Transfers, "Transfers").badge(2),
+                            Button::icon_button("transfers", IconName::Transfers, "Transfers")
+                                .badge(2),
                         )
                         .divider()
-                        .child(IconButton::new("settings", IconName::Settings, "Settings"))
-                        .child(IconButton::new(
+                        .child(Button::icon_button(
+                            "settings",
+                            IconName::Settings,
+                            "Settings",
+                        ))
+                        .child(Button::icon_button(
                             "overflow",
                             IconName::MoreHorizontal,
                             "More",
@@ -847,7 +870,7 @@ impl Lab {
     }
     fn browse(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let (columns, width) = grid(f32::from(window.viewport_size().width));
-        let mut rows = col().gap(s::GRID_GAP).p(s::GRID_INSET);
+        let mut rows = col().gap(layout::GRID_GAP).p(size::PAGE_INSET);
         for chunk in self.cards.chunks(columns) {
             for card in chunk {
                 card.update(cx, |card, _| card.width = width);
@@ -855,7 +878,7 @@ impl Lab {
             rows = rows.child(
                 row()
                     .items_start()
-                    .gap(s::GRID_GAP)
+                    .gap(layout::GRID_GAP)
                     .children(chunk.iter().cloned()),
             );
         }
@@ -866,7 +889,7 @@ impl Lab {
             .child(ScrollArea::new("grid", self.scroll.clone()).child(rows))
     }
     fn play_sheet(&self, cx: &mut Context<Self>) -> Sheet {
-        let p = *tokens::palette(cx);
+        let p = *theme::palette(cx);
         let weak = cx.entity().downgrade();
         let mut files = col().gap_0();
         for (i, (name, size)) in [
@@ -881,10 +904,10 @@ impl Lab {
                 row()
                     .id(("file-choice", i))
                     .w_full()
-                    .h(s::ROW_TWO_LINE)
+                    .h(size::ROW_TALL)
                     .justify_between()
                     .border_b_1()
-                    .border_color(p.line_hairline)
+                    .border_color(p.border)
                     .child(
                         Radio::new(("file-radio", i), name, self.selected_file == Some(i))
                             .on_select(move |_, cx| {
@@ -896,8 +919,9 @@ impl Lab {
                     )
                     .child(
                         div()
-                            .type_style(t::MONO)
-                            .text_color(p.text_secondary)
+                            .text(TextSize::Sm)
+                            .mono()
+                            .text_color(p.muted_foreground)
                             .child(size),
                     ),
             );
@@ -911,17 +935,18 @@ impl Lab {
                             .gap(s::S4)
                             .child(
                                 div()
-                                    .type_style(t::MONO)
+                                    .text(TextSize::Sm)
+                                    .mono()
                                     .child("Quiet.Orbit.2024.1080p.WEB-DL"),
                             )
                             .child(
                                 row()
-                                    .child(Chip::quality("1080P"))
-                                    .child(Chip::quality("HDR"))
+                                    .child(Badge::quality("1080P"))
+                                    .child(Badge::quality("HDR"))
                                     .child(
                                         div()
-                                            .type_style(t::SMALL)
-                                            .text_color(p.text_secondary)
+                                            .text(TextSize::Sm)
+                                            .text_color(p.muted_foreground)
                                             .child("via Real-Debrid · fixture"),
                                     ),
                             ),
@@ -929,9 +954,14 @@ impl Lab {
                     .child(
                         row()
                             .gap(s::S8)
-                            .text_color(p.status_ok)
-                            .child(div().type_style(t::BODY_STRONG).child("① Prepared"))
-                            .child(Icon::new(IconName::Check).color(p.status_ok)),
+                            .text_color(p.success)
+                            .child(
+                                div()
+                                    .text(TextSize::Base)
+                                    .weight(Weight::Semibold)
+                                    .child("① Prepared"),
+                            )
+                            .child(Icon::new(IconName::Check).color(p.success)),
                     )
                     .child(
                         col()
@@ -941,8 +971,8 @@ impl Lab {
                     )
                     .child(
                         div()
-                            .type_style(t::SMALL)
-                            .text_color(p.text_muted)
+                            .text(TextSize::Sm)
+                            .text_color(p.subtle_foreground)
                             .child("Fixture only · no player will be started"),
                     ),
             )
@@ -954,7 +984,7 @@ impl Lab {
             )
             .footer(
                 Button::new("cancel", "Cancel")
-                    .size(ButtonSize::Large)
+                    .size(ButtonSize::Md)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.sheet = false;
                         cx.notify();
@@ -963,7 +993,7 @@ impl Lab {
             .footer(
                 Button::new("play", "Play")
                     .icon(IconName::Play)
-                    .size(ButtonSize::Large)
+                    .size(ButtonSize::Md)
                     .variant(ButtonVariant::Primary)
                     .disabled(self.selected_file.is_none())
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -979,14 +1009,14 @@ impl Lab {
             })
     }
     fn components(&self, window: &Window, cx: &mut Context<Self>) -> Div {
-        let p = *tokens::palette(cx);
+        let p = *theme::palette(cx);
         let weak = cx.entity().downgrade();
         let mut buttons = col().child(heading("Buttons · rest / disabled / busy"));
         for (i, (name, variant)) in [
             ("Primary", ButtonVariant::Primary),
             ("Secondary", ButtonVariant::Secondary),
             ("Ghost", ButtonVariant::Ghost),
-            ("Danger", ButtonVariant::Danger),
+            ("Destructive", ButtonVariant::Destructive),
         ]
         .into_iter()
         .enumerate()
@@ -1006,19 +1036,23 @@ impl Lab {
             .child(buttons)
             .child(
                 row()
-                    .child(IconButton::new("icon", IconName::Play, "Play"))
-                    .child(IconButton::new("badge", IconName::Transfers, "Transfers").badge(2))
+                    .child(Button::icon_button("icon", IconName::Play, "Play"))
+                    .child(Button::icon_button("badge", IconName::Transfers, "Transfers").badge(2))
                     .child(
-                        IconButton::new(
+                        Button::icon_button(
                             "icon-disabled",
                             IconName::Settings,
                             "Settings unavailable",
                         )
                         .disabled(true),
                     )
-                    .child(IconButton::new("icon-busy", IconName::Refresh, "Refreshing").busy(true))
                     .child(
-                        IconButton::new("icon-toggled", IconName::Info, "Information")
+                        Button::icon_button("icon-busy", IconName::Refresh, "Refreshing")
+                            .busy(true),
+                    )
+                    .child(
+                        Button::icon_button("icon-toggled", IconName::Info, "Information")
+                            .selected(true)
                             .toggled(true),
                     ),
             )
@@ -1055,23 +1089,23 @@ impl Lab {
             .child(heading("Chips · unknown rating is absent"))
             .child(
                 row()
-                    .child(Chip::rating(Some(8.1)))
-                    .child(Chip::rating(Some(0.)))
-                    .child(Chip::rating(None))
-                    .child(Chip::series())
-                    .child(Chip::quality("2160P"))
-                    .child(Chip::quality("HDR")),
+                    .child(Badge::rating(Some(8.1)))
+                    .child(Badge::rating(Some(0.)))
+                    .child(Badge::rating(None))
+                    .child(Badge::series())
+                    .child(Badge::quality("2160P"))
+                    .child(Badge::quality("HDR")),
             )
             .child(
                 row().children(
                     [
-                        (StatusKind::Info, "Info"),
-                        (StatusKind::Success, "Ready"),
-                        (StatusKind::Warning, "Stale"),
-                        (StatusKind::Error, "Failed"),
+                        (BadgeTone::Neutral, "Info"),
+                        (BadgeTone::Success, "Ready"),
+                        (BadgeTone::Warning, "Stale"),
+                        (BadgeTone::Destructive, "Failed"),
                     ]
                     .into_iter()
-                    .map(|(kind, text)| Chip::status(kind, text)),
+                    .map(|(tone, text)| Badge::new(text).tone(tone)),
                 ),
             )
             .child(heading("Progress · 42% / indeterminate"))
@@ -1105,7 +1139,7 @@ impl Lab {
                         div()
                             .id("context-target")
                             .p(s::S8)
-                            .bg(p.ctl_rest)
+                            .bg(p.secondary)
                             .child("Right-click / Shift+F10")
                             .context_menu("specimen-context", |_, _| card_menu()),
                     )
@@ -1132,8 +1166,8 @@ impl Lab {
                     .gap(s::S2)
                     .child(
                         div()
-                            .type_style(t::SMALL)
-                            .text_color(p.text_secondary)
+                            .text(TextSize::Sm)
+                            .text_color(p.muted_foreground)
                             .child(label),
                     )
                     .child(self.inputs[i].clone()),
@@ -1145,65 +1179,56 @@ impl Lab {
             .child(self.select.clone())
             .child(heading("Notices"));
         for (kind, label) in [
-            (NoticeKind::Info, "Fixture information"),
-            (NoticeKind::Success, "Ready to launch"),
-            (NoticeKind::Warning, "Saved results · refresh failed"),
-            (NoticeKind::Error, "Couldn't reach provider"),
-            (NoticeKind::Empty, "No matching titles"),
+            (AlertTone::Info, "Fixture information"),
+            (AlertTone::Success, "Ready to launch"),
+            (AlertTone::Warning, "Saved results · refresh failed"),
+            (AlertTone::Error, "Couldn't reach provider"),
+            (AlertTone::Empty, "No matching titles"),
         ] {
-            editors = editors.child(Notice::new(kind, label));
+            editors = editors.child(Alert::new(kind, label));
         }
-        editors = editors
-            .child(Notice::new(NoticeKind::Warning, "Saved results · refresh failed").strip());
+        editors =
+            editors.child(Alert::new(AlertTone::Warning, "Saved results · refresh failed").strip());
         let mut typography = col().child(heading("Type scale"));
-        for (label, style) in [
-            ("DISPLAY · Quiet Orbit", t::DISPLAY),
-            ("TITLE · Play", t::TITLE),
-            ("HEADING · North Harbor", t::HEADING),
-            ("BODY · A distant shore", t::BODY),
-            ("BODY STRONG · Open", t::BODY_STRONG),
-            ("SMALL · 2024 · 118 min", t::SMALL),
-            ("CAPTION · 2160P", t::CAPTION),
-            ("MONO · release.1080p.mkv", t::MONO),
-        ] {
-            typography = typography.child(div().type_style(style).child(label));
-        }
-        typography = typography.child(heading("Cinema · semantic palette"));
-        for (name, color) in [
-            ("bg.canvas", p.bg_canvas),
-            ("bg.surface", p.bg_surface),
-            ("bg.raised", p.bg_raised),
-            ("bg.placeholder", p.bg_placeholder),
-            ("ctl.rest", p.ctl_rest),
-            ("ctl.hover", p.ctl_hover),
-            ("ctl.pressed", p.ctl_pressed),
-            ("line.hairline", p.line_hairline),
-            ("line.control", p.line_control),
-            ("text.primary", p.text_primary),
-            ("text.secondary", p.text_secondary),
-            ("text.muted", p.text_muted),
-            ("accent", p.accent),
-            ("accent.text", p.accent_text),
-            ("focus.ring", p.focus_ring),
-            ("rating", p.rating),
-            ("status.ok", p.status_ok),
-            ("status.warn", p.status_warn),
-            ("status.error", p.status_error),
-        ] {
-            typography = typography.child(
-                row()
-                    .gap(s::S8)
-                    .child(
-                        div()
-                            .w(s::S32)
-                            .h(s::S12)
-                            .bg(color)
-                            .border_1()
-                            .border_color(p.line_control),
-                    )
-                    .child(div().type_style(t::MONO).child(name)),
+        typography = typography
+            .child(
+                div()
+                    .text(TextSize::Xxl)
+                    .weight(Weight::Bold)
+                    .child("DISPLAY · Quiet Orbit"),
+            )
+            .child(
+                div()
+                    .text(TextSize::Xl)
+                    .weight(Weight::Semibold)
+                    .child("TITLE · Play"),
+            )
+            .child(
+                div()
+                    .text(TextSize::Lg)
+                    .weight(Weight::Semibold)
+                    .child("HEADING · North Harbor"),
+            )
+            .child(div().text(TextSize::Base).child("BODY · A distant shore"))
+            .child(
+                div()
+                    .text(TextSize::Base)
+                    .weight(Weight::Semibold)
+                    .child("BODY STRONG · Open"),
+            )
+            .child(div().text(TextSize::Sm).child("SMALL · 2024 · 118 min"))
+            .child(
+                div()
+                    .text(TextSize::Xs)
+                    .weight(Weight::Semibold)
+                    .child("CAPTION · 2160P"),
+            )
+            .child(
+                div()
+                    .text(TextSize::Sm)
+                    .mono()
+                    .child("MONO · release.1080p.mkv"),
             );
-        }
         col()
             .p(s::S20)
             .gap(s::S16)
@@ -1212,7 +1237,8 @@ impl Lab {
                     .justify_between()
                     .child(
                         div()
-                            .type_style(t::TITLE)
+                            .text(TextSize::Xl)
+                            .weight(Weight::Semibold)
                             .child("Kinema / native design lab"),
                     )
                     .child("v3 · fixture only · no services"),
@@ -1228,7 +1254,7 @@ impl Lab {
             .child(self.patterns(window, cx))
     }
     fn menus(&self, cx: &mut Context<Self>) -> Div {
-        let p = *tokens::palette(cx);
+        let p = *theme::palette(cx);
         col()
             .p(s::S32)
             .gap(s::S24)
@@ -1254,7 +1280,7 @@ impl Lab {
                     )
                     .child(
                         col()
-                            .w(s::POPOVER_WIDTH)
+                            .w(size::POPOVER_WIDTH)
                             .child(heading("Transfers popover"))
                             .child(
                                 Popover::new("interactive-popover")
@@ -1262,7 +1288,7 @@ impl Lab {
                                     .content(
                                         col()
                                             .w(px(352.))
-                                            .bg(p.bg_raised)
+                                            .bg(p.card)
                                             .child(heading("Transfers"))
                                             .child("North Harbor · S01E02")
                                             .child("Downloading 1.4 / 4.2 GiB · serving")
@@ -1286,17 +1312,18 @@ impl Lab {
             .tab_stop(true)
             .flex()
             .items_center()
-            .h(s::CONTROL_HEIGHT)
+            .h(size::CONTROL_SM)
             .px(s::S12)
             .gap(s::S6)
-            .type_style(t::BODY_STRONG)
-            .border(s::FOCUS_RING)
-            .border_color(dark.bg_canvas.opacity(0.))
-            .text_color(dark.text_secondary)
+            .text(TextSize::Base)
+            .weight(Weight::Semibold)
+            .border(size::FOCUS_RING)
+            .border_color(dark.background.opacity(0.))
+            .text_color(dark.muted_foreground)
             .cursor_pointer()
-            .hover(move |el| el.bg(dark.ctl_hover))
-            .focus_visible(move |el| el.border_color(dark.focus_ring))
-            .child(Icon::new(IconName::ChevronDown).color(dark.text_secondary))
+            .hover(move |el| el.bg(dark.accent))
+            .focus_visible(move |el| el.border_color(dark.ring))
+            .child(Icon::new(IconName::ChevronDown).color(dark.muted_foreground))
             .child("Details & provenance")
             .on_click(cx.listener(|this, _, _, cx| {
                 this.provenance_open = !this.provenance_open;
@@ -1343,7 +1370,7 @@ impl Lab {
     }
 
     fn hero(&self, window: &Window, series: bool, cx: &mut Context<Self>) -> Div {
-        let p = *tokens::palette(cx);
+        let p = *theme::palette(cx);
         let dark = Palette::dark();
         let band_height = f32::from(window.viewport_size().height) * 0.60;
         let width = f32::from(window.viewport_size().width) - f32::from(action_column(window));
@@ -1375,8 +1402,8 @@ impl Lab {
             // These are functional scrims across the artwork, not a text-bearing box.
             .child(div().absolute().inset_0().bg(linear_gradient(
                 90.,
-                linear_color_stop(dark.scrim_max, 0.),
-                linear_color_stop(dark.scrim_max.opacity(0.), 0.65),
+                linear_color_stop(dark.scrim, 0.),
+                linear_color_stop(dark.scrim.opacity(0.), 0.65),
             )))
             .child(
                 div()
@@ -1387,8 +1414,8 @@ impl Lab {
                     .h(relative(0.40))
                     .bg(linear_gradient(
                         180.,
-                        linear_color_stop(p.bg_canvas.opacity(0.), 0.),
-                        linear_color_stop(p.bg_canvas, 1.),
+                        linear_color_stop(p.background.opacity(0.), 0.),
+                        linear_color_stop(p.background, 1.),
                     )),
             )
             .child(
@@ -1412,12 +1439,12 @@ impl Lab {
                             .min_w_0()
                             .max_w(px(640.))
                             .gap(s::S8)
-                            .text_color(dark.text_primary)
-                            .child(div().type_style(t::DISPLAY).child(title))
+                            .text_color(dark.foreground)
+                            .child(div().text(TextSize::Xxl).weight(Weight::Bold).child(title))
                             .child(
                                 div()
-                                    .type_style(t::SMALL)
-                                    .text_color(dark.text_secondary)
+                                    .text(TextSize::Sm)
+                                    .text_color(dark.muted_foreground)
                                     .child(if series {
                                         "2024 · 3 seasons · Drama · Mystery"
                                     } else {
@@ -1425,16 +1452,16 @@ impl Lab {
                                     }),
                             )
                             .child(
-                                row().child(Chip::rating(Some(8.1)).over_art(true)).child(
+                                row().child(Badge::rating(Some(8.1)).over_art(true)).child(
                                     div()
-                                        .type_style(t::SMALL)
-                                        .text_color(dark.text_muted)
+                                        .text(TextSize::Sm)
+                                        .text_color(dark.subtle_foreground)
                                         .child("IMDb"),
                                 ),
                             )
                             .child(
                                 div()
-                                    .type_style(t::BODY_LONG)
+                                    .text(TextSize::Md)
                                     .w_full()
                                     .max_w(px(640.))
                                     .line_clamp(4)
@@ -1476,48 +1503,57 @@ impl Lab {
                             .gap(s::S4)
                             .child(
                                 div()
-                                    .type_style(t::SMALL)
-                                    .text_color(p.text_muted)
+                                    .text(TextSize::Sm)
+                                    .text_color(p.subtle_foreground)
                                     .child(label),
                             )
                             .child(
                                 div()
-                                    .type_style(t::SMALL)
-                                    .text_color(p.text_secondary)
+                                    .text(TextSize::Sm)
+                                    .text_color(p.muted_foreground)
                                     .child(value),
                             )
                     }),
                 ),
-        ).when(self.provenance_open, |el| el.child(div().px(s::S32).type_style(t::SMALL).text_color(p.text_muted).child("Metadata: offline fixture · IMDb rating fixture 8.1 · no provider contacted")))
+        ).when(self.provenance_open, |el| el.child(div().px(s::S32).text(TextSize::Sm).text_color(p.subtle_foreground).child("Metadata: offline fixture · IMDb rating fixture 8.1 · no provider contacted")))
     }
 
     fn streams(&self, window: &Window, series: bool, cx: &mut Context<Self>) -> Div {
-        let p = *tokens::palette(cx);
+        let p = *theme::palette(cx);
         let mut streams = col()
             .gap_0()
             .w(action_column(window))
             .h_full()
             .flex_none()
-            .bg(p.bg_surface)
+            .bg(p.surface)
             .border_l_1()
-            .border_color(p.line_hairline);
+            .border_color(p.border);
         if series {
             streams = streams.child(
                 row()
                     .px(s::S12)
                     .h(s::S48)
                     .child(
-                        IconButton::new("episode-back", IconName::ArrowLeft, "Back to episodes")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.scene = "series".into();
-                                cx.notify();
-                            })),
+                        Button::icon_button(
+                            "episode-back",
+                            IconName::ArrowLeft,
+                            "Back to episodes",
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.scene = "series".into();
+                            cx.notify();
+                        })),
                     )
-                    .child(div().type_style(t::BODY_STRONG).child(format!(
-                        "S01E{:02} · {}",
-                        self.selected_episode + 1,
-                        EPISODES[self.selected_episode].0
-                    ))),
+                    .child(
+                        div()
+                            .text(TextSize::Base)
+                            .weight(Weight::Semibold)
+                            .child(format!(
+                                "S01E{:02} · {}",
+                                self.selected_episode + 1,
+                                EPISODES[self.selected_episode].0
+                            )),
+                    ),
             );
         }
         streams = streams
@@ -1551,16 +1587,17 @@ impl Lab {
                 col()
                     .id(("stream", i))
                     .relative()
-                    .h(s::ROW_TWO_LINE)
+                    .h(size::ROW_TALL)
                     .gap(s::S4)
                     .px(s::S12)
                     .py(s::S8)
                     .border_b_1()
-                    .border_color(p.line_hairline)
+                    .border_color(p.border)
                     .when(i == 1, |el| selected_row(el, p))
                     .child(
                         div()
-                            .type_style(t::MONO)
+                            .text(TextSize::Sm)
+                            .mono()
                             .text_ellipsis()
                             .child(release.clone())
                             .id(("release", i))
@@ -1568,17 +1605,17 @@ impl Lab {
                     )
                     .child(
                         row()
-                            .child(Chip::quality(quality))
-                            .when(i == 0, |el| el.child(Chip::quality("HDR")))
-                            .child(div().type_style(t::SMALL).child(if i == 0 {
+                            .child(Badge::quality(quality))
+                            .when(i == 0, |el| el.child(Badge::quality("HDR")))
+                            .child(div().text(TextSize::Sm).child(if i == 0 {
                                 "18.2 GiB"
                             } else {
                                 "4.2 GiB"
                             }))
                             .child(
                                 div()
-                                    .type_style(t::SMALL)
-                                    .text_color(p.text_secondary)
+                                    .text(TextSize::Sm)
+                                    .text_color(p.muted_foreground)
                                     .child("412 seeds"),
                             ),
                     )
@@ -1593,15 +1630,15 @@ impl Lab {
     }
 
     fn episodes(&self, window: &Window, cx: &mut Context<Self>) -> Div {
-        let p = *tokens::palette(cx);
+        let p = *theme::palette(cx);
         let mut column = col()
             .gap_0()
             .w(action_column(window))
             .h_full()
             .flex_none()
-            .bg(p.bg_surface)
+            .bg(p.surface)
             .border_l_1()
-            .border_color(p.line_hairline)
+            .border_color(p.border)
             .child(
                 row()
                     .p(s::S16)
@@ -1609,8 +1646,8 @@ impl Lab {
                     .child(self.season.clone())
                     .child(
                         div()
-                            .type_style(t::SMALL)
-                            .text_color(p.text_muted)
+                            .text(TextSize::Sm)
+                            .text_color(p.subtle_foreground)
                             .child("8 episodes"),
                     ),
             );
@@ -1619,18 +1656,19 @@ impl Lab {
                 row()
                     .id(("episode", i))
                     .relative()
-                    .h(s::ROW_TWO_LINE)
+                    .h(size::ROW_TALL)
                     .px(s::S16)
                     .gap(s::S12)
                     .border_b_1()
-                    .border_color(p.line_hairline)
+                    .border_color(p.border)
                     .cursor_pointer()
                     .when(i == self.selected_episode, |el| selected_row(el, p))
-                    .hover(move |el| el.bg(p.ctl_hover))
+                    .hover(move |el| el.bg(p.accent))
                     .child(
                         div()
-                            .type_style(t::MONO)
-                            .text_color(p.text_muted)
+                            .text(TextSize::Sm)
+                            .mono()
+                            .text_color(p.subtle_foreground)
                             .child(format!("{:02}", i + 1)),
                     )
                     .child(
@@ -1641,13 +1679,18 @@ impl Lab {
                             .child(
                                 row()
                                     .justify_between()
-                                    .child(div().type_style(t::BODY_STRONG).child(title))
+                                    .child(
+                                        div()
+                                            .text(TextSize::Base)
+                                            .weight(Weight::Semibold)
+                                            .child(title),
+                                    )
                                     .child(
                                         row()
                                             .child(
                                                 div()
-                                                    .type_style(t::SMALL)
-                                                    .text_color(p.text_secondary)
+                                                    .text(TextSize::Sm)
+                                                    .text_color(p.muted_foreground)
                                                     .child(runtime),
                                             )
                                             .child({
@@ -1672,8 +1715,8 @@ impl Lab {
                             )
                             .child(
                                 div()
-                                    .type_style(t::SMALL)
-                                    .text_color(p.text_muted)
+                                    .text(TextSize::Sm)
+                                    .text_color(p.subtle_foreground)
                                     .child(format!("Aired {date}")),
                             ),
                     )
@@ -1688,7 +1731,7 @@ impl Lab {
     }
 
     fn detail(&self, window: &Window, cx: &mut Context<Self>) -> Div {
-        let p = *tokens::palette(cx);
+        let p = *theme::palette(cx);
         let series = self.scene.starts_with("series");
         let title = if series {
             "North Harbor"
@@ -1705,25 +1748,25 @@ impl Lab {
             .gap_0()
             .child(
                 row()
-                    .h(s::TOOLBAR_HEIGHT)
+                    .h(size::TOOLBAR_HEIGHT)
                     .flex_none()
                     .px(s::S20)
-                    .bg(p.bg_surface)
+                    .bg(p.surface)
                     .child(
-                        IconButton::new("back", IconName::ArrowLeft, "Back").on_click(cx.listener(
-                            |this, _, _, cx| {
+                        Button::icon_button("back", IconName::ArrowLeft, "Back").on_click(
+                            cx.listener(|this, _, _, cx| {
                                 this.scene = "browse".into();
                                 cx.notify();
-                            },
-                        )),
+                            }),
+                        ),
                     )
                     .child(title)
                     .child(div().flex_1())
                     .child(
-                        IconButton::new("detail-transfers", IconName::Transfers, "Transfers")
+                        Button::icon_button("detail-transfers", IconName::Transfers, "Transfers")
                             .badge(2),
                     )
-                    .child(IconButton::new(
+                    .child(Button::icon_button(
                         "detail-settings",
                         IconName::Settings,
                         "Settings",
@@ -1741,14 +1784,14 @@ impl Lab {
     }
 
     fn states(&self, window: &Window, cx: &mut Context<Self>) -> Div {
-        let p = *tokens::palette(cx);
+        let p = *theme::palette(cx);
         let width = (f32::from(window.viewport_size().width)
-            - 2. * f32::from(s::GRID_INSET)
-            - f32::from(s::GRID_GAP))
+            - 2. * f32::from(size::PAGE_INSET)
+            - f32::from(layout::GRID_GAP))
             / 2.;
-        let height = (f32::from(window.viewport_size().height - s::TOOLBAR_HEIGHT)
-            - 2. * f32::from(s::GRID_INSET)
-            - 2. * f32::from(s::GRID_GAP))
+        let height = (f32::from(window.viewport_size().height - size::TOOLBAR_HEIGHT)
+            - 2. * f32::from(size::PAGE_INSET)
+            - 2. * f32::from(layout::GRID_GAP))
             / 3.;
         let fixtures = [
             ("Loading · first page", None, "", "", ""),
@@ -1782,9 +1825,9 @@ impl Lab {
             ),
             ("Stale · loaded titles stay visible", None, "", "", ""),
         ];
-        let mut specimens = col().p(s::GRID_INSET).gap(s::GRID_GAP);
+        let mut specimens = col().p(size::PAGE_INSET).gap(layout::GRID_GAP);
         for (row_index, pair) in fixtures.chunks(2).enumerate() {
-            let mut cells = row().items_start().gap(s::GRID_GAP);
+            let mut cells = row().items_start().gap(layout::GRID_GAP);
             for (j, &(label, icon, title, body, action_label)) in pair.iter().enumerate() {
                 let index = row_index * 2 + j;
                 let mut cell = col()
@@ -1792,20 +1835,20 @@ impl Lab {
                     .h(px(height))
                     .gap(s::S12)
                     .p(s::S16)
-                    .bg(p.bg_surface)
+                    .bg(p.surface)
                     .border_1()
-                    .border_color(p.line_hairline)
+                    .border_color(p.border)
                     .child(
                         div()
-                            .type_style(t::SMALL)
-                            .text_color(p.text_muted)
+                            .text(TextSize::Sm)
+                            .text_color(p.subtle_foreground)
                             .child(label),
                     );
                 if let Some(icon) = icon {
                     let ink = match icon {
-                        IconName::Warning => p.status_warn,
-                        IconName::Error => p.status_error,
-                        _ => p.text_secondary,
+                        IconName::Warning => p.warning,
+                        IconName::Error => p.destructive,
+                        _ => p.muted_foreground,
                     };
                     cell = cell.child(
                         col()
@@ -1815,11 +1858,17 @@ impl Lab {
                             .justify_center()
                             .gap(s::S8)
                             .child(Icon::new(icon).color(ink))
-                            .child(div().type_style(t::HEADING).text_center().child(title))
                             .child(
                                 div()
-                                    .type_style(t::SMALL)
-                                    .text_color(p.text_secondary)
+                                    .text(TextSize::Lg)
+                                    .weight(Weight::Semibold)
+                                    .text_center()
+                                    .child(title),
+                            )
+                            .child(
+                                div()
+                                    .text(TextSize::Sm)
+                                    .text_color(p.muted_foreground)
                                     .text_center()
                                     .child(body),
                             )
@@ -1836,16 +1885,16 @@ impl Lab {
                                 div()
                                     .w(px(84.))
                                     .h(px(126.))
-                                    .bg(p.bg_placeholder)
+                                    .bg(p.muted)
                                     .border_1()
-                                    .border_color(p.line_hairline)
+                                    .border_color(p.border)
                             })),
                     );
                 } else {
                     cell = cell
                         .child(
-                            Notice::new(
-                                NoticeKind::Warning,
+                            Alert::new(
+                                AlertTone::Warning,
                                 "Showing saved results · refresh failed",
                             )
                             .strip()
@@ -1881,19 +1930,20 @@ impl Lab {
 
     /// Skeleton, badge, row, card, carousel and hero specimens (pattern layer).
     fn patterns(&self, window: &Window, cx: &mut Context<Self>) -> Div {
-        let p = *tokens::palette(cx);
+        let p = *theme::palette(cx);
         let label = |text: &'static str| {
             div()
-                .type_style(t::SMALL)
-                .text_color(p.text_muted)
+                .text(TextSize::Sm)
+                .text_color(p.subtle_foreground)
                 .child(text)
         };
         let tones = [
             ("Neutral", BadgeTone::Neutral),
-            ("Accent", BadgeTone::Accent),
-            ("Info", BadgeTone::Info),
+            ("Primary", BadgeTone::Primary),
             ("Success", BadgeTone::Success),
-            ("Warn", BadgeTone::Warn),
+            ("Warning", BadgeTone::Warning),
+            ("Destructive", BadgeTone::Destructive),
+            ("OnArt", BadgeTone::OnArt),
         ];
         let badges = col()
             .child(label("Badge · tones"))
@@ -1906,15 +1956,15 @@ impl Lab {
             )
             .child(
                 row().flex_wrap().children([
-                    Badge::new("4k").tone(BadgeTone::Accent).uppercase(true),
-                    Badge::new("hdr10").tone(BadgeTone::Info).uppercase(true),
-                    Badge::new("Dolby Vision").tone(BadgeTone::Info),
+                    Badge::new("4k").tone(BadgeTone::Primary).uppercase(true),
+                    Badge::new("hdr10").strong(true).uppercase(true),
+                    Badge::new("Dolby Vision").strong(true),
                     Badge::new("HEVC").uppercase(true),
                     Badge::new("Cached")
                         .tone(BadgeTone::Success)
                         .icon(IconName::Check),
                     Badge::new("Low seeds")
-                        .tone(BadgeTone::Warn)
+                        .tone(BadgeTone::Warning)
                         .icon(IconName::Warning),
                 ]),
             );
@@ -1949,7 +1999,7 @@ impl Lab {
                                 img(self.poster.clone())
                                     .w(s::S32)
                                     .h(s::S32)
-                                    .rounded(tokens::radius::SM)
+                                    .rounded(theme::radius::MD)
                                     .object_fit(ObjectFit::Cover),
                             )
                             .trailing(Badge::new("1080p").uppercase(true))
@@ -2000,12 +2050,12 @@ impl Lab {
                     .object_fit(ObjectFit::Cover),
             )
             .metas([
-                Chip::rating(Some(8.1)).over_art(true).into_any_element(),
+                Badge::rating(Some(8.1)).over_art(true).into_any_element(),
                 div().child("2024").into_any_element(),
                 div().child("118 min").into_any_element(),
             ])
-            .meta_badge(Badge::new("4k").tone(BadgeTone::Accent).uppercase(true))
-            .meta_badge(Badge::new("hdr10").tone(BadgeTone::Info).uppercase(true))
+            .meta_badge(Badge::new("4k").tone(BadgeTone::Primary).uppercase(true))
+            .meta_badge(Badge::new("hdr10").strong(true).uppercase(true))
             .overview(
                 "A visitor uncovers a secret by the distant shore, and the harbor town that \
                  has kept it for generations is not ready to let it go. Across one long \
@@ -2019,10 +2069,15 @@ impl Lab {
                     .over_art(true),
             )
             .secondary(Button::new("pat-trailer", "Trailer").over_art(true))
-            .title_action(IconButton::new("pat-copy", IconName::Copy, "Copy title").over_art(true))
-            .secondary(IconButton::new("pat-refresh", IconName::Refresh, "Refresh").over_art(true))
+            .title_action(
+                Button::icon_button("pat-copy", IconName::Copy, "Copy title").over_art(true),
+            )
             .secondary(
-                IconButton::new("pat-imdb", IconName::ExternalLink, "Open on IMDb").over_art(true),
+                Button::icon_button("pat-refresh", IconName::Refresh, "Refresh").over_art(true),
+            )
+            .secondary(
+                Button::icon_button("pat-imdb", IconName::ExternalLink, "Open on IMDb")
+                    .over_art(true),
             );
         let _ = window;
         col()
@@ -2060,7 +2115,7 @@ impl Lab {
                         Section::new("Section")
                             .count(10)
                             .trailing(Button::new("pat-section-action", "Sort").variant(ButtonVariant::Ghost))
-                            .child(div().type_style(t::BODY).text_color(p.text_secondary).child(
+                            .child(div().text(TextSize::Base).text_color(p.muted_foreground).child(
                                 "Body content sits below a heading row with count and trailing action.",
                             )),
                     ),
@@ -2085,7 +2140,7 @@ impl Lab {
     /// Loading, error, empty, refreshing and stale-failure specimens driven by
     /// real `Resource` values through `ResourceView`, plus an enum-driven `StateView`.
     fn pattern_states(&self, cx: &mut Context<Self>) -> Div {
-        let p = *tokens::palette(cx);
+        let p = *theme::palette(cx);
         let titles = || {
             vec![
                 "North Harbor",
@@ -2136,14 +2191,14 @@ impl Lab {
                 .min_w_0()
                 .p(s::S12)
                 .gap(s::S8)
-                .bg(p.bg_surface)
+                .bg(p.surface)
                 .border_1()
-                .border_color(p.line_subtle)
-                .rounded(tokens::radius::MD)
+                .border_color(p.border)
+                .rounded(theme::radius::LG)
                 .child(
                     div()
-                        .type_style(t::SMALL)
-                        .text_color(p.text_muted)
+                        .text(TextSize::Sm)
+                        .text_color(p.subtle_foreground)
                         .child(name),
                 )
                 .child(body)
@@ -2162,17 +2217,18 @@ impl Lab {
                 .into_any_element()
         };
         col()
-            .p(s::GRID_INSET)
-            .gap(s::GRID_GAP)
+            .p(size::PAGE_INSET)
+            .gap(layout::GRID_GAP)
             .child(
                 div()
-                    .type_style(t::HEADING)
+                    .text(TextSize::Lg)
+                    .weight(Weight::Semibold)
                     .child("Pattern states · ResourceView / StateView"),
             )
             .child(
                 row()
                     .items_start()
-                    .gap(s::GRID_GAP)
+                    .gap(layout::GRID_GAP)
                     .child(cell("Loading · skeleton", view("pat-rv-loading", &loading)))
                     .child(cell("Error · Retry", view("pat-rv-error", &error)))
                     .child(cell("Empty · successful", view("pat-rv-empty", &empty))),
@@ -2180,7 +2236,7 @@ impl Lab {
             .child(
                 row()
                     .items_start()
-                    .gap(s::GRID_GAP)
+                    .gap(layout::GRID_GAP)
                     .child(cell(
                         "Refreshing · stale stays",
                         view("pat-rv-refresh", &refreshing),
@@ -2198,7 +2254,7 @@ impl Lab {
 
 impl Render for Lab {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let p = *tokens::palette(cx);
+        let p = *theme::palette(cx);
         let content = match self.scene.as_str() {
             "browse" | "library" | "sheet" | "sheet-ready" => {
                 self.browse(window, cx).into_any_element()
@@ -2206,6 +2262,15 @@ impl Render for Lab {
             "menus" => self.menus(cx).into_any_element(),
             "detail" | "series" | "series-streams" => self.detail(window, cx).into_any_element(),
             "states" => self.states(window, cx).into_any_element(),
+            "tokens" => ScrollArea::new("tokens-scroll", self.scroll.clone())
+                .child(tokens_scene::render(p, theme::theme(cx).mode))
+                .into_any_element(),
+            "motion" => match &self.motion {
+                Some(motion) => ScrollArea::new("motion-scroll", self.scroll.clone())
+                    .child(motion.clone())
+                    .into_any_element(),
+                None => div().into_any_element(),
+            },
             "patterns" => ScrollArea::new("patterns-scroll", self.scroll.clone())
                 .child(self.patterns(window, cx))
                 .into_any_element(),
@@ -2228,9 +2293,9 @@ impl Render for Lab {
             .on_action(|_: &PreviousFocus, window, cx| window.focus_prev(cx))
             .size_full()
             .relative()
-            .bg(p.bg_canvas)
-            .text_color(p.text_primary)
-            .type_style(t::BODY)
+            .bg(p.background)
+            .text_color(p.foreground)
+            .text(TextSize::Base)
             .child(content)
             .when(self.sheet, |el| el.child(self.play_sheet(cx)))
     }
@@ -2255,10 +2320,10 @@ fn open_settings_fixture(
     cx: &mut App,
 ) {
     use crate::{
-        screens::coordinator::AppCoordinator,
+        controllers::coordinator::AppCoordinator,
         settings::{MotionChoice, Settings, ThemeChoice},
     };
-    use settings_window::{Section, SettingsWindow};
+    use settings::{Section, SettingsWindow};
     let section = match scene {
         "settings-accounts" | "settings-accounts-no-token" => Section::Accounts,
         "settings-playback" => Section::Playback,
@@ -2320,7 +2385,7 @@ fn open_settings_fixture(
 /// Offline fixture host: mounts production entities with no workers or services.
 struct ProductionScene {
     content: AnyView,
-    coordinator: Entity<crate::screens::coordinator::AppCoordinator>,
+    coordinator: Entity<crate::controllers::coordinator::AppCoordinator>,
     quit: bool,
     transfers: bool,
     _startup: Option<Task<()>>,
@@ -2328,12 +2393,11 @@ struct ProductionScene {
 }
 impl ProductionScene {
     fn new(scene: &str, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        use crate::screens::{
+        use crate::controllers::{
             coordinator::{AppCoordinator, BrowseTitle},
-            detail::Detail,
             play_session::PlaySession,
-            transfers::Transfers,
         };
+        use crate::ui::views::{detail::Detail, transfers::Transfers};
         use kinema_core::{
             MediaKind,
             catalog::{CatalogDisplay, CatalogTitle, ImdbId, ImdbRating},
@@ -2341,7 +2405,7 @@ impl ProductionScene {
         let series = scene.contains("series");
         let title=BrowseTitle::Cinemeta(CatalogTitle::new(ImdbId::new("tt1234567").unwrap_or_else(|e|panic!("fixture: {e}")),if series {MediaKind::Series}else{MediaKind::Movie},if series {"North Harbor"} else {"The Quiet Orbit"},Some("A drifting station's last engineer follows a mysterious signal across the silent ocean of space. A synthetic story, made only for this offline design fixture. Nothing here is real: the people, the station and the signal exist only so that long overviews wrap, clamp and expand the way they would for a real title with a generous synopsis.".into())).unwrap_or_else(|e|panic!("fixture: {e}")).with_display(CatalogDisplay{year:Some(2024),imdb_rating:ImdbRating::new(8.1),runtime_minutes:Some(118),genres:vec!["Drama".into(),"Sci-fi".into()],..Default::default()}));
         let title = if scene.contains("-local-") {
-            crate::screens::detail::local_fixture_title(series)
+            crate::ui::views::detail::local_fixture_title(series)
         } else if scene.contains("tmdb") {
             BrowseTitle::Tmdb(crate::tmdb::TmdbTitle {
                 id: 91,
@@ -2380,7 +2444,7 @@ impl ProductionScene {
         } else if scene.starts_with("transfers-live") {
             coordinator.update(cx, |c, _| {
                 c.sessions
-                    .push(crate::screens::coordinator::SessionSnapshot {
+                    .push(crate::controllers::coordinator::SessionSnapshot {
                         session: crate::media::PlaybackSession {
                             id: "offline-session".into(),
                             url: "http://127.0.0.1:1234/offline".into(),
@@ -2400,7 +2464,7 @@ impl ProductionScene {
                         can_reveal: true,
                     });
                 c.sessions
-                    .push(crate::screens::coordinator::SessionSnapshot {
+                    .push(crate::controllers::coordinator::SessionSnapshot {
                         session: crate::media::PlaybackSession {
                             id: "offline-local".into(),
                             url: "http://127.0.0.1:1234/media/offline-local".into(),
@@ -2469,14 +2533,14 @@ impl ProductionScene {
             if scene.starts_with("detail-live-window") {
                 let detail_route = detail.clone();
                 let main = cx.new(|cx| {
-                    crate::screens::main_window::MainWindow::with_coordinator(
+                    crate::ui::views::main_window::MainWindow::with_coordinator(
                         coordinator.clone(),
                         window,
                         cx,
                     )
                 });
                 main.update(cx, |m, _| {
-                    m.route = crate::screens::main_window::Route::Detail(detail_route)
+                    m.route = crate::ui::views::main_window::Route::Detail(detail_route)
                 });
                 main.into()
             } else {
@@ -2550,13 +2614,13 @@ impl ProductionScene {
 }
 impl Render for ProductionScene {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let p = *tokens::palette(cx);
+        let p = *theme::palette(cx);
         div()
             .size_full()
             .relative()
-            .bg(p.bg_canvas)
-            .text_color(p.text_primary)
-            .type_style(t::BODY)
+            .bg(p.background)
+            .text_color(p.foreground)
+            .text(TextSize::Base)
             // Keyboard traversal for native focus captures of production scenes.
             .key_context("KinemaLab")
             .track_focus(&self.focus)
@@ -2566,17 +2630,17 @@ impl Render for ProductionScene {
             .when(self.transfers, |el| {
                 el.child(
                     div()
-                        .h(s::TOOLBAR_HEIGHT)
+                        .h(size::TOOLBAR_HEIGHT)
                         .w_full()
                         .flex()
                         .justify_end()
                         .items_center()
                         .px(s::S20)
-                        .bg(p.bg_surface)
+                        .bg(p.surface)
                         .child(
                             Popover::new("fixture-transfers")
                                 .trigger(
-                                    IconButton::new(
+                                    Button::icon_button(
                                         "fixture-transfers-trigger",
                                         IconName::Transfers,
                                         "Transfers",
@@ -2588,7 +2652,7 @@ impl Render for ProductionScene {
                 )
             })
             .when(self.quit, |el| {
-                el.child(crate::screens::quit::confirmation(
+                el.child(crate::ui::views::quit::confirmation(
                     self.coordinator.clone(),
                     self.focus.clone(),
                 ))

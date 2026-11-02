@@ -5,9 +5,14 @@
 - Keep domain types and pure policies in `kinema-core`; keep GPUI and platform
   presentation in `kinema-desktop`. Do not add unused framework layers or subsystems.
 - Use direct `gpui` (package `gpui-pre =0.3.9`) and `gpui_platform`, with in-house
-  components under `kinema-desktop/src/widgets` per `docs/design/desktop-v3.md`.
+  components under `kinema-desktop/src/ui/{theme,motion,primitives,blocks,views}`
+  and orchestration in `src/controllers`; see `docs/design/design-system.md` and
+  `docs/design/desktop-v3.md`.
   V3 is the sole/default UI; do not restore legacy UI, version switches, or
   `gpui-kit`.
+- No raw style literals (`px(..)`, colors, opacity, durations, GPUI shorthand sizing)
+  outside `ui/theme`; a source-scan test enforces it (`// token-exempt: <reason>` is
+  the rare escape). Animate only through `ui::motion` presets.
 - Embedded MPV uses the sole/default GPU-surface path via default Cargo feature
   `gpu-surface`. Keep root `cargo run -p kinema-desktop --locked` working with
   durable vendored GPUI/HAL patches; do not require an experimental wrapper or

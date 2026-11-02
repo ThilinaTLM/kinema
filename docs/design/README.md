@@ -1,13 +1,14 @@
 # Desktop design
 
 [Desktop v3](desktop-v3.md) is the sole/default native UI contract: direct GPUI
-and in-house widgets, without Kit or UI-version switches. Approved revisions
+and in-house components, without Kit or UI-version switches. Approved revisions
 supersede conflicting portions of the base contract. Design approval and source
 implementation do not establish full workflow or cross-platform acceptance.
 
 | Document | Purpose |
 | --- | --- |
-| [Desktop v3](desktop-v3.md) | Layouts, components, accessibility, motion and performance requirements |
+| [Desktop v3](desktop-v3.md) | Product rules, layouts, accessibility, motion and performance requirements |
+| [Design system](design-system.md) | Tokens (color, type, space, size, radius, elevation, opacity, layout, motion), layers, component conventions, accessibility checklist, motion runtime and the no-raw-literals rule |
 | [UI revision](ui-revision-2026-10.html) | Approved toolbar, detail, Streams and catalog design revisions |
 | [Episodes revision](episodes-revision-2026-10.html) | Approved episode, season and shared artwork/control revisions |
 | [Streams revision](streams-revision-2026-10.html) | Approved Streams page: hero-lite header with filters, list + inspector, inline play (no Play sheet) |

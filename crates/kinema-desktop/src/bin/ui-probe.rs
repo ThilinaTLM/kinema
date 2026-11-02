@@ -1,5 +1,5 @@
 //! Offline native v3 lab; see docs/design/ui-probe.md.
-use kinema_desktop::{player::PlayerChoice, screens::player_window};
+use kinema_desktop::{player::PlayerChoice, ui::views::player};
 
 #[derive(Debug, PartialEq)]
 struct PlayerProbeArgs {
@@ -119,7 +119,7 @@ fn main() {
         eprintln!("player probe: category=tracing-subscriber-already-set");
     }
     let successful = if probe.native {
-        player_window::run_probe_mode(
+        player::run_probe_mode(
             probe.media,
             probe.seconds,
             probe.light,
@@ -128,7 +128,7 @@ fn main() {
             probe.stress_resize,
         )
     } else {
-        player_window::run_probe(
+        player::run_probe(
             if probe.native { probe.media } else { None },
             probe.seconds,
             probe.light,

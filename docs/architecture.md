@@ -4,7 +4,7 @@
 
 **Current state:** MVP source flows are composed in the Rust workspace,
 using direct GPUI (`gpui-pre =0.3.9`) and `gpui_platform`. V3 is the sole/default
-UI, with in-house widgets and no version switch or Kit dependency. It wires Cinemeta/TMDB browse/search/details
+UI, with in-house components and no version switch or Kit dependency. It wires Cinemeta/TMDB browse/search/details
 and episodes, source selection, settings/keyring actions, preparation/file choice,
 managed-media sessions, local-file playback, manual cleanup, and quit confirmation.
 The reported v4 source uses normalized canonical metadata and indexer rows, with
@@ -237,10 +237,40 @@ for fixture checks, not the retired wrapper.
 ## UI direction
 
 [Desktop v3](design/desktop-v3.md) is the sole/default native UI contract,
-using direct pinned GPUI and in-house widgets. Its approved revisions govern
+using direct pinned GPUI and in-house components. Its approved revisions govern
 current layouts and controls; Graphite v2 and Kit are not supported alternatives.
-Use the [design index](design/README.md) for active contracts and the
+Use the [design index](design/README.md) for active contracts, the
+[design system](design/design-system.md) for tokens, layers and motion, and the
 [native UI lab](design/ui-probe.md) for isolated fixture commands and evidence limits.
+
+### Desktop module layout
+
+`crates/kinema-desktop/src/` keeps rendering and orchestration apart:
+
+```mermaid
+flowchart TD
+  T["ui/theme<br/>tokens"] --> M["ui/motion<br/>presets, Presence"]
+  T --> P["ui/primitives<br/>generic accessible components"]
+  M --> P
+  P --> B["ui/blocks<br/>media/app compositions"]
+  B --> V["ui/views<br/>pages and windows"]
+  P --> V
+  C["controllers<br/>coordinator, lifecycle, play_session,<br/>enrichment, playback_progress"] <-- "entities / events" --> V
+```
+
+- `ui/theme`: pure token values (color, type, space, size, radius, elevation,
+  opacity, layout, motion values); the only place raw style literals are allowed.
+- `ui/motion`: transition presets, `AnimateExt`, `Presence`, tweens; the only
+  place that calls GPUI animation APIs.
+- `ui/primitives`: generic, domain-free, accessible components.
+- `ui/blocks`: media/app compositions; may use `kinema-core` types and
+  `crate::artwork`, never controllers or views.
+- `ui/views`: main window, browse, detail, settings, player, transfers, quit.
+- `controllers/`: background orchestration and generation-guarded results; no
+  rendering. Views reach it through entities and events.
+
+Non-UI modules (`catalog_*`, `media`, `providers`, …) are unchanged. Layer rules
+and the source-scan enforcement are in the [design system](design/design-system.md#1-layers).
 
 Search/detail/sources cancellation and shared display facts are implemented, not
 full rich/provenance UI acceptance. The approved Library extension above adds
@@ -309,7 +339,7 @@ This target-architecture diagram shows responsibilities and data flow, not separ
 
 ```mermaid
 flowchart TB
-    UI["GPUI screens"] --> Catalog["Catalog queries + sync"]
+    UI["GPUI views"] --> Catalog["Catalog queries + sync"]
     Catalog --> DB[("SQLite")]
     Catalog --> Metadata["TMDB / Cinemeta"]
     UI --> Sources["Source discovery"]

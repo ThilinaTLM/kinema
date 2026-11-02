@@ -24,7 +24,7 @@ Cargo 1.97.1.
 
 ### Source evidence
 
-- `screens/coordinator.rs`, `AppCoordinator::new`: queues `LoadSettings` during
+- `controllers/coordinator.rs`, `AppCoordinator::new`: queues `LoadSettings` during
   initialization, not only when the user opens Settings.
 - `app.rs`, `Backend::execute_checked`: `LoadSettings` clears cached settings and
   calls `snapshot`; `snapshot_warning` queries both debrid providers' `status`
@@ -129,8 +129,8 @@ Read-only inspection of the actual pinned upstream source
 `activate is not implemented on Linux, ignoring the call` and does nothing.
 Vendored `gpui-pre/src/app.rs`, `App::activate`, delegates to this platform API.
 Kinema calls `cx.activate(true)` after opening the main window (`main.rs`), in
-the lab (`design_lab.rs`), quit UI (`screens/quit.rs`), and player probe
-(`screens/player_window.rs`). The message alone does **not** establish a player
+the lab (`design_lab.rs`), quit UI (`ui/views/quit.rs`), and player probe
+(`ui/views/player`). The message alone does **not** establish a player
 startup failure, failed decoder or failed window focus.
 
 The separate `Window::activate_window` delegates to platform-window activation.

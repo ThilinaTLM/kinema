@@ -10,7 +10,16 @@ Production-screen fixtures inject offline state; they do not prove live workflow
 
 `--lab` bootstraps direct GPUI + `widgets` (no Kit initialization or legacy
 screens). Scenes: `components` (default), `browse`, `menus`, `sheet`, `sheet-ready`,
-`detail`, `series`, `series-streams`, `states`.
+`detail`, `series`, `series-streams`, `states`, `tokens`, `motion`.
+`tokens` shows the active mode's palette swatches grouped and labelled by token
+name (surfaces, text, actions, lines, status, over-art, rating/brand, derived
+states), the `TextSize` scale with weights, spacing bars, radius, elevation and
+opacity samples; capture it with and without `--light`. `motion` has one row per
+`Transition` preset (duration, ease, delay, effect) with Enter/Exit buttons that
+replay it, a `Presence` open/close panel, a `PosterCard` for the `CardHover`
+choreography, and the pulse loop; `--reduce-motion` makes every preset instant and
+the pulse static. Both scenes scroll; use `--size` (e.g. `1280x2300`) to capture
+them whole.
 All content is synthetic/in-memory; buttons never start services or players.
 `--light` and `--reduce-motion` select lab theme/motion preferences. `--size WxH`
 (logical pixels, default 1280x800; also accepted by `native-verify.cjs`, whose Xvfb

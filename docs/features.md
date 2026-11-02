@@ -17,8 +17,8 @@ not a completion report, runtime qualification or C++ parity checklist. The
   presentation live in `kinema-desktop`; native playback lives in `kinema-mpv`.
 
 **Source:** [workspace](../Cargo.toml), [bootstrap](../crates/kinema-desktop/src/main.rs),
-[widgets](../crates/kinema-desktop/src/widgets/),
-[coordinator](../crates/kinema-desktop/src/screens/coordinator.rs).
+[UI](../crates/kinema-desktop/src/ui/) (`theme`, `motion`, `primitives`, `blocks`, `views`; see the [design system](design/design-system.md)),
+[coordinator](../crates/kinema-desktop/src/controllers/coordinator.rs).
 **Contract:** [desktop v3](design/desktop-v3.md). Source composition does not establish
 keyboard/accessibility, visual, performance or cross-platform acceptance.
 
@@ -81,7 +81,7 @@ Fixture/public-endpoint evidence is not authenticated debrid/playback acceptance
 
 **Source/evidence:** [media contract and tests](../crates/kinema-desktop/src/media/README.md),
 [player choice/launch](../crates/kinema-desktop/src/player.rs),
-[player window](../crates/kinema-desktop/src/screens/player_window.rs),
+[player window](../crates/kinema-desktop/src/ui/views/),
 [native backend](../crates/kinema-mpv/README.md),
 [default features](../crates/kinema-desktop/Cargo.toml).
 **Limits:** [player contract](design/player.md), [storage policy](storage-layout.md).
@@ -102,7 +102,7 @@ support, sustained performance or complete live-provider workflows.
 **Source/evidence:** [personal storage](../crates/kinema-desktop/src/catalog_library.rs),
 [queries](../crates/kinema-desktop/src/catalog_library_query.rs),
 [storage tests](../crates/kinema-desktop/src/catalog_library_tests.rs),
-[shared personal state](../crates/kinema-desktop/src/screens/coordinator/personal.rs),
+[shared personal state](../crates/kinema-desktop/src/controllers/coordinator/personal.rs),
 [credentials](../crates/kinema-desktop/src/credentials.rs),
 [settings](../crates/kinema-desktop/src/settings.rs).
 **Contracts:** [Library/manual watch tracking](design/library.md) and the approved
