@@ -273,7 +273,7 @@ pub trait AnimateExt: IntoElement + Sized + 'static {
         let total = if run && !r.is_instant() {
             r.total()
         } else {
-            Duration::from_millis(1)
+            Duration::from_millis(1) // token-exempt: 1 ms sentinel so with_animation completes at once; not a design duration
         };
         self.with_animation(id, Animation::new(total), move |el, t| {
             f(el, r.progress_at(t))
