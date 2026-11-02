@@ -319,13 +319,6 @@ impl Detail {
                         &c.name,
                         &self.stream_page.query,
                     )
-                    && (!prefs.account_only
-                        || self.stream_page.accounts.is_empty()
-                        || self
-                            .stream_page
-                            .accounts
-                            .iter()
-                            .any(|(_, state)| state.contains(&c.torrent.hash)))
             })
             .map(|(i, _)| i)
             .collect();
@@ -387,27 +380,9 @@ impl Detail {
 
         let hero = self.streams_hero(&title, sources.as_ref(), busy, wide, cx);
 
-        // List heading: count plus the quiet notes that used to crowd the control box.
-        let has_accounts = !self.stream_page.accounts.is_empty();
-        let mut notes = Vec::new();
-        if prefs.account_only
-            && self
-                .stream_page
-                .accounts
-                .iter()
-                .any(|(_, state)| !matches!(state, AccountPresence::Known(_)))
-        {
-            notes.push(
-                "Account-only results are incomplete while a service is Checking or Unknown"
-                    .to_owned(),
-            );
-        }
-        if prefs.quality != self.filter && sources.is_some() {
-            notes.push(format!(
-                "No {} streams · showing all",
-                prefs.quality.label()
-            ));
-        }
+        // List heading: count plus a quiet fallback note.
+        let fallback_note = (prefs.quality != self.filter && sources.is_some())
+            .then(|| format!("No {} streams · showing all", prefs.quality.label()));
         let heading = div()
             .w_full()
             .flex()
@@ -432,8 +407,7 @@ impl Detail {
                 )
             })
             .children(
-                notes
-                    .into_iter()
+                fallback_note
                     .map(|note| div().text(TextSize::Sm).text_color(p.warning).child(note)),
             )
             .child(div().flex_1())
@@ -441,11 +415,7 @@ impl Detail {
                 div()
                     .text(TextSize::Sm)
                     .text_color(p.subtle_foreground)
-                    .child(if has_accounts {
-                        "Provider, quality, sort and account filter are remembered"
-                    } else {
-                        "Provider, quality and sort are remembered"
-                    }),
+                    .child("Provider, quality and sort are remembered"),
             );
 
         let sel = selection(
@@ -456,7 +426,7 @@ impl Detail {
         );
         let weak = cx.entity().downgrade();
         let mut view = state_view("streams", sel)
-            .skeleton(stream_skeleton())
+            .skeleton(stream_skeleton(&p))
             .message(format!("Couldn’t load streams from {provider}"))
             .empty(
                 IconName::Search,
@@ -610,7 +580,6 @@ impl Detail {
                 hero = hero.meta(
                     div()
                         .text(TextSize::Lg)
-                        .weight(Weight::Semibold)
                         .text_color(p.foreground)
                         .child(name.to_owned()),
                 );
@@ -631,7 +600,7 @@ impl Detail {
             hero = hero.meta_item(MetaItem::Badge(Badge::new(chip)));
         }
 
-        // Filters: provider and quality segments, search, sort, account toggle, refresh.
+        // Filters: provider and quality segments, search, sort, refresh.
         let active = *self.indexer.read(cx).value();
         let providers = [IndexerKind::Torrentio, IndexerKind::Peerflix];
         let weak = cx.entity().downgrade();
@@ -694,32 +663,6 @@ impl Detail {
             );
         if let Some(sort) = self.stream_page.sort.clone() {
             hero = hero.secondary(sort);
-        }
-        if !self.stream_page.accounts.is_empty() {
-            let account_only = self
-                .coordinator
-                .read(cx)
-                .settings
-                .as_ref()
-                .is_some_and(|s| s.streams.account_only);
-            let weak = cx.entity().downgrade();
-            hero = hero.secondary(
-                Button::new("streams-account-only", "In my account")
-                    .size(ButtonSize::Md)
-                    .square(!wide)
-                    .icon(IconName::Zap)
-                    .selected(account_only)
-                    .toggled(account_only)
-                    .tooltip("Only releases already in a connected debrid account")
-                    .on_click(move |_, _, cx| {
-                        let _ = weak.update(cx, |this, cx| {
-                            this.save_stream_settings(
-                                |s| s.streams.account_only = !account_only,
-                                cx,
-                            )
-                        });
-                    }),
-            );
         }
         hero = hero.secondary(
             Button::new("streams-refresh", "Refresh streams")

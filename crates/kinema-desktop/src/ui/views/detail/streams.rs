@@ -20,7 +20,7 @@ use crate::{
 };
 use kinema_core::sources::{DebridKind, InfoHash, parse_release_tags};
 
-pub(super) fn stream_skeleton() -> AnyElement {
+pub(super) fn stream_skeleton(p: &theme::Palette) -> AnyElement {
     div()
         .w_full()
         .flex()
@@ -29,8 +29,12 @@ pub(super) fn stream_skeleton() -> AnyElement {
         .children((0..geometry::STREAM_SKELETON_ROWS).map(|_| {
             div()
                 .w_full()
-                .h(size::ROW_TALL)
-                .px(s::S12)
+                .h(size::ROW_TALL + s::S12 + s::S12)
+                .px(s::S16)
+                .rounded(radius::LG)
+                .bg(p.card)
+                .border(size::HAIRLINE)
+                .border_color(p.border)
                 .flex()
                 .items_center()
                 .gap(s::S16)
@@ -112,7 +116,7 @@ impl Detail {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let p = *theme::palette(cx);
-        let mut list = div().w_full().flex().flex_col().gap(s::S2);
+        let mut list = div().w_full().flex().flex_col().gap(s::S8);
         while self.stream_focus.len() < sources.candidates.len() {
             self.stream_focus.push(cx.focus_handle().tab_stop(true));
         }
@@ -286,7 +290,7 @@ impl Detail {
         let focus = self.stream_focus[i].clone();
         let click_focus = focus.clone();
         let release = parse_release_tags(&candidate.name).release_name;
-        let mut row = StreamRow::new(("stream", i), release)
+        let mut row = StreamRow::new(i, release)
             .leading(quality_tile(candidate))
             .meta(tag_list(candidate, provider))
             .size(size_label(candidate.size))
@@ -342,7 +346,6 @@ impl Detail {
         if self.stream_page.accounts.len() < 2 {
             return div()
                 .text(TextSize::Sm)
-                .weight(Weight::Medium)
                 .text_color(p.muted_foreground)
                 .child(service_name(current))
                 .into_any_element();
@@ -403,7 +406,6 @@ impl Detail {
             actions = actions.child(
                 div()
                     .text(TextSize::Xs)
-                    .weight(Weight::Semibold)
                     .text_color(p.subtle_foreground)
                     .child(format!(
                         "Saved at {}. External players start from the beginning.",
@@ -472,7 +474,6 @@ impl Detail {
                 .child(
                     div()
                         .text(TextSize::Xs)
-                        .weight(Weight::Semibold)
                         .text_color(p.subtle_foreground)
                         .child("Play with"),
                 )
@@ -483,7 +484,6 @@ impl Detail {
             footer = footer.child(
                 div()
                     .text(TextSize::Xs)
-                    .weight(Weight::Semibold)
                     .text_color(p.subtle_foreground)
                     .child(format!("Opens in {player}")),
             );
@@ -506,7 +506,7 @@ impl Detail {
         let section = |title: &'static str| {
             div()
                 .text(TextSize::Xs)
-                .weight(Weight::Semibold)
+                .weight(Weight::Medium)
                 .text_color(p.subtle_foreground)
                 .child(title)
         };
@@ -541,8 +541,8 @@ impl Detail {
             .child(chips)
             .child(
                 div()
-                    .text(TextSize::Lg)
-                    .weight(Weight::Semibold)
+                    .text(TextSize::Base)
+                    .weight(Weight::Medium)
                     .text_color(p.foreground)
                     .clamp_lines(3)
                     .child(tags.release_name),
@@ -610,7 +610,6 @@ impl Detail {
                 accounts.child(
                     div()
                         .text(TextSize::Xs)
-                        .weight(Weight::Semibold)
                         .text_color(p.subtle_foreground)
                         .child("Account presence only. This is not a cache or readiness check."),
                 ),
@@ -784,7 +783,7 @@ impl Detail {
                             .w_full()
                             .min_w_0()
                             .text(TextSize::Base)
-                            .weight(Weight::Semibold)
+                            .weight(Weight::Medium)
                             .text_color(p.foreground)
                             .clamp_lines(1)
                             .child(release),

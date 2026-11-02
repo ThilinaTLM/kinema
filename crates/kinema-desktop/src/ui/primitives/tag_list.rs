@@ -1,5 +1,5 @@
 //! `TagList`: quiet inline technical tags (codec, audio, languages) followed
-//! by an optional lighter origin label. No boxes: rows stay calm and tags
+//! by an optional quieter origin label. No boxes: rows stay calm and tags
 //! never compete with badges or selection.
 use crate::{
     ui::theme::typography::{TextSize, TypeExt, Weight},
@@ -20,7 +20,7 @@ impl TagList {
             origin: None,
         }
     }
-    /// Provider or tracker, rendered after the tags in a lighter weight.
+    /// Provider or tracker, rendered after the tags in a quieter ink.
     pub fn origin(mut self, origin: impl Into<SharedString>) -> Self {
         self.origin = Some(origin.into());
         self
@@ -37,12 +37,14 @@ impl RenderOnce for TagList {
             .gap_x(space::S12 - space::S2)
             .gap_y(space::S2)
             .text(TextSize::Xs)
-            .weight(Weight::Semibold)
-            .text_color(p.subtle_foreground)
+            .weight(Weight::Medium)
+            .text_color(p.muted_foreground)
             .children(self.tags.into_iter().map(|tag| div().child(tag)))
-            .children(
-                self.origin
-                    .map(|origin| div().weight(Weight::Medium).child(origin)),
-            )
+            .children(self.origin.map(|origin| {
+                div()
+                    .weight(Weight::Regular)
+                    .text_color(p.subtle_foreground)
+                    .child(origin)
+            }))
     }
 }

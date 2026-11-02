@@ -47,7 +47,6 @@ impl RenderOnce for StatTile {
             .child(
                 div()
                     .text(TextSize::Xs)
-                    .weight(Weight::Semibold)
                     .text_color(p.subtle_foreground)
                     .truncate()
                     .child(self.label),
@@ -55,7 +54,7 @@ impl RenderOnce for StatTile {
             .child(
                 div()
                     .text(TextSize::Lg)
-                    .weight(Weight::Semibold)
+                    .weight(Weight::Medium)
                     .text_color(self.ink.unwrap_or(p.foreground))
                     .truncate()
                     .child(self.value.unwrap_or_else(|| "\u{2014}".into())),

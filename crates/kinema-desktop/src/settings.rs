@@ -77,11 +77,28 @@ pub enum StreamSort {
     Quality,
 }
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(from = "StreamPreferencesDocument")]
 pub struct StreamPreferences {
     pub quality: StreamQuality,
     pub sort: StreamSort,
-    pub account_only: bool,
+}
+/// On-disk shape of [`StreamPreferences`].
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct StreamPreferencesDocument {
+    quality: StreamQuality,
+    sort: StreamSort,
+    /// Retired "in my account" filter key: accepted and ignored, never written.
+    #[serde(rename = "account_only")]
+    _retired_account_only: Option<serde::de::IgnoredAny>,
+}
+impl From<StreamPreferencesDocument> for StreamPreferences {
+    fn from(document: StreamPreferencesDocument) -> Self {
+        Self {
+            quality: document.quality,
+            sort: document.sort,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -826,7 +843,6 @@ mod stream_preference_tests {
             streams: StreamPreferences {
                 quality: StreamQuality::Hd,
                 sort: StreamSort::Size,
-                account_only: true,
             },
             ..Settings::default()
         };
@@ -851,6 +867,18 @@ mod stream_preference_tests {
             loaded.streams.quality.for_visit(|_| true),
             StreamQuality::Hd
         );
+        Ok(())
+    }
+
+    #[test]
+    fn retired_account_only_key_loads_and_is_not_written() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let prefs: StreamPreferences =
+            toml::from_str("quality = \"hd\"\nsort = \"size\"\naccount_only = true\n")?;
+        assert_eq!(prefs.quality, StreamQuality::Hd);
+        assert_eq!(prefs.sort, StreamSort::Size);
+        assert!(!toml::to_string(&prefs)?.contains("account_only"));
+        assert!(toml::from_str::<StreamPreferences>("unknown = 1").is_err());
         Ok(())
     }
 }
