@@ -33,8 +33,8 @@ parts of §§3.1, 4.1, 4.2, 4.5, 4.6 and 6.1 below:
   immediately, no confirm/Undo); next-up episode highlight and hero
   "Continue · SxEy"; default season = season of next-up.
 - Streams: no sidebar; compact header + control bar (provider, quality, filter,
-  sort, "In my debrid account"); provider/quality/sort/account-only remembered
-  globally; column table with parsed tags; selection drawer ≥ 1280 px. Debrid shows
+  sort); provider/quality/sort remembered globally; one-per-row release cards
+  with parsed tags; selection drawer ≥ 1280 px. Debrid shows
   only *account presence* from one read-only listing per configured service —
   RD/AllDebrid instant-availability is unavailable, and no magnets are uploaded.
 - Header chips: an open popover chip (Filters) keeps the shared glass edge and only
@@ -657,7 +657,7 @@ arrow return to the detail page, which keeps its scroll position, season and foc
 │ ┌──────┐ CHOOSE A STREAM                                                     │
 │ │POSTER│ North Harbor                                       (TextSize::Xxl)   │
 │ │104 px│ [▭ S01E02] The Signal [2024]                                        │
-│ └──────┘ [Torrentio 5│Peerflix 1] [All 5│4K 1│1080p 3] │ [⌕ Filter] [Sort ▾] [⚡] [⟳] │
+│ └──────┘ [Torrentio 5│Peerflix 1] [All 5│4K 1│1080p 3] │ [⌕ Filter] [Sort ▾] [⟳]     │
 │ Streams 5 of 5                       remembered note │ ┌ inspector ───────┐ │
 │ ▌[4K ] Release name (2 lines)        3.9 GiB  ↑412    │ │ badges, name     │ │
 │  [HDR] DTS-HD 5.1 · Torrentio  [⚡ AllDebrid]          │ │ Size│Seeders│Audio│ │
@@ -670,19 +670,21 @@ arrow return to the detail page, which keeps its scroll position, season and foc
 - **Header:** `MediaHero` with eyebrow, 104 px poster (80 px narrow), episode
   marker badge + name, fact chips. Filters sit in the hero action row as 32 px
   glass controls: provider and quality `Segmented` with counts, `SearchField`,
-  sort `Select` (icon + "Sort" prefix), "In my account" `Button` toggle
-  (only with a debrid token) and Refresh.
-- **List:** `StreamRow` pattern — `QualityTile`, release name in the regular UI
-  face (2 lines), `TagList` (codec, audio, languages, tracker) and presence
-  badges, right-aligned size and seeders. No table header and no resting fill;
-  selection is the `selection` fill plus a 2 px leading marker.
+  sort `Select` (icon + "Sort" prefix) and Refresh. There is no account-only
+  filter; per-row presence badges carry that information.
+- **List:** `StreamRow` cards, one per row, built on `MediaCard` (the poster and
+  episode card surface: raised fill, hairline edge, `LG` radius, hover lift) —
+  `QualityTile`, release name in the regular weight (2 lines), `TagList` (codec,
+  audio, languages, tracker) and presence badges, right-aligned size and
+  seeders. No table header; selection is the accent edge (as next-up episodes)
+  plus the `selection` tint. Weights stay light: bold is reserved for headings.
 - **Inspector** (frame ≥ 1040 px, 340–400 px, sticky): badges, cleaned name,
   origin, three `StatTile`s, debrid account presence (presence only, never
   cache/readiness), file-name disclosure, then the play footer.
 - **Narrow** (< 1040 px): the inspector is replaced by a floating play dock with
   the selected release and the same play footer.
 - Single click selects; double-click, Enter, the row menu or the footer's Play
-  start playback. Remembered provider/quality/sort/account filter, loading,
+  start playback. Remembered provider/quality/sort, loading,
   empty, error (with retry) and provider-limit states are unchanged.
 
 ### 4.7 Inline play session (no modal)

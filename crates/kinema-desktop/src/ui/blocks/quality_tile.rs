@@ -61,14 +61,13 @@ impl RenderOnce for QualityTile {
                 div()
                     .text(TextSize::Sm)
                     .weight(Weight::Medium)
-                    .weight(Weight::Bold)
                     .text_color(ink)
                     .child(self.resolution.unwrap_or_else(|| "\u{2014}".into())),
             )
             .children(self.dynamic_range.map(|range| {
                 div()
                     .text(TextSize::Xs)
-                    .weight(Weight::Semibold)
+                    .weight(Weight::Medium)
                     .text_color(p.muted_foreground)
                     .child(range.to_uppercase())
             }))

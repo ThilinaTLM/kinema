@@ -1,15 +1,18 @@
-//! Stream release row: quality tile, release name with quiet tags and
-//! marks, then right-aligned size and seeders. No table header, no resting
-//! fill: rows sit on the canvas, gain a surface fill on hover, and selection
-//! is the v3 list rule (accent tint plus a 2 px leading accent marker).
+//! Stream release card: one per row, built on [`MediaCard`] so it shares the
+//! raised fill, edge, radius and hover lift of the poster and episode cards.
+//! Inside: quality tile, release name with quiet tags and marks, then
+//! right-aligned size and seeders. Selection is the accent edge (the same
+//! treatment as the next-up episode) plus a soft selection tint.
 //!
-//! The row is presentation only. [`StreamRow::build`] returns the styled
-//! element so the screen attaches focus, click, key and context-menu
-//! behaviour without this pattern knowing about sources or playback.
+//! The card is presentation only. [`StreamRow::build`] returns the styled
+//! host so the screen attaches focus, click, key and context-menu behaviour
+//! without this pattern knowing about sources or playback; the hover lift
+//! happens inside the host, so the hit area never moves.
 use crate::ui::theme::layout::detail::{STREAM_SEEDERS_WIDTH, STREAM_SIZE_WIDTH};
 use gpui::{prelude::*, *};
 
 use crate::{
+    ui::blocks::media_card::MediaCard,
     ui::primitives::Icon,
     ui::primitives::IconName,
     ui::theme::typography::{TextSize, TypeExt, Weight},
@@ -23,7 +26,7 @@ use crate::ui::motion::interaction::focus_ring;
 pub const HEALTHY_SEEDERS: u32 = 50;
 
 pub struct StreamRow {
-    id: ElementId,
+    index: usize,
     leading: Option<AnyElement>,
     title: SharedString,
     meta: Vec<AnyElement>,
@@ -33,9 +36,10 @@ pub struct StreamRow {
 }
 
 impl StreamRow {
-    pub fn new(id: impl Into<ElementId>, title: impl Into<SharedString>) -> Self {
+    /// `index` must be stable across renders: it keys the row and its hover tween.
+    pub fn new(index: usize, title: impl Into<SharedString>) -> Self {
         Self {
-            id: id.into(),
+            index,
             leading: None,
             title: title.into(),
             meta: Vec::new(),
@@ -67,7 +71,7 @@ impl StreamRow {
         self
     }
 
-    /// The styled, focusable row; callers add listeners and `track_focus`.
+    /// The styled, focusable host; callers add listeners and `track_focus`.
     pub fn build(self, cx: &App) -> Stateful<Div> {
         let p = *palette(cx);
         let numeric = |value: AnyElement, caption: &'static str, width: Pixels| {
@@ -80,15 +84,12 @@ impl StreamRow {
                 .child(
                     div()
                         .text(TextSize::Base)
-                        .weight(Weight::Medium)
                         .text_color(p.foreground)
                         .child(value),
                 )
                 .child(
                     div()
                         .text(TextSize::Xs)
-                        .weight(Weight::Semibold)
-                        .weight(Weight::Medium)
                         .text_color(p.subtle_foreground)
                         .child(caption),
                 )
@@ -115,36 +116,15 @@ impl StreamRow {
             None => div().child("\u{2014}").into_any_element(),
         };
         let selected = self.selected;
-        div()
-            .id(self.id)
-            .relative()
+        let content = div()
             .w_full()
             .min_h(size::ROW_TALL)
-            .px(space::S12 + space::S2)
-            .py(space::S12 - space::S2)
+            .px(space::S16)
+            .py(space::S12)
             .flex()
             .items_center()
             .gap(space::S16)
-            .rounded(radius::LG)
-            .role(Role::ListItem)
-            .aria_label(self.title.clone())
-            .aria_selected(selected)
-            .cursor_pointer()
             .when(selected, |el| el.bg(p.selection))
-            .when(!selected, |el| el.hover(move |s| s.bg(p.surface)))
-            .focus_visible(move |s| s.shadow(vec![focus_ring(&p)]))
-            .when(selected, |el| {
-                el.child(
-                    div()
-                        .absolute()
-                        .left_0()
-                        .top(space::S12 - space::S2)
-                        .bottom(space::S12 - space::S2)
-                        .w(space::S2)
-                        .rounded(radius::FULL)
-                        .bg(p.primary),
-                )
-            })
             .children(self.leading.map(|leading| div().flex_none().child(leading)))
             .child(
                 div()
@@ -156,10 +136,10 @@ impl StreamRow {
                     .child(
                         div()
                             .text(TextSize::Base)
-                            .weight(Weight::Medium)
+                            .weight(Weight::Regular)
                             .text_color(p.foreground)
                             .clamp_lines(2)
-                            .child(self.title),
+                            .child(self.title.clone()),
                     )
                     .when(!self.meta.is_empty(), |el| {
                         el.child(
@@ -173,6 +153,21 @@ impl StreamRow {
                     }),
             )
             .child(numeric(size, "size", STREAM_SIZE_WIDTH))
-            .child(numeric(seeders, "seeders", STREAM_SEEDERS_WIDTH))
+            .child(numeric(seeders, "seeders", STREAM_SEEDERS_WIDTH));
+        div()
+            .id(("stream", self.index))
+            .w_full()
+            .flex_none()
+            .rounded(radius::LG)
+            .role(Role::ListItem)
+            .aria_label(self.title)
+            .aria_selected(selected)
+            .cursor_pointer()
+            .focus_visible(move |s| s.shadow(vec![focus_ring(&p)]))
+            .child(
+                MediaCard::new(("stream-card", self.index))
+                    .accent_edge(selected)
+                    .child(content),
+            )
     }
 }
