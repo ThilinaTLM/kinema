@@ -13,7 +13,7 @@ pipeline are implemented, lead checks passed, and native A/B results support
 much smoother playback during dragging. Occasional dips remain; cross-platform
 behavior is not qualified.
 The initial telemetry covered embedded presentation in
-`crates/kinema-desktop/src/screens/player_window.rs`. A concurrent, separately
+`crates/kinema-desktop/src/ui/views/player` (formerly `screens/player_window.rs`). A concurrent, separately
 owned implementation added opt-in acquisition-worker aggregation in
 `crates/kinema-desktop/src/media/storage.rs`; instrumentation is no longer
 presentation-only. This documentation scope adds no runtime changes. Validation

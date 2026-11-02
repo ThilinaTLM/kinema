@@ -23,9 +23,9 @@ review includes the corrected Streams layout; native OS/runtime gates remain bel
   or `Stale(snapshot)`. Snapshots include watched state, epoch, active run,
   suppression and optional checkpoint. Personal movie/episode reads carry these
   snapshots; title summaries expose separate `has_resume`.
-- `screens/coordinator/playback.rs` owns intents, pending acknowledgements,
+- `controllers/coordinator/playback.rs` owns intents, pending acknowledgements,
   one latest coalesced observation per run, sequence/generation rejection and
-  retries. `screens/playback_progress.rs` and `player_window.rs` observe the
+  retries. `controllers/playback_progress.rs` and the player view (`ui/views/player`) observe the
   independent managed player. Canonical movies/episodes are tracked; unmatched
   files are not persisted by filename/path guesses. External mpv/VLC are unchanged.
 - `desktop_integration` implements bounded typed native commands, selected-player
@@ -118,7 +118,7 @@ Focused reproduction commands (no real provider credentials or user DB required)
 cargo test -p kinema-core --locked
 cargo test -p kinema-desktop --locked catalog::library::tests
 cargo test -p kinema-desktop --features ui-probe-test --locked \
-  screens::coordinator::playback::tests
+  controllers::coordinator::playback::tests
 ```
 
 Scoped runs also passed **22 catalog-library tests** and **9 coordinator progress

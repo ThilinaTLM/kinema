@@ -54,7 +54,7 @@ Compact desktop density stays. Smooth hover lift, crossfades and overshoot-free
 sheet/popup settle must honor reduced motion. Browse targets a blurred, darkened
 title-responsive crossfading backdrop; Detail targets a full-bleed hero.
 
-The token/motion foundation and contrast tests are implemented in `widgets`;
+The token/motion foundation and contrast tests are implemented in `ui/theme` and `ui/motion` (see [design system](design/design-system.md));
 backdrop blur/crossfade integration and the broader widget/screen reskin are in
 progress, not a claim of accepted rendering, OS support or measured performance.
 GPUI currently lacks an OS reduced-motion signal; Settings Always remains the

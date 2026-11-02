@@ -29,9 +29,9 @@ migration, cloud sync, viewing-history timeline, or new UI framework is proposed
 | Aggregation | `catalog_library_query.rs`: watched episode counts plus catalog-completeness checks | Season/series are derived summaries, not independent completion flags |
 | Domain | `crates/kinema-core/src/watch_progress.rs`: `EpisodeMark`, `next_up`, `default_season`, `season_tally` | Unknown metadata is not unwatched; next-up currently uses binary episode marks |
 | Playback | `crates/kinema-mpv/src/state.rs` and `mpv/player.rs`: observed `time-pos`, duration, ended/loading state, absolute seek | Transport primitives exist, but are not connected to durable personal progress |
-| Window ownership | `screens/player_window.rs`: global registry by session ID, generations, independent player window and lease release | Several players can coexist; progress and OS controls need explicit ownership |
-| App close | `screens/quit.rs`: main close routes to quit; main-window removal calls `cx.quit()` | Adding a tray alone will not preserve playback |
-| Bootstrap | `src/main.rs` and `screens/coordinator.rs` | No existing tray/media-session/inhibition integration |
+| Window ownership | `ui/views/player`: global registry by session ID, generations, independent player window and lease release | Several players can coexist; progress and OS controls need explicit ownership |
+| App close | `ui/views/quit.rs`: main close routes to quit; main-window removal calls `cx.quit()` | Adding a tray alone will not preserve playback |
+| Bootstrap | `src/main.rs` and `controllers/coordinator.rs` | No existing tray/media-session/inhibition integration |
 
 Paths without a crate prefix above are relative to `crates/kinema-desktop/src`.
 
