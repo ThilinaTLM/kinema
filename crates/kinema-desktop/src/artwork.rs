@@ -378,7 +378,9 @@ pub fn skeleton_due(key: &ArtworkKey, cx: &App) -> bool {
             .iter()
             .chain(store.active.values())
             .find(|job| &job.key == key)
-            .is_some_and(|job| job.queued_at.elapsed() >= Duration::from_millis(150))
+            .is_some_and(|job| {
+                job.queued_at.elapsed() >= crate::ui::theme::motion::timing::SKELETON_DELAY
+            })
     })
 }
 pub fn request(owner: &str, generation: u64, key: ArtworkKey, cx: &mut App) {
@@ -405,7 +407,7 @@ fn pump(cx: &mut App) {
         let id = job.id;
         let timer = cx.spawn(async move |cx| {
             cx.background_executor()
-                .timer(Duration::from_millis(150))
+                .timer(crate::ui::theme::motion::timing::SKELETON_DELAY)
                 .await;
             cx.update(|cx| cx.refresh_windows());
         });

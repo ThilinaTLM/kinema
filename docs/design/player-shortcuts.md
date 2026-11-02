@@ -9,17 +9,17 @@ This extends [Player](player.md); external mpv/VLC behavior is unchanged.
 
 ## Research findings
 
-- `crates/kinema-desktop/src/screens/player_window.rs`: `bind_keys` already binds
+- `crates/kinema-desktop/src/ui/views/player`: `bind_keys` already binds
   Space/K, arrows, M, F, Escape and Tab traversal. Space uses the surface context;
   other actions use the player context. Root handlers defer while menus are open.
   Surface pointer handlers, control tooltips, focus traversal and command helpers
   are the integration points. Do not create another input engine.
-- `screens/player_controls.rs` has existing control policies and unit tests.
+- `ui/views/player/controls.rs` has existing control policies and unit tests.
 - `crates/kinema-mpv/src/mpv/player.rs` provides asynchronous exact seeks, speed,
   audio/subtitle selection and subtitle positioning. `state.rs` exposes observed
   tracks, chapters, speed and seekability. Visibility, delay and frame stepping
   need typed APIs; subtitle visibility/delay need observations.
-- `screens/settings_window.rs`: extend `Section`, `Section::ALL`, labels and the
+- `ui/views/settings`: extend `Section`, `Section::ALL`, labels and the
   content match. Existing sidebar navigation and scrollable content can be reused.
   Extend colocated navigation tests and `design_lab.rs` settings fixture routing.
 - Existing design describes double-click fullscreen, but the inspected surface
