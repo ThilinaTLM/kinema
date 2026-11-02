@@ -122,10 +122,13 @@ fn prev_ident(b: &[char], i: usize) -> bool {
     i > 0 && (b[i - 1].is_alphanumeric() || b[i - 1] == '_')
 }
 
-/// Blanks every item annotated with a `#[cfg(...)]` that mentions `test`.
-/// Input must already be masked.
-fn strip_test_items(masked: &str) -> String {
+/// Blanks every item annotated with a `#[cfg(...)]` that mentions `test` or
+/// enables `feature = "ui-probe"` (probe fixture code). `masked` must come from
+/// [`mask`] of `original`.
+fn strip_test_items(masked: &str, original: &str) -> String {
     let mut b: Vec<char> = masked.chars().collect();
+    // `mask` is char-for-char length-preserving, so indices line up.
+    let orig: Vec<char> = original.chars().collect();
     let mut i = 0;
     while i < b.len() {
         if b[i] == '#' && b.get(i + 1) == Some(&'[') {
@@ -135,9 +138,10 @@ fn strip_test_items(masked: &str) -> String {
             };
             let attr: String = b[i + 2..attr_end].iter().collect();
             let attr = attr.trim();
-            let is_test_cfg = attr
-                .strip_prefix("cfg")
-                .is_some_and(|r| r.trim_start().starts_with('(') && words(r).any(|w| w == "test"));
+            let probe = enables_probe(&orig[i + 2..attr_end].iter().collect::<String>());
+            let is_test_cfg = attr.strip_prefix("cfg").is_some_and(|r| {
+                r.trim_start().starts_with('(') && (probe || words(r).any(|w| w == "test"))
+            });
             i = attr_end + 1;
             if !is_test_cfg {
                 continue;
@@ -169,6 +173,54 @@ fn strip_test_items(masked: &str) -> String {
         }
     }
     b.into_iter().collect()
+}
+
+/// True when a `cfg(...)` attribute body (unmasked) mentions
+/// `feature = "ui-probe"` outside any `not(...)` group.
+fn enables_probe(attr: &str) -> bool {
+    const NEEDLE: &str = "\"ui-probe\"";
+    let c: Vec<char> = attr.chars().collect();
+    let mut stack: Vec<bool> = Vec::new(); // true = `not` group
+    let mut i = 0;
+    while i < c.len() {
+        match c[i] {
+            '(' => {
+                let mut s = i;
+                while s > 0 && c[s - 1].is_whitespace() {
+                    s -= 1;
+                }
+                let mut st = s;
+                while st > 0 && is_ident(c[st - 1]) {
+                    st -= 1;
+                }
+                stack.push(c[st..s].iter().collect::<String>() == "not");
+            }
+            ')' => {
+                stack.pop();
+            }
+            '"' => {
+                let rest: String = c[i..].iter().collect();
+                if rest.starts_with(NEEDLE) {
+                    let before: String = c[..i].iter().collect();
+                    let before = before.trim_end();
+                    let is_feature = before
+                        .strip_suffix('=')
+                        .is_some_and(|b| b.trim_end().ends_with("feature"));
+                    if is_feature && !stack.contains(&true) {
+                        return true;
+                    }
+                }
+                // Skip the string literal.
+                i += 1;
+                while i < c.len() && c[i] != '"' {
+                    i += 1;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    false
 }
 
 fn words(s: &str) -> impl Iterator<Item = &str> {
@@ -302,7 +354,7 @@ fn style_violations(line: &str, out: &mut Vec<String>) {
 
 /// `rel` is the path below `src/ui`, with `/` separators.
 fn scan_source(rel: &str, src: &str) -> (Vec<Violation>, usize) {
-    let code = strip_test_items(&mask(src));
+    let code = strip_test_items(&mask(src), src);
     let in_motion = rel.starts_with("motion/");
     let in_prim = rel.starts_with("primitives/");
     let in_blocks = rel.starts_with("blocks/");
@@ -488,6 +540,17 @@ mod scanner {
                 what: "px(<digit>".into()
             }]
         );
+    }
+
+    #[test]
+    fn ui_probe_items_are_stripped_but_not_negations() {
+        let gated = "#[cfg(feature = \"ui-probe\")]\nfn p() { px(1.0); }\n\
+                     #[cfg(all(unix, feature = \"ui-probe\"))]\nmod m {\n    fn q() { px(2.0); }\n}\n";
+        assert_eq!(scan_source("views/a.rs", gated).0, vec![]);
+        let negated = "#[cfg(not(feature = \"ui-probe\"))]\nfn p() { px(1.0); }\n\
+                       #[cfg(feature = \"other\")]\nfn r() { px(3.0); }\n";
+        let v = scan_source("views/a.rs", negated).0;
+        assert_eq!(v.iter().map(|v| v.line).collect::<Vec<_>>(), vec![2, 4]);
     }
 
     #[test]
