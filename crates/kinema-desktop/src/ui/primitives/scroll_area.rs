@@ -1,4 +1,10 @@
-//! Vertical scrolling with an overlay scrollbar and keyboard paging.
+//! Vertical scrolling with an overlay scrollbar and keyboard scrolling.
+//!
+//! Accessibility: the viewport is a focusable `ScrollView` (named by
+//! [`ScrollArea::label`] when given) with one tab stop and a focus ring.
+//! Up/Down scroll by a line, PageUp/PageDown by a page, Home/End jump to the
+//! ends. The overlay scrollbar is pointer-only and hidden from assistive
+//! technology; scrolling itself is not announced.
 use crate::{
     ui::motion::{self, transition::CROSSFADE},
     ui::theme::{palette, space},
@@ -8,6 +14,22 @@ use std::{cell::Cell, rc::Rc, time::Instant};
 
 /// Idle thumb opacity; the thumb rises to 1.0 while scrolling or hovered.
 const IDLE_ALPHA: f32 = 0.35;
+
+/// Offset targets for a scroll key: `offset` is the current (non-positive)
+/// vertical offset, `max` the scrollable extent. `None` for other keys.
+fn key_target(key: &str, offset: Pixels, viewport: Pixels, max: Pixels) -> Option<Pixels> {
+    let line = space::S32;
+    let target = match key {
+        "up" => offset + line,
+        "down" => offset - line,
+        "pageup" => offset + viewport,
+        "pagedown" => offset - viewport,
+        "home" => px(0.0),
+        "end" => -max,
+        _ => return None,
+    };
+    Some(target.clamp(-max, px(0.0)))
+}
 
 fn thumb_height(handle: &ScrollHandle) -> Pixels {
     let viewport = handle.bounds().size.height;
@@ -24,6 +46,7 @@ pub struct ScrollArea {
     id: ElementId,
     handle: ScrollHandle,
     gutter: Pixels,
+    label: Option<SharedString>,
     children: Vec<AnyElement>,
 }
 impl ScrollArea {
@@ -32,11 +55,17 @@ impl ScrollArea {
             id: id.into(),
             handle,
             gutter: px(0.0),
+            label: None,
             children: Vec::new(),
         }
     }
     /// Reserve end padding so content never touches the overlay scrollbar.
     /// Full-bleed pages leave it off; columns beside other content use it.
+    /// Accessible name of the scroll region.
+    pub fn label(mut self, label: impl Into<SharedString>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
     pub fn gutter(mut self, gutter: Pixels) -> Self {
         self.gutter = gutter;
         self
@@ -100,6 +129,8 @@ impl RenderOnce for ScrollArea {
             .child(
                 div()
                     .id("viewport")
+                    .role(Role::ScrollView)
+                    .when_some(self.label.clone(), |el, label| el.aria_label(label))
                     .size_full()
                     .pr(self.gutter)
                     .overflow_y_scroll()
@@ -108,14 +139,16 @@ impl RenderOnce for ScrollArea {
                     .tab_stop(true)
                     .focus_visible(move |s| s.border(space::FOCUS_RING).border_color(p.focus_ring))
                     .on_key_down(move |event, window, cx| {
-                        let direction = match event.keystroke.key.as_str() {
-                            "pageup" => 1.0,
-                            "pagedown" => -1.0,
-                            _ => return,
-                        };
                         let mut offset = keys.offset();
-                        offset.y = (offset.y + keys.bounds().size.height * direction)
-                            .clamp(-keys.max_offset().y, px(0.0));
+                        let Some(y) = key_target(
+                            event.keystroke.key.as_str(),
+                            offset.y,
+                            keys.bounds().size.height,
+                            keys.max_offset().y,
+                        ) else {
+                            return;
+                        };
+                        offset.y = y;
                         keys.set_offset(offset);
                         window.refresh();
                         cx.stop_propagation();
@@ -217,5 +250,25 @@ impl RenderOnce for ScrollArea {
                         .size_full(),
                     ),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::key_target;
+    use gpui::px;
+
+    #[test]
+    fn keys_scroll_and_clamp_to_the_extent() {
+        let (view, max) = (px(400.0), px(1000.0));
+        assert_eq!(key_target("home", px(-500.0), view, max), Some(px(0.0)));
+        assert_eq!(key_target("end", px(0.0), view, max), Some(px(-1000.0)));
+        assert_eq!(key_target("pagedown", px(0.0), view, max), Some(px(-400.0)));
+        assert_eq!(key_target("pageup", px(-100.0), view, max), Some(px(0.0)));
+        assert_eq!(key_target("down", px(-990.0), view, max), Some(px(-1000.0)));
+        assert!(key_target("up", px(-100.0), view, max) > Some(px(-100.0)));
+        assert_eq!(key_target("a", px(0.0), view, max), None);
+        // No overflow: nothing to scroll.
+        assert_eq!(key_target("end", px(0.0), view, px(0.0)), Some(px(0.0)));
     }
 }

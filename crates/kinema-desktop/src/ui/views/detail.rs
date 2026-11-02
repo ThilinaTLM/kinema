@@ -18,7 +18,6 @@ use crate::{
     ui::primitives::Skeleton,
     ui::primitives::button::{Button, ButtonSize, ButtonVariant},
     ui::primitives::icon::{Icon, IconName},
-    ui::primitives::icon_button::IconButton,
     ui::primitives::menu::{ContextMenuExt, Select, SelectEvent},
     ui::primitives::menu_item,
     ui::primitives::scroll_area::ScrollArea,

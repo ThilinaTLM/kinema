@@ -1,10 +1,17 @@
 //! Controlled segmented selection, with wraparound arrow-key navigation.
+//!
+//! Accessibility: a `TabList` (named by [`Segmented::label`]) of `Tab`s with
+//! `selected`, name, position and set size. The group has one tab stop; once
+//! focused, Left/Up and Right/Down move the selection with wraparound and
+//! Home/End jump to the first/last option (selection follows focus, so no
+//! Enter/Space is needed). The focus ring follows the host radius. The
+//! selected option is a raised pill with accent ink, not colour alone.
 use crate::{
     ui::motion::{interaction::state_spring, transition::FEEDBACK},
     ui::primitives::Icon,
     ui::primitives::IconName,
     ui::theme::typography::TypeExt,
-    ui::theme::{elevation, palette, radius, space, typeface},
+    ui::theme::{elevation, opacity, palette, radius, space, typeface},
 };
 use gpui::{prelude::*, *};
 use std::rc::Rc;
@@ -33,6 +40,7 @@ pub struct Segmented<T: Clone + PartialEq + 'static> {
     icons: Vec<IconName>,
     counts: Vec<Option<usize>>,
     toolbar: bool,
+    label: Option<SharedString>,
 }
 impl<T: Clone + PartialEq + 'static> Segmented<T> {
     pub fn new(
@@ -48,6 +56,7 @@ impl<T: Clone + PartialEq + 'static> Segmented<T> {
             icons: Vec::new(),
             counts: Vec::new(),
             toolbar: false,
+            label: None,
         }
     }
     /// Leading glyph per option, matched by position.
@@ -63,6 +72,11 @@ impl<T: Clone + PartialEq + 'static> Segmented<T> {
     /// Floating-header geometry and glass material (see `Palette::glass`).
     pub fn toolbar(mut self) -> Self {
         self.toolbar = true;
+        self
+    }
+    /// Accessible name of the group.
+    pub fn label(mut self, label: impl Into<SharedString>) -> Self {
+        self.label = Some(label.into());
         self
     }
     pub fn on_change(mut self, handler: impl Fn(&T, &mut Window, &mut App) + 'static) -> Self {
@@ -84,6 +98,8 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for Segmented<T> {
         let counts = self.counts;
         let muted = p.text_muted;
         let in_toolbar = self.toolbar;
+        let group_label = self.label.clone();
+        let count = self.options.len();
         let (track, track_edge, height, outer, inner) = if in_toolbar {
             let (fill, _, edge) = p.glass();
             (fill, edge, space::TOOLBAR_CONTROL, radius::LG, radius::MD)
@@ -110,7 +126,7 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for Segmented<T> {
                 .children(counts.get(index).copied().flatten().map(|count| {
                     // Counts read as secondary: muted at rest, softened accent when active.
                     let ink = if ink == p.accent_text {
-                        ink.opacity(0.75)
+                        ink.opacity(opacity::INK_SOFT)
                     } else {
                         muted
                     };
@@ -131,6 +147,7 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for Segmented<T> {
             .focusable()
             .tab_stop(true)
             .role(Role::TabList)
+            .when_some(group_label, |el, label| el.aria_label(label))
             .focus_visible(move |s| s.border_color(p.focus_ring))
             .on_key_down(move |event, window, cx| {
                 if let Some(index) = navigate(selected, options.len(), &event.keystroke.key) {
@@ -202,6 +219,8 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for Segmented<T> {
                                 .role(Role::Tab)
                                 .aria_label(label.clone())
                                 .aria_selected(active)
+                                .aria_position_in_set(index + 1)
+                                .aria_size_of_set(count)
                                 .cursor_pointer()
                                 .when(!active, |el| el.hover(move |s| s.bg(p.ctl_hover)))
                                 .child(div().invisible().child(content(
@@ -233,5 +252,59 @@ mod tests {
         assert_eq!(navigate(0, 1, "left"), Some(0));
         assert_eq!(navigate(99, 2, "right"), Some(0));
         assert_eq!(navigate(0, 2, "enter"), None);
+    }
+}
+
+#[cfg(all(test, feature = "ui-probe-test"))]
+#[allow(clippy::unwrap_used, reason = "test setup must succeed")]
+mod interaction_tests {
+    use super::Segmented;
+    use gpui::{AppContext, Context, IntoElement, Render, TestAppContext, Window};
+    use std::{cell::RefCell, rc::Rc};
+
+    struct Fixture {
+        selected: u8,
+        seen: Rc<RefCell<Vec<u8>>>,
+    }
+    impl Render for Fixture {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let this = cx.entity().downgrade();
+            let seen = self.seen.clone();
+            Segmented::new(
+                "seg",
+                [(0u8, "A".into()), (1, "B".into()), (2, "C".into())],
+                self.selected,
+            )
+            .label("Letters")
+            .on_change(move |value, _, cx| {
+                seen.borrow_mut().push(*value);
+                let value = *value;
+                let _ = this.update(cx, |fixture, cx| {
+                    fixture.selected = value;
+                    cx.notify();
+                });
+            })
+        }
+    }
+
+    #[gpui::test]
+    fn arrows_home_end_move_selection(cx: &mut TestAppContext) {
+        cx.update(crate::ui::theme::init);
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let handle = cx.add_window({
+            let seen = seen.clone();
+            move |_, _| Fixture { selected: 0, seen }
+        });
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.draw(cx).clear(cx);
+            window.focus_next(cx);
+        })
+        .unwrap();
+        for key in ["right", "right", "right", "left", "end", "home"] {
+            cx.simulate_keystrokes(handle.into(), key);
+            cx.update_window(handle.into(), |_, window, cx| window.draw(cx).clear(cx))
+                .unwrap();
+        }
+        assert_eq!(*seen.borrow(), vec![1, 2, 0, 2, 2, 0]);
     }
 }

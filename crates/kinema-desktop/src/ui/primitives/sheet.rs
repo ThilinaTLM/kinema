@@ -1,4 +1,11 @@
 //! Modal sheet. Render above the screen; remove it in `on_dismiss`.
+//!
+//! Accessibility: `Role::Dialog` named by the title. Focus moves into the
+//! sheet on open (the `initial_focus` handle, else the dialog), Tab/Shift-Tab
+//! wrap inside it (a focus trap), and Esc restores focus to the element that
+//! held it before opening, then calls `on_dismiss`. The scrim occludes the
+//! content behind; GPUI has no `aria-modal` flag, so assistive technology is
+//! not told the background is inert. Focus rings come from the controls inside.
 use crate::{
     ui::motion::{AnimateExt, Presence, transition::SHEET},
     ui::theme::typography::TypeExt,
@@ -197,9 +204,10 @@ impl RenderOnce for Sheet {
 )]
 mod interaction_tests {
     use super::Sheet;
+    use crate::ui::primitives::button::Button;
     use gpui::{
-        AppContext, Context, InputEvent, IntoElement, KeyDownEvent, Keystroke, Render,
-        TestAppContext, Window,
+        AppContext, Context, FocusHandle, InputEvent, IntoElement, KeyDownEvent, Keystroke,
+        ParentElement, Render, TestAppContext, Window, div,
     };
     use std::{cell::Cell, rc::Rc};
     struct Fixture(Rc<Cell<bool>>);
@@ -237,5 +245,73 @@ mod interaction_tests {
         })
         .unwrap();
         assert!(dismissed.get());
+    }
+
+    struct TrapFixture {
+        outside: FocusHandle,
+        inside: [FocusHandle; 2],
+    }
+    impl Render for TrapFixture {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .child(Button::new("outside", "Outside").focus_handle(self.outside.clone()))
+                .child(
+                    Sheet::new("trap-sheet", "Trap")
+                        .on_dismiss(|_, _| {})
+                        .footer(Button::new("one", "One").focus_handle(self.inside[0].clone()))
+                        .footer(Button::new("two", "Two").focus_handle(self.inside[1].clone())),
+                )
+        }
+    }
+
+    #[test]
+    fn tab_is_trapped_inside_the_sheet() {
+        let mut cx = TestAppContext::single();
+        cx.update(crate::ui::theme::init);
+        let (outside, inside) = cx.update(|cx| {
+            (
+                cx.focus_handle().tab_stop(true),
+                [cx.focus_handle(), cx.focus_handle()],
+            )
+        });
+        let window = cx.add_window({
+            let (outside, inside) = (outside.clone(), inside.clone());
+            move |_, _| TrapFixture { outside, inside }
+        });
+        cx.update_window(window.into(), |_, window, cx| window.draw(cx).clear(cx))
+            .unwrap();
+        cx.run_until_parked();
+        let visited = std::cell::Cell::new([false; 2]);
+        for shift in [false, true] {
+            for _ in 0..6 {
+                cx.update_window(window.into(), |_, window, cx| {
+                    window.draw(cx).clear(cx);
+                    let mut keystroke = Keystroke::parse("tab").unwrap();
+                    keystroke.modifiers.shift = shift;
+                    window.dispatch_event(
+                        KeyDownEvent {
+                            keystroke,
+                            is_held: false,
+                            prefer_character_input: false,
+                        }
+                        .to_platform_input(),
+                        cx,
+                    );
+                    window.draw(cx).clear(cx);
+                    assert!(!outside.is_focused(window), "focus escaped the sheet");
+                    let mut seen = visited.get();
+                    for (i, handle) in inside.iter().enumerate() {
+                        seen[i] |= handle.is_focused(window);
+                    }
+                    visited.set(seen);
+                })
+                .unwrap();
+            }
+        }
+        assert_eq!(
+            visited.get(),
+            [true, true],
+            "both sheet controls are reachable"
+        );
     }
 }

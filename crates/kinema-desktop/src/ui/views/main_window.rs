@@ -12,12 +12,11 @@ use crate::{
         TRANSFER_DETAIL_MIN_WIDTH, Toolbar, ToolbarChip, ToolbarGroup, TransferStatus, icon_cell,
     },
     ui::motion::{AnimateExt, transition::DISCLOSE},
+    ui::primitives::alert::{Alert, AlertTone},
     ui::primitives::button::Button,
     ui::primitives::icon::IconName,
-    ui::primitives::icon_button::IconButton,
     ui::primitives::menu::Menu,
     ui::primitives::menu_item_icon,
-    ui::primitives::notice::{Notice, NoticeKind},
     ui::primitives::popover::{Popover, PopoverAlign, PopoverHandle},
     ui::primitives::search_field::{SearchField, SearchFieldEvent},
     ui::primitives::segmented::Segmented,
@@ -358,7 +357,7 @@ impl MainWindow {
     }
     /// The one global personal-state toast: confirmation (with Undo after a
     /// removal) or the latest failure (with the coordinator's exact Retry).
-    fn personal_notice(&self, cx: &mut Context<Self>) -> Option<Notice> {
+    fn personal_notice(&self, cx: &mut Context<Self>) -> Option<Alert> {
         let (message, failed, retry, undo) = {
             let c = self.coordinator.read(cx);
             let failed = c.personal_notice_failed();
@@ -370,9 +369,9 @@ impl MainWindow {
             )
         };
         let kind = match (failed, undo) {
-            (true, _) => NoticeKind::Error,
-            (_, true) => NoticeKind::Info,
-            _ => NoticeKind::Success,
+            (true, _) => AlertTone::Error,
+            (_, true) => AlertTone::Info,
+            _ => AlertTone::Success,
         };
         let label = if retry {
             "Retry"
@@ -381,7 +380,7 @@ impl MainWindow {
         } else {
             "Dismiss"
         };
-        Some(Notice::new(kind, message).action(
+        Some(Alert::new(kind, message).action(
             Button::new("personal-notice-action", label).on_click(cx.listener(
                 move |this, _, _, cx| {
                     this.coordinator.update(cx, |c, cx| {
@@ -729,11 +728,11 @@ impl MainWindow {
         ToolbarGroup::new()
             .debug_selector("toolbar-global")
             .child(
-                IconButton::new("open-local", IconName::Folder, "Open local file")
+                Button::icon_button("open-local", IconName::Folder, "Open local file")
                     .on_click(cx.listener(|this, _, window, cx| this.open_local(window, cx))),
             )
             .child(
-                IconButton::new("refresh", IconName::Refresh, "Refresh")
+                Button::icon_button("refresh", IconName::Refresh, "Refresh")
                     .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
             )
             .divider()
@@ -750,13 +749,13 @@ impl MainWindow {
             )
             .divider()
             .child(
-                IconButton::new("settings", IconName::Settings, "Settings").on_click({
+                Button::icon_button("settings", IconName::Settings, "Settings").on_click({
                     let coordinator = self.coordinator.clone();
                     move |_, _, cx| coordinator.update(cx, |c, cx| c.open_settings(cx))
                 }),
             )
             .child(
-                IconButton::new("overflow", IconName::MoreHorizontal, "More").on_click(
+                Button::icon_button("overflow", IconName::MoreHorizontal, "More").on_click(
                     cx.listener(|this, event: &ClickEvent, window, cx| {
                         this.overflow(!event.is_keyboard(), window, cx)
                     }),

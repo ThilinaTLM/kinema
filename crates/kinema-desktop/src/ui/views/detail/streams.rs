@@ -297,7 +297,7 @@ impl Detail {
             .seeders(candidate.seeders)
             .selected(self.selected == Some(i));
         if self.busy_session_for(i, cx) {
-            row = row.meta(Badge::new("Preparing…").tone(BadgeTone::Accent));
+            row = row.meta(Badge::new("Preparing…").tone(BadgeTone::Primary));
         }
         for mark in self.account_marks(&candidate.torrent.hash) {
             row = row.meta(mark);
@@ -386,7 +386,7 @@ impl Detail {
                     },
                 )
                 .variant(ButtonVariant::Primary)
-                .size(ButtonSize::Large)
+                .size(ButtonSize::Md)
                 .icon(IconName::Play)
                 .on_click(
                     cx.listener(move |this, _, _, cx| this.play_stream_row(i, Some(false), cx)),
@@ -511,13 +511,13 @@ impl Detail {
         let mut chips = div().flex().flex_wrap().gap(s::S6);
         if let Some(resolution) = badges.resolution {
             chips = chips.child(Badge::new(resolution).tone(if resolution == "4K" {
-                BadgeTone::Accent
+                BadgeTone::Primary
             } else {
                 BadgeTone::Neutral
             }));
         }
         if let Some(range) = badges.dynamic_range {
-            chips = chips.child(Badge::new(range).tone(BadgeTone::Info));
+            chips = chips.child(Badge::new(range).strong(true));
         }
         for chip in badges
             .codec
@@ -735,7 +735,7 @@ impl Detail {
                             },
                         )
                         .variant(ButtonVariant::Primary)
-                        .size(ButtonSize::Large)
+                        .size(ButtonSize::Md)
                         .icon(IconName::Play)
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.play_stream_row(i, Some(false), cx)

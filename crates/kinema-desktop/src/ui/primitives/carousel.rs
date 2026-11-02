@@ -1,5 +1,11 @@
 //! Horizontal strip of fixed-gap items with optional header, edge fades and
 //! paging buttons.
+//!
+//! Accessibility: the strip is a `Group` named by the title; Previous/Next are
+//! icon `Button`s (named "Previous in <title>"), disabled at the ends so they
+//! leave the tab order. Items keep their own roles and focus. Known gap: a
+//! focused item is not scrolled into view automatically, so keyboard users
+//! page with the buttons.
 use std::time::{Duration, Instant};
 
 use gpui::{prelude::*, *};
@@ -7,7 +13,7 @@ use gpui::{prelude::*, *};
 use crate::{
     ui::motion::{self, transition::COLUMN},
     ui::primitives::IconName,
-    ui::primitives::icon_button::IconButton,
+    ui::primitives::button::Button,
     ui::theme::{palette, space},
 };
 
@@ -181,6 +187,14 @@ fn fade(color: Hsla, leading: bool) -> Div {
         ))
 }
 
+/// Accessible name of a paging control: "Next" or "Next in <title>".
+fn page_name(action: &str, title: Option<&SharedString>) -> SharedString {
+    match title {
+        Some(title) => format!("{action} in {title}").into(),
+        None => action.to_owned().into(),
+    }
+}
+
 impl RenderOnce for Carousel {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let p = *palette(cx);
@@ -229,17 +243,20 @@ impl RenderOnce for Carousel {
                 window.refresh();
             }
         };
+        let title_text = self.title.clone();
         let show_paging = self.paging && self.title.is_some();
         let mut trailing: Vec<AnyElement> = self.trailing.into_iter().collect();
         if show_paging {
             trailing.push(
-                IconButton::new((self.id.clone(), "prev"), IconName::ChevronLeft, "Previous")
+                Button::icon_button((self.id.clone(), "prev"), IconName::ChevronLeft, "Previous")
+                    .name(page_name("Previous", title_text.as_ref()))
                     .disabled(!more_before)
                     .on_click(page(1.0, handle.clone()))
                     .into_any_element(),
             );
             trailing.push(
-                IconButton::new((self.id.clone(), "next"), IconName::ChevronRight, "Next")
+                Button::icon_button((self.id.clone(), "next"), IconName::ChevronRight, "Next")
+                    .name(page_name("Next", title_text.as_ref()))
                     .disabled(!more_after)
                     .on_click(page(-1.0, handle.clone()))
                     .into_any_element(),
@@ -270,6 +287,8 @@ impl RenderOnce for Carousel {
                     .child(
                         div()
                             .id((self.id, "strip"))
+                            .role(Role::Group)
+                            .when_some(title_text.clone(), |el, title| el.aria_label(title))
                             .w_full()
                             .min_w_0()
                             .flex()
@@ -293,8 +312,17 @@ impl RenderOnce for Carousel {
 
 #[cfg(test)]
 mod tests {
-    use super::{overflow_edges, page_target};
+    use super::{overflow_edges, page_name, page_target};
     use gpui::px;
+
+    #[test]
+    fn paging_controls_are_named_after_their_carousel() {
+        assert_eq!(
+            page_name("Next", Some(&"Similar".into())).as_ref(),
+            "Next in Similar"
+        );
+        assert_eq!(page_name("Previous", None).as_ref(), "Previous");
+    }
 
     #[test]
     fn edge_fades_follow_scroll_position() {

@@ -1,6 +1,6 @@
 //! Session identity, telemetry and per-lease context actions.
 use super::*;
-use crate::ui::primitives::{Badge, BadgeTone, ListRow};
+use crate::ui::primitives::{Badge, ListRow};
 
 impl Transfers {
     pub(super) fn session_row(
@@ -27,9 +27,9 @@ impl Transfers {
         {
             identity.push_str(&format!(" · S{season:02}E{episode:02}"));
         }
-        let (origin, tone) = match session.origin {
-            crate::media::SessionOrigin::Local => ("Local file", BadgeTone::Neutral),
-            crate::media::SessionOrigin::Remote => ("Online", BadgeTone::Info),
+        let (origin, strong) = match session.origin {
+            crate::media::SessionOrigin::Local => ("Local file", false),
+            crate::media::SessionOrigin::Remote => ("Online", true),
         };
         let progress = session.progress.clone();
         let error = session.error.clone();
@@ -45,7 +45,7 @@ impl Transfers {
             .child(
                 ListRow::new(("session-row", i), identity)
                     .subtitle(session.file_name.clone())
-                    .trailing(Badge::new(origin).tone(tone)),
+                    .trailing(Badge::new(origin).strong(strong)),
             )
             .when_some(progress, |row, progress| {
                 let value = if progress.total_bytes == 0 {

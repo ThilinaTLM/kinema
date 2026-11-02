@@ -3,7 +3,8 @@ use std::rc::Rc;
 
 use gpui::{App, Window};
 
-use crate::{ui::primitives::icon::IconName, ui::primitives::menu::MenuItem};
+use super::MenuItem;
+use crate::ui::primitives::icon::IconName;
 
 pub fn menu_item(
     label: &'static str,

@@ -9,7 +9,7 @@ use crate::{
     ui::blocks::watch_mark::{WatchMark, WatchMarkState},
     ui::blocks::watched_toggle::WatchedToggle,
     ui::motion::interaction::focus_ring,
-    ui::primitives::notice::{Notice, NoticeKind},
+    ui::primitives::alert::{Alert, AlertTone},
     ui::theme::TypeStyle,
 };
 use kinema_core::watch_progress::{self, Tally, WatchedState};
@@ -898,7 +898,7 @@ impl Detail {
         }
         if self.episode_streams_unavailable(cx) {
             column = column.child(
-                Notice::new(NoticeKind::Info, "Streams aren’t available for this title")
+                Alert::new(AlertTone::Info, "Streams aren’t available for this title")
                     .body("You can still browse its episodes."),
             );
         }

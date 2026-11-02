@@ -1,4 +1,4 @@
-//! Tri-state watch toggle: `ActionButton` + `WatchMark` + a word + a muted count.
+//! Tri-state watch toggle: `Button` + `WatchMark` + a word + a muted count.
 //!
 //! The control is stateless and service-free. The caller passes a [`Tally`]
 //! (watched / total) and receives the *desired* value: `true` = mark everything
@@ -10,7 +10,7 @@
 //! is `Mixed` for partial progress.
 use crate::{
     ui::blocks::watch_mark::{WatchMark, WatchMarkState},
-    ui::primitives::action_button::{ActionButton, ActionKind},
+    ui::primitives::button::{Button, ButtonSize},
 };
 use gpui::{prelude::*, *};
 use kinema_core::watch_progress::{Tally, WatchedState};
@@ -200,27 +200,25 @@ impl RenderOnce for WatchedToggle {
             self.unavailable.as_deref(),
             self.show_count,
         );
-        let kind = if self.compact {
-            ActionKind::Icon
-        } else {
-            ActionKind::Secondary
-        };
         let name = match &face.count {
             Some(count) => format!("{}, {count}. {}", face.word, face.action),
             None => format!("{}. {}", face.word, face.action),
         };
-        let mut button = ActionButton::new(self.id, kind, face.word.clone())
+        let mut button = Button::new(self.id, face.word.clone())
+            .size(ButtonSize::Md)
+            .square(self.compact)
             .glyph(WatchMark::new(face.mark))
-            .on(face.on)
+            .selected(face.on)
             .busy(self.busy)
-            .toggled(face.on, face.mixed)
+            .toggled(face.on)
+            .mixed(face.mixed)
             .name(name)
             .tooltip(face.action.clone());
         if let Some(count) = face.count.clone() {
             button = button.trailing(count);
         }
         if let Some(reason) = face.blocked_reason.clone() {
-            button = button.disabled(reason);
+            button = button.disabled_because(reason);
         }
         if let (Some(change), Some(desired)) = (self.on_change, face.intent) {
             button = button.on_click(move |_, window, cx| change(desired, window, cx));

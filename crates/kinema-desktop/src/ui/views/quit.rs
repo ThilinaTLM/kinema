@@ -184,7 +184,7 @@ pub(crate) fn confirmation_for_close(
         )
         .footer(
             Button::new("confirm-quit", "Quit")
-                .variant(ButtonVariant::Danger)
+                .variant(ButtonVariant::Destructive)
                 .on_click(|_, _, cx| finish(cx)),
         )
         .when(close_fallback, |sheet| {

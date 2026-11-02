@@ -21,16 +21,18 @@ pub const OVERLAY_HOVER: f32 = 0.95;
 pub const CARD_TRANSLUCENT: f32 = 0.86;
 /// Soft list-row selected hover blend of `accent` (`list_row.rs` 0.5).
 pub const SELECTED_HOVER: f32 = 0.5;
-/// Status badge / alert wash over a surface (`badge.rs`, `notice.rs` 0.10).
+/// Status badge / alert wash over a surface (`badge.rs`, `alert.rs` 0.10).
 pub const BADGE_WASH: f32 = 0.10;
 
 // --- Edges ----------------------------------------------------------------------
-/// Alert edge ink (`notice.rs` 0.28).
+/// Alert edge ink (`alert.rs` 0.28).
 pub const ALERT_EDGE: f32 = 0.28;
 /// Selected ("on") button edge of `primary` (`button.rs` 0.35).
 pub const SELECTED_EDGE: f32 = 0.35;
 /// Highlighted card edge of `primary` (`media_card.rs` ACCENT_EDGE_ALPHA).
 pub const SELECTED_EDGE_STRONG: f32 = 0.55;
+/// Hover gain of the `selection` alpha on selected buttons (`button.rs` 1.4).
+pub const SELECTION_HOVER_GAIN: f32 = 1.4;
 /// Destructive button edge (`button.rs` 0.4).
 pub const DESTRUCTIVE_EDGE: f32 = 0.4;
 /// Player slider track in `input` ink (`player_window.rs` 0.5).
@@ -43,7 +45,7 @@ pub const INK_SOFT: f32 = 0.75;
 pub const INK_THUMB: f32 = 0.6;
 /// Faint ring of an unwatched mark (`watch_mark.rs` 0.45).
 pub const INK_FAINT: f32 = 0.45;
-/// Refresh indicator ink (`resource_view.rs` 0.8).
+/// Refresh indicator ink (`state_view.rs` 0.8).
 pub const INK_REFRESH: f32 = 0.8;
 /// Disabled over-art button (`overlay.rs` 0.6).
 pub const DISABLED_OVER_ART: f32 = 0.6;

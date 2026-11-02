@@ -12,10 +12,10 @@ mod media_hero;
 pub mod overlay;
 pub mod poster_card;
 pub mod quality_tile;
-mod resource_view;
 pub mod skeleton_card;
 pub mod stat_tile;
 pub mod state_toggle;
+mod state_view;
 mod stream_row;
 pub mod thumb;
 pub mod toolbar;
@@ -23,8 +23,8 @@ pub mod watch_mark;
 pub mod watched_toggle;
 
 pub use media_hero::{MediaHero, MetaItem, POSTER_ASPECT, POSTER_WIDTH, uses_over_art};
-#[cfg_attr(not(feature = "ui-probe"), allow(unused_imports))]
-pub(crate) use resource_view::ResourceView;
-pub use resource_view::{StateView, ViewSelection, ViewState, select_view};
 pub use state_toggle::{StateToggle, ToggleKind, ToggleStatus};
+#[cfg_attr(not(feature = "ui-probe"), allow(unused_imports))]
+pub(crate) use state_view::ResourceView;
+pub use state_view::{StateView, ViewSelection, ViewState, select_view};
 pub use stream_row::{HEALTHY_SEEDERS, StreamRow};

@@ -3,6 +3,13 @@
 //!
 //! Both are stateless and controlled: the owner passes `selected` and reacts to
 //! `on_click`. Each is its own tab stop and activates with Enter/Space.
+//!
+//! Accessibility: cards are `RadioButton`s and chips are `RadioButton`s (or
+//! `CheckBox`es when multi-select), named by their label, with `selected`
+//! exposed. The focus ring is a shadow that follows the host radius. Selection
+//! is also shown by an edge and fill (and a check on multi-select chips), not
+//! by colour alone. Arrow keys between siblings are not provided: each option
+//! is a separate tab stop and the owner owns the group.
 use crate::{
     ui::motion::interaction::focus_ring,
     ui::primitives::Icon,

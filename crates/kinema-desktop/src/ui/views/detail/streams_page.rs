@@ -10,7 +10,7 @@ use crate::{
     settings::StreamSort,
     ui::blocks::MetaItem,
     ui::blocks::ViewState,
-    ui::primitives::action_button::{ActionButton, ActionKind},
+    ui::primitives::button::{Button, ButtonSize},
     ui::primitives::search_field::SearchField,
     ui::primitives::segmented::Segmented,
     ui::primitives::text_input::TextInputEvent,
@@ -692,28 +692,27 @@ impl Detail {
                 .is_some_and(|s| s.streams.account_only);
             let weak = cx.entity().downgrade();
             hero = hero.secondary(
-                ActionButton::new(
-                    "streams-account-only",
-                    if wide {
-                        ActionKind::Secondary
-                    } else {
-                        ActionKind::Icon
-                    },
-                    "In my account",
-                )
-                .icon(IconName::Zap)
-                .on(account_only)
-                .toggled(account_only, false)
-                .tooltip("Only releases already in a connected debrid account")
-                .on_click(move |_, _, cx| {
-                    let _ = weak.update(cx, |this, cx| {
-                        this.save_stream_settings(|s| s.streams.account_only = !account_only, cx)
-                    });
-                }),
+                Button::new("streams-account-only", "In my account")
+                    .size(ButtonSize::Md)
+                    .square(!wide)
+                    .icon(IconName::Zap)
+                    .selected(account_only)
+                    .toggled(account_only)
+                    .tooltip("Only releases already in a connected debrid account")
+                    .on_click(move |_, _, cx| {
+                        let _ = weak.update(cx, |this, cx| {
+                            this.save_stream_settings(
+                                |s| s.streams.account_only = !account_only,
+                                cx,
+                            )
+                        });
+                    }),
             );
         }
         hero = hero.secondary(
-            ActionButton::new("streams-refresh", ActionKind::Icon, "Refresh streams")
+            Button::new("streams-refresh", "Refresh streams")
+                .size(ButtonSize::Md)
+                .square(true)
                 .icon(IconName::Refresh)
                 .busy(busy)
                 .on_click(cx.listener(|this, _, _, cx| {

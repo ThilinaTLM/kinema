@@ -37,7 +37,7 @@ impl Skeleton {
         let base = match shape {
             SkeletonShape::Block => base.rounded(radius::LG).w_full().h(space::S48),
             SkeletonShape::Line => base.rounded(radius::SM).w_full().h(LINE_HEIGHT),
-            SkeletonShape::Circle => base.rounded_full().size(CIRCLE_SIZE),
+            SkeletonShape::Circle => base.rounded(radius::FULL).size(CIRCLE_SIZE),
         };
         Self { base }
     }

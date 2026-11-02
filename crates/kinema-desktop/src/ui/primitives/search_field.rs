@@ -1,4 +1,10 @@
 //! Search editor with cancellable, generation-checked live queries.
+//!
+//! Accessibility: the inner field is a `SearchInput` named "Search" (its
+//! placeholder may refine the hint). Tab moves from the field to the clear
+//! button, which appears only for non-empty text, is a named `Button`, and is
+//! activated with Enter/Space or a click; clearing returns focus to the field.
+//! Keyboard focus draws a ring that follows the field radius.
 use crate::{
     ui::primitives::icon::{Icon, IconName},
     ui::primitives::text_input::{TextInput, TextInputEvent},
@@ -29,6 +35,8 @@ impl SearchField {
         let input = cx.new(|cx| {
             let mut input = TextInput::new(window, cx);
             input.set_chromeless(true, cx);
+            input.set_search_role(true, cx);
+            input.set_label("Search", cx);
             input
         });
         let subscription =
@@ -175,6 +183,9 @@ impl Render for SearchField {
                 s.child(
                     div()
                         .id("clear-search")
+                        .role(Role::Button)
+                        .aria_label("Clear search")
+                        .tab_stop(true)
                         .track_focus(&self.clear_focus)
                         .rounded(radius::SM)
                         .focus_visible(move |s| s.border_2().border_color(p.focus_ring))

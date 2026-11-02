@@ -11,10 +11,10 @@ use crate::{
     ui::blocks::ViewState,
     ui::blocks::poster_card::{CardOpened, MembershipRequested, MembershipRetry, PosterCard},
     ui::blocks::skeleton_card::SkeletonCard,
+    ui::primitives::alert::{Alert, AlertTone},
     ui::primitives::button::Button,
     ui::primitives::icon::IconName,
     ui::primitives::menu::MenuItem,
-    ui::primitives::notice::{Notice, NoticeKind},
     ui::theme::typography::TypeExt,
     ui::theme::{self, Mode, space as s, theme, typeface as t},
 };
@@ -1058,8 +1058,8 @@ impl Render for Browse {
                 let weak_retry = cx.entity().downgrade();
                 el.child(
                     div().pt(s::TOOLBAR_HEIGHT).child(
-                        Notice::new(
-                            NoticeKind::Warning,
+                        Alert::new(
+                            AlertTone::Warning,
                             "Showing previous results · request failed",
                         )
                         .strip()

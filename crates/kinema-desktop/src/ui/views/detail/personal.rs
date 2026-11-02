@@ -361,7 +361,7 @@ impl Detail {
     /// Error / undo notices below the hero. Unknown or failed reads are never
     /// hidden: a failed personal read offers Retry without hiding metadata.
     pub(super) fn personal_notices(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        use crate::ui::primitives::notice::{Notice, NoticeKind};
+        use crate::ui::primitives::alert::{Alert, AlertTone};
         let c = self.coordinator.read(cx);
         let view = c.personal(&self.title);
         let mut stack = div().w_full().flex().flex_col().gap(s::S8).pt(s::S12);
@@ -369,7 +369,7 @@ impl Detail {
         if let PersonalLoad::Failed(error) = &view.state {
             any = true;
             stack = stack.child(
-                Notice::new(NoticeKind::Warning, "Library status unavailable")
+                Alert::new(AlertTone::Warning, "Library status unavailable")
                     .body(error.clone())
                     .action(
                         Button::new("personal-retry", "Retry")
@@ -381,7 +381,7 @@ impl Detail {
         if let Some((write, error)) = self.write_error.clone() {
             any = true;
             stack = stack.child(
-                Notice::new(NoticeKind::Warning, "Couldn’t save your change")
+                Alert::new(AlertTone::Warning, "Couldn’t save your change")
                     .body(error)
                     .action(Button::new("personal-write-retry", "Retry").on_click(
                         cx.listener(move |this, _, _, cx| this.perform(write.clone(), cx)),
@@ -394,8 +394,8 @@ impl Detail {
         {
             any = true;
             stack = stack.child(
-                Notice::new(
-                    NoticeKind::Warning,
+                Alert::new(
+                    AlertTone::Warning,
                     format!("Couldn\u{2019}t update {}", season_label(request.season)),
                 )
                 .body(error)

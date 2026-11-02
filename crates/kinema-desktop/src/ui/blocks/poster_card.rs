@@ -3,7 +3,7 @@
 use crate::{
     ui::blocks::state_toggle::{StateToggle, ToggleKind, ToggleStatus},
     ui::motion::{self, AnimateExt, CardHover, card_hover as hv, transition::CROSSFADE},
-    ui::primitives::chip::{self, Chip},
+    ui::primitives::badge::{self, Badge},
     ui::primitives::menu::{ContextMenuExt, MenuItem},
     ui::theme::typography::TypeExt,
     ui::theme::{self, Palette, radius, space as s, typeface as t},
@@ -175,7 +175,7 @@ impl Render for PosterCard {
             } else {
                 self.facts.to_string()
             };
-            let score = chip::format_rating(self.rating).map(|r| format!("\u{2605} {r}"));
+            let score = badge::format_rating(self.rating).map(|r| format!("\u{2605} {r}"));
             match (base.is_empty(), score) {
                 (false, Some(r)) => format!("{base} \u{b7} {r}"),
                 (false, None) => base,
@@ -275,7 +275,7 @@ impl Render for PosterCard {
                             .absolute()
                             .top(s::S8)
                             .left(s::S8)
-                            .child(Chip::rating(self.rating).over_art(true)),
+                            .child(Badge::rating(self.rating).over_art(true)),
                     )
                     .child(
                         col()
@@ -305,7 +305,7 @@ impl Render for PosterCard {
                                     move |_, cx| this.update(cx, |_, cx| cx.emit(MembershipRetry))
                                 }),
                             )
-                            .when(self.series, |el| el.child(Chip::series().over_art(true))),
+                            .when(self.series, |el| el.child(Badge::series().over_art(true))),
                     ),
             )
             .child(

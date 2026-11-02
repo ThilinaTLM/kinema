@@ -138,6 +138,9 @@ impl RenderOnce for StateToggle {
                 ButtonVariant::Ghost
             })
             .icon(icon)
+            .square(true)
+            .selected(on)
+            .tooltip(label)
             .disabled(disabled && !busy)
             .busy(busy)
             .over_art(self.over_art)
@@ -150,11 +153,10 @@ impl RenderOnce for StateToggle {
                     change(!on, window, cx);
                 }
             });
-        button.square = true;
-        button.toggled = on;
         // Only a known state claims checked/unchecked; loading/failed expose none.
-        button.aria_toggled = matches!(self.status, ToggleStatus::Known { .. }).then_some(on);
-        button.tooltip = Some(label.into());
+        if matches!(self.status, ToggleStatus::Known { .. }) {
+            button = button.toggled(on);
+        }
         // Consume pointer events so hosts (cards, rows) never see this activation.
         gpui::div()
             .flex_none()

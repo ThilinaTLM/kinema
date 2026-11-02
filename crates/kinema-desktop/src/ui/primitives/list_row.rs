@@ -1,5 +1,11 @@
 //! Dense list row: leading slot, title/subtitle, trailing slot. The highlight
 //! is an inset rounded rectangle so adjacent rows never touch.
+//!
+//! Accessibility: `Role::ListItem` named by the title, with `selected`
+//! exposed. With `on_click` the row is one tab stop, Enter/Space activate it
+//! and a focus ring (inset, following the row radius) shows keyboard focus.
+//! The selected row also gets a leading marker bar, so selection is not
+//! colour-only. Without `on_click` it is static content.
 use std::rc::Rc;
 
 use gpui::{prelude::*, *};
@@ -11,7 +17,7 @@ use crate::{
     },
     ui::primitives::button::ClickHandler,
     ui::theme::typography::TypeExt,
-    ui::theme::{palette, radius, space, typeface},
+    ui::theme::{opacity, palette, radius, space, typeface},
 };
 
 /// Gap between the row highlight and the container edge.
@@ -84,7 +90,10 @@ impl RenderOnce for ListRow {
         let hovered = window.use_keyed_state(self.id.clone(), cx, |_, _| false);
         let active = interactive && *hovered.read(cx);
         let (rest, hover) = if self.selected {
-            (p.accent_tint, p.accent_tint.blend(p.ctl_hover.opacity(0.5)))
+            (
+                p.selection,
+                p.selection.blend(p.accent.opacity(opacity::SELECTED_HOVER)),
+            )
         } else {
             (transparent_black(), p.ctl_hover)
         };
@@ -108,6 +117,7 @@ impl RenderOnce for ListRow {
             .rounded(radius::MD)
             .role(Role::ListItem)
             .aria_label(self.title.clone())
+            .aria_selected(self.selected)
             .when(interactive, |el| {
                 state
                     .focus(el.focusable().tab_stop(true).cursor_pointer())
@@ -129,7 +139,7 @@ impl RenderOnce for ListRow {
                         .top(space::S8)
                         .bottom(space::S8)
                         .w(space::S2)
-                        .rounded_full()
+                        .rounded(radius::FULL)
                         .bg(p.primary),
                 )
             })

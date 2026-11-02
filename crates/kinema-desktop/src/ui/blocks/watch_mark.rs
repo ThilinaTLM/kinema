@@ -5,7 +5,7 @@
 //! never green. The glyph is purely presentational; hosts supply the name.
 use crate::{
     ui::primitives::icon::{Icon, IconName},
-    ui::theme::{Palette, palette},
+    ui::theme::{Palette, palette, radius},
 };
 use gpui::{prelude::*, *};
 use kinema_core::watch_progress::{Tally, WatchedState};
@@ -182,7 +182,7 @@ impl RenderOnce for WatchMark {
         let frame = div().relative().flex_none().size(px(g.size));
         match self.state {
             WatchMarkState::All => frame
-                .rounded_full()
+                .rounded(radius::FULL)
                 .bg(p.primary)
                 .flex()
                 .items_center()

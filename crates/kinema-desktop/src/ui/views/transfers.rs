@@ -6,10 +6,10 @@ use crate::{
     ui::blocks::ViewState,
     ui::primitives::Badge,
     ui::primitives::BadgeTone,
+    ui::primitives::alert::{Alert, AlertTone},
     ui::primitives::button::{Button, ButtonVariant},
     ui::primitives::icon::IconName,
     ui::primitives::menu::ContextMenuExt,
-    ui::primitives::notice::{Notice, NoticeKind},
     ui::theme::typography::TypeExt,
     ui::theme::{self, space as s, typeface as t},
 };
@@ -91,7 +91,7 @@ impl Render for Transfers {
                     .when(!sessions.is_empty(), |el| {
                         el.child(
                             Badge::new(format!("{} active", sessions.len()))
-                                .tone(BadgeTone::Accent),
+                                .tone(BadgeTone::Primary),
                         )
                     }),
             );
@@ -117,7 +117,7 @@ impl Render for Transfers {
         if let Some(id) = self.stop.clone() {
             content = content
                 .child(
-                    Notice::new(NoticeKind::Warning, "Stop serving?")
+                    Alert::new(AlertTone::Warning, "Stop serving?")
                         .body("Your player may lose access to this media."),
                 )
                 .child(
@@ -133,7 +133,7 @@ impl Render for Transfers {
                         )))
                         .child(
                             Button::new("stop-confirm", "Stop")
-                                .variant(ButtonVariant::Danger)
+                                .variant(ButtonVariant::Destructive)
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.coordinator.update(cx, |c, cx| {
                                         c.command(AppAction::ReleaseSession(id.clone()), cx)
@@ -160,7 +160,7 @@ impl Render for Transfers {
             None => muted("Cache usage unavailable".into()),
         });
         if let Some(result) = &self.result {
-            content = content.child(Notice::new(NoticeKind::Info, result.clone()));
+            content = content.child(Alert::new(AlertTone::Info, result.clone()));
         }
         content.child(
             div().flex().justify_end().child(

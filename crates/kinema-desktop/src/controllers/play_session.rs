@@ -13,8 +13,8 @@ use crate::{
     settings::Settings,
     ui::primitives::Icon,
     ui::primitives::IconName,
+    ui::primitives::alert::{Alert, AlertTone},
     ui::primitives::button::{Button, ButtonSize, ButtonVariant},
-    ui::primitives::notice::{Notice, NoticeKind},
     ui::primitives::progress::Progress,
     ui::theme::typography::TypeExt,
     ui::theme::{self, space as s, typeface as t},
@@ -185,17 +185,17 @@ impl Render for PlaySession {
                     .child(button_slot(
                         s::CONTROL_HEIGHT_LARGE,
                         Button::new("play-cancel", "Cancel")
-                            .size(ButtonSize::Large)
+                            .size(ButtonSize::Md)
                             .on_click(cx.listener(|this, _, _, cx| this.dismiss(cx))),
                     ));
             }
             PlayPhase::Failed(message) => {
                 let mut notice =
-                    Notice::new(NoticeKind::Error, "Couldn’t play this stream").body(message);
+                    Alert::new(AlertTone::Error, "Couldn’t play this stream").body(message);
                 if let Some(limit) = self.limit_exceeded {
                     let coordinator = self.coordinator.clone();
-                    notice = Notice::new(
-                        NoticeKind::Warning,
+                    notice = Alert::new(
+                        AlertTone::Warning,
                         format!("File exceeds the cache limit ({})", format_bytes(limit)),
                     )
                     .body(self.error.clone().unwrap_or_default())
@@ -218,7 +218,7 @@ impl Render for PlaySession {
                             div().flex_1().child(button_slot(
                                 s::CONTROL_HEIGHT_LARGE,
                                 Button::new("play-retry", "Try again")
-                                    .size(ButtonSize::Large)
+                                    .size(ButtonSize::Md)
                                     .icon(IconName::Refresh)
                                     .on_click(
                                         cx.listener(|_, _, _, cx| cx.emit(PlaySessionEvent::Retry)),
@@ -229,7 +229,7 @@ impl Render for PlaySession {
                             div().flex_1().child(button_slot(
                                 s::CONTROL_HEIGHT_LARGE,
                                 Button::new("play-dismiss", "Dismiss")
-                                    .size(ButtonSize::Large)
+                                    .size(ButtonSize::Md)
                                     .variant(ButtonVariant::Ghost)
                                     .on_click(cx.listener(|this, _, _, cx| this.dismiss(cx))),
                             )),
@@ -241,7 +241,7 @@ impl Render for PlaySession {
                 let destination = SettingsDestination::Account(self.provider);
                 body = body
                     .child(
-                        Notice::new(NoticeKind::Warning, "This stream can’t be prepared yet")
+                        Alert::new(AlertTone::Warning, "This stream can’t be prepared yet")
                             .body(message),
                     )
                     .child(
@@ -253,7 +253,7 @@ impl Render for PlaySession {
                                 div().flex_1().child(button_slot(
                                     s::CONTROL_HEIGHT_LARGE,
                                     Button::new("play-settings", "Open Settings")
-                                        .size(ButtonSize::Large)
+                                        .size(ButtonSize::Md)
                                         .icon(IconName::Settings)
                                         .on_click(move |_, _, cx| {
                                             coordinator.update(cx, |c, cx| {
@@ -266,7 +266,7 @@ impl Render for PlaySession {
                                 div().flex_1().child(button_slot(
                                     s::CONTROL_HEIGHT_LARGE,
                                     Button::new("play-dismiss", "Dismiss")
-                                        .size(ButtonSize::Large)
+                                        .size(ButtonSize::Md)
                                         .variant(ButtonVariant::Ghost)
                                         .on_click(cx.listener(|this, _, _, cx| this.dismiss(cx))),
                                 )),

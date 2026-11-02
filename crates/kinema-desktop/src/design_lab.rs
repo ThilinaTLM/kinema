@@ -20,13 +20,11 @@ use crate::{
     ui::primitives::Section,
     ui::primitives::Skeleton,
     ui::primitives::SkeletonText,
+    ui::primitives::alert::{Alert, AlertTone},
     ui::primitives::button::{Button, ButtonSize, ButtonVariant},
-    ui::primitives::chip::{Chip, StatusKind},
     ui::primitives::choice_card::ChoiceTile,
     ui::primitives::icon::{Icon, IconName},
-    ui::primitives::icon_button::IconButton,
     ui::primitives::menu::{ContextMenuExt, Menu, MenuItem, Select},
-    ui::primitives::notice::{Notice, NoticeKind},
     ui::primitives::popover::Popover,
     ui::primitives::progress::Progress,
     ui::primitives::scroll_area::ScrollArea,
@@ -552,6 +550,7 @@ impl Lab {
                 cx.new(|cx| {
                     let mut input = TextInput::new(window, cx);
                     input.set_placeholder("Placeholder…", cx);
+                    input.set_label(format!("Fixture input {i}"), cx);
                     if i != 0 {
                         input.set_text(
                             if i == 4 {
@@ -840,11 +839,16 @@ impl Lab {
                 .trailing(
                     ToolbarGroup::new()
                         .child(
-                            IconButton::new("transfers", IconName::Transfers, "Transfers").badge(2),
+                            Button::icon_button("transfers", IconName::Transfers, "Transfers")
+                                .badge(2),
                         )
                         .divider()
-                        .child(IconButton::new("settings", IconName::Settings, "Settings"))
-                        .child(IconButton::new(
+                        .child(Button::icon_button(
+                            "settings",
+                            IconName::Settings,
+                            "Settings",
+                        ))
+                        .child(Button::icon_button(
                             "overflow",
                             IconName::MoreHorizontal,
                             "More",
@@ -923,8 +927,8 @@ impl Lab {
                             )
                             .child(
                                 row()
-                                    .child(Chip::quality("1080P"))
-                                    .child(Chip::quality("HDR"))
+                                    .child(Badge::quality("1080P"))
+                                    .child(Badge::quality("HDR"))
                                     .child(
                                         div()
                                             .type_style(t::SMALL)
@@ -961,7 +965,7 @@ impl Lab {
             )
             .footer(
                 Button::new("cancel", "Cancel")
-                    .size(ButtonSize::Large)
+                    .size(ButtonSize::Md)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.sheet = false;
                         cx.notify();
@@ -970,7 +974,7 @@ impl Lab {
             .footer(
                 Button::new("play", "Play")
                     .icon(IconName::Play)
-                    .size(ButtonSize::Large)
+                    .size(ButtonSize::Md)
                     .variant(ButtonVariant::Primary)
                     .disabled(self.selected_file.is_none())
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -993,7 +997,7 @@ impl Lab {
             ("Primary", ButtonVariant::Primary),
             ("Secondary", ButtonVariant::Secondary),
             ("Ghost", ButtonVariant::Ghost),
-            ("Danger", ButtonVariant::Danger),
+            ("Destructive", ButtonVariant::Destructive),
         ]
         .into_iter()
         .enumerate()
@@ -1013,19 +1017,22 @@ impl Lab {
             .child(buttons)
             .child(
                 row()
-                    .child(IconButton::new("icon", IconName::Play, "Play"))
-                    .child(IconButton::new("badge", IconName::Transfers, "Transfers").badge(2))
+                    .child(Button::icon_button("icon", IconName::Play, "Play"))
+                    .child(Button::icon_button("badge", IconName::Transfers, "Transfers").badge(2))
                     .child(
-                        IconButton::new(
+                        Button::icon_button(
                             "icon-disabled",
                             IconName::Settings,
                             "Settings unavailable",
                         )
                         .disabled(true),
                     )
-                    .child(IconButton::new("icon-busy", IconName::Refresh, "Refreshing").busy(true))
                     .child(
-                        IconButton::new("icon-toggled", IconName::Info, "Information")
+                        Button::icon_button("icon-busy", IconName::Refresh, "Refreshing")
+                            .busy(true),
+                    )
+                    .child(
+                        Button::icon_button("icon-toggled", IconName::Info, "Information")
                             .toggled(true),
                     ),
             )
@@ -1062,23 +1069,23 @@ impl Lab {
             .child(heading("Chips · unknown rating is absent"))
             .child(
                 row()
-                    .child(Chip::rating(Some(8.1)))
-                    .child(Chip::rating(Some(0.)))
-                    .child(Chip::rating(None))
-                    .child(Chip::series())
-                    .child(Chip::quality("2160P"))
-                    .child(Chip::quality("HDR")),
+                    .child(Badge::rating(Some(8.1)))
+                    .child(Badge::rating(Some(0.)))
+                    .child(Badge::rating(None))
+                    .child(Badge::series())
+                    .child(Badge::quality("2160P"))
+                    .child(Badge::quality("HDR")),
             )
             .child(
                 row().children(
                     [
-                        (StatusKind::Info, "Info"),
-                        (StatusKind::Success, "Ready"),
-                        (StatusKind::Warning, "Stale"),
-                        (StatusKind::Error, "Failed"),
+                        (BadgeTone::Neutral, "Info"),
+                        (BadgeTone::Success, "Ready"),
+                        (BadgeTone::Warning, "Stale"),
+                        (BadgeTone::Destructive, "Failed"),
                     ]
                     .into_iter()
-                    .map(|(kind, text)| Chip::status(kind, text)),
+                    .map(|(tone, text)| Badge::new(text).tone(tone)),
                 ),
             )
             .child(heading("Progress · 42% / indeterminate"))
@@ -1152,16 +1159,16 @@ impl Lab {
             .child(self.select.clone())
             .child(heading("Notices"));
         for (kind, label) in [
-            (NoticeKind::Info, "Fixture information"),
-            (NoticeKind::Success, "Ready to launch"),
-            (NoticeKind::Warning, "Saved results · refresh failed"),
-            (NoticeKind::Error, "Couldn't reach provider"),
-            (NoticeKind::Empty, "No matching titles"),
+            (AlertTone::Info, "Fixture information"),
+            (AlertTone::Success, "Ready to launch"),
+            (AlertTone::Warning, "Saved results · refresh failed"),
+            (AlertTone::Error, "Couldn't reach provider"),
+            (AlertTone::Empty, "No matching titles"),
         ] {
-            editors = editors.child(Notice::new(kind, label));
+            editors = editors.child(Alert::new(kind, label));
         }
-        editors = editors
-            .child(Notice::new(NoticeKind::Warning, "Saved results · refresh failed").strip());
+        editors =
+            editors.child(Alert::new(AlertTone::Warning, "Saved results · refresh failed").strip());
         let mut typography = col().child(heading("Type scale"));
         for (label, style) in [
             ("DISPLAY · Quiet Orbit", t::DISPLAY),
@@ -1432,7 +1439,7 @@ impl Lab {
                                     }),
                             )
                             .child(
-                                row().child(Chip::rating(Some(8.1)).over_art(true)).child(
+                                row().child(Badge::rating(Some(8.1)).over_art(true)).child(
                                     div()
                                         .type_style(t::SMALL)
                                         .text_color(dark.text_muted)
@@ -1514,11 +1521,15 @@ impl Lab {
                     .px(s::S12)
                     .h(s::S48)
                     .child(
-                        IconButton::new("episode-back", IconName::ArrowLeft, "Back to episodes")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.scene = "series".into();
-                                cx.notify();
-                            })),
+                        Button::icon_button(
+                            "episode-back",
+                            IconName::ArrowLeft,
+                            "Back to episodes",
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.scene = "series".into();
+                            cx.notify();
+                        })),
                     )
                     .child(div().type_style(t::BODY_STRONG).child(format!(
                         "S01E{:02} · {}",
@@ -1575,8 +1586,8 @@ impl Lab {
                     )
                     .child(
                         row()
-                            .child(Chip::quality(quality))
-                            .when(i == 0, |el| el.child(Chip::quality("HDR")))
+                            .child(Badge::quality(quality))
+                            .when(i == 0, |el| el.child(Badge::quality("HDR")))
                             .child(div().type_style(t::SMALL).child(if i == 0 {
                                 "18.2 GiB"
                             } else {
@@ -1717,20 +1728,20 @@ impl Lab {
                     .px(s::S20)
                     .bg(p.bg_surface)
                     .child(
-                        IconButton::new("back", IconName::ArrowLeft, "Back").on_click(cx.listener(
-                            |this, _, _, cx| {
+                        Button::icon_button("back", IconName::ArrowLeft, "Back").on_click(
+                            cx.listener(|this, _, _, cx| {
                                 this.scene = "browse".into();
                                 cx.notify();
-                            },
-                        )),
+                            }),
+                        ),
                     )
                     .child(title)
                     .child(div().flex_1())
                     .child(
-                        IconButton::new("detail-transfers", IconName::Transfers, "Transfers")
+                        Button::icon_button("detail-transfers", IconName::Transfers, "Transfers")
                             .badge(2),
                     )
-                    .child(IconButton::new(
+                    .child(Button::icon_button(
                         "detail-settings",
                         IconName::Settings,
                         "Settings",
@@ -1851,8 +1862,8 @@ impl Lab {
                 } else {
                     cell = cell
                         .child(
-                            Notice::new(
-                                NoticeKind::Warning,
+                            Alert::new(
+                                AlertTone::Warning,
                                 "Showing saved results · refresh failed",
                             )
                             .strip()
@@ -1897,10 +1908,11 @@ impl Lab {
         };
         let tones = [
             ("Neutral", BadgeTone::Neutral),
-            ("Accent", BadgeTone::Accent),
-            ("Info", BadgeTone::Info),
+            ("Primary", BadgeTone::Primary),
             ("Success", BadgeTone::Success),
-            ("Warn", BadgeTone::Warn),
+            ("Warning", BadgeTone::Warning),
+            ("Destructive", BadgeTone::Destructive),
+            ("OnArt", BadgeTone::OnArt),
         ];
         let badges = col()
             .child(label("Badge · tones"))
@@ -1913,15 +1925,15 @@ impl Lab {
             )
             .child(
                 row().flex_wrap().children([
-                    Badge::new("4k").tone(BadgeTone::Accent).uppercase(true),
-                    Badge::new("hdr10").tone(BadgeTone::Info).uppercase(true),
-                    Badge::new("Dolby Vision").tone(BadgeTone::Info),
+                    Badge::new("4k").tone(BadgeTone::Primary).uppercase(true),
+                    Badge::new("hdr10").strong(true).uppercase(true),
+                    Badge::new("Dolby Vision").strong(true),
                     Badge::new("HEVC").uppercase(true),
                     Badge::new("Cached")
                         .tone(BadgeTone::Success)
                         .icon(IconName::Check),
                     Badge::new("Low seeds")
-                        .tone(BadgeTone::Warn)
+                        .tone(BadgeTone::Warning)
                         .icon(IconName::Warning),
                 ]),
             );
@@ -2007,12 +2019,12 @@ impl Lab {
                     .object_fit(ObjectFit::Cover),
             )
             .metas([
-                Chip::rating(Some(8.1)).over_art(true).into_any_element(),
+                Badge::rating(Some(8.1)).over_art(true).into_any_element(),
                 div().child("2024").into_any_element(),
                 div().child("118 min").into_any_element(),
             ])
-            .meta_badge(Badge::new("4k").tone(BadgeTone::Accent).uppercase(true))
-            .meta_badge(Badge::new("hdr10").tone(BadgeTone::Info).uppercase(true))
+            .meta_badge(Badge::new("4k").tone(BadgeTone::Primary).uppercase(true))
+            .meta_badge(Badge::new("hdr10").strong(true).uppercase(true))
             .overview(
                 "A visitor uncovers a secret by the distant shore, and the harbor town that \
                  has kept it for generations is not ready to let it go. Across one long \
@@ -2026,10 +2038,15 @@ impl Lab {
                     .over_art(true),
             )
             .secondary(Button::new("pat-trailer", "Trailer").over_art(true))
-            .title_action(IconButton::new("pat-copy", IconName::Copy, "Copy title").over_art(true))
-            .secondary(IconButton::new("pat-refresh", IconName::Refresh, "Refresh").over_art(true))
+            .title_action(
+                Button::icon_button("pat-copy", IconName::Copy, "Copy title").over_art(true),
+            )
             .secondary(
-                IconButton::new("pat-imdb", IconName::ExternalLink, "Open on IMDb").over_art(true),
+                Button::icon_button("pat-refresh", IconName::Refresh, "Refresh").over_art(true),
+            )
+            .secondary(
+                Button::icon_button("pat-imdb", IconName::ExternalLink, "Open on IMDb")
+                    .over_art(true),
             );
         let _ = window;
         col()
@@ -2582,7 +2599,7 @@ impl Render for ProductionScene {
                         .child(
                             Popover::new("fixture-transfers")
                                 .trigger(
-                                    IconButton::new(
+                                    Button::icon_button(
                                         "fixture-transfers-trigger",
                                         IconName::Transfers,
                                         "Transfers",

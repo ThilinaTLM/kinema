@@ -1,4 +1,12 @@
 //! Rounded single-line native input. Text is deliberately absent from Debug output.
+//!
+//! Accessibility: `Role::TextInput` (`SearchInput` / `PasswordInput` as set),
+//! named by `set_label`, with value and placeholder exposed (never the value of
+//! a secret field) and an invalid description. Tab focuses; the edge turns
+//! `primary` while focused. Disabled inputs leave the tab order and ignore
+//! edits; GPUI has no disabled attribute, so assistive technology is not told
+//! the field is disabled. Caret and selection are not exposed to assistive
+//! technology (no synthetic text nodes yet).
 // Element painting and IME integration adapted from gpui-pre 0.3.9 examples/input.rs
 // (Zed Industries contributors, Apache-2.0).
 use crate::{
@@ -203,6 +211,8 @@ pub struct TextInput {
     focus_handle: FocusHandle,
     buffer: EditBuffer,
     placeholder: SharedString,
+    label: SharedString,
+    role: Role,
     secret: bool,
     disabled: bool,
     read_only: bool,
@@ -232,6 +242,8 @@ impl TextInput {
             focus_handle,
             buffer: EditBuffer::default(),
             placeholder: "".into(),
+            label: "".into(),
+            role: Role::TextInput,
             secret: false,
             disabled: false,
             read_only: false,
@@ -262,6 +274,20 @@ impl TextInput {
     }
     pub fn set_placeholder(&mut self, text: impl Into<SharedString>, cx: &mut Context<Self>) {
         self.placeholder = text.into();
+        cx.notify();
+    }
+    /// Accessible name; every text field needs one (the placeholder is only a hint).
+    pub fn set_label(&mut self, label: impl Into<SharedString>, cx: &mut Context<Self>) {
+        self.label = label.into();
+        cx.notify();
+    }
+    /// Expose the field as a search box to assistive technology.
+    pub fn set_search_role(&mut self, search: bool, cx: &mut Context<Self>) {
+        self.role = if search {
+            Role::SearchInput
+        } else {
+            Role::TextInput
+        };
         cx.notify();
     }
     pub fn set_secret(&mut self, value: bool, cx: &mut Context<Self>) {
@@ -768,6 +794,18 @@ impl Render for TextInput {
         let focused = !disabled && focus.is_focused(window);
         div()
             .id("kinema-text-input")
+            .role(if self.secret {
+                Role::PasswordInput
+            } else {
+                self.role
+            })
+            .when(!self.label.is_empty(), |el| {
+                el.aria_label(self.label.clone())
+            })
+            .aria_placeholder(self.placeholder.clone())
+            // A secret's value is never exposed to the accessibility tree.
+            .when(!self.secret, |el| el.aria_value(self.buffer.text.clone()))
+            .when(self.invalid, |el| el.aria_description("Invalid value"))
             .relative()
             .key_context("KinemaTextInput")
             .track_focus(&self.focus_handle)

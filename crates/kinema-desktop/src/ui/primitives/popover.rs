@@ -1,4 +1,11 @@
 //! Anchored, nonmodal, focus-returning panels built directly on GPUI.
+//!
+//! Accessibility: the trigger is a `Button` with `expanded` state, named by
+//! [`Popover::label`] (or by its content). Enter/Space/Down open the panel and
+//! move focus into it; Esc or an outside press closes it and returns focus to
+//! the trigger. The panel is a `Dialog` carrying the same name. It is
+//! nonmodal, so Tab may leave it. The trigger focus ring follows the host
+//! radius.
 use crate::{
     ui::motion::{
         Presence,
@@ -152,6 +159,7 @@ impl RenderOnce for Popover {
         let presence = state.read(cx).presence.clone();
         let open = presence.read(cx).is_open();
         let trigger = self.trigger.map(|build| build(open));
+        let panel_label = self.label.clone();
         let mut root = div().id(self.id).relative().flex().flex_col().child(
             div()
                 .id("popover-trigger")
@@ -186,6 +194,8 @@ impl RenderOnce for Popover {
             let key_state = state.clone();
             let panel = div()
                 .id("popover-panel")
+                .role(Role::Dialog)
+                .when_some(panel_label, |el, label| el.aria_label(label))
                 .track_focus(&state.read(cx).focus)
                 .occlude()
                 .max_w(window.viewport_size().width - space::S16)

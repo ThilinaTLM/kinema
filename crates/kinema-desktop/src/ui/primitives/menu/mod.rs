@@ -1,4 +1,18 @@
-//! Rounded native menus and context-menu/select adapters.
+//! Rounded native menus with context-menu and select adapters.
+//!
+//! `Menu` (this file) is the popup list; `context` attaches it to a right-click
+//! or keyboard trigger; `select` is the typed compact select; `item` has the
+//! plain-action constructors.
+//!
+//! Accessibility: the panel is `Role::Menu` named by [`Menu::label`]; rows are
+//! `MenuItem` (or `MenuItemCheckBox` with a toggled state when checked), and
+//! the highlighted row is reported as the active descendant because the menu
+//! itself keeps keyboard focus. Submenu rows expose `expanded`; disabled rows
+//! are inert and their reason is the description. Up/Down/Home/End move,
+//! Enter/Space activate, Right/Left open/close a submenu, typing jumps, and
+//! Esc (or an outside press) closes the menu and returns focus to the element
+//! that held it before opening. The highlight is a fill; checked state also
+//! shows a check glyph, so selection is not colour-only.
 //!
 //! A window-keyed registry owns only a weak reference: opening a context menu
 //! dismisses the previous one without keeping an unmounted trigger alive.
@@ -13,7 +27,7 @@ use crate::{
     ui::theme::{elevation, palette, radius, space, typeface},
 };
 use gpui::{prelude::*, *};
-use std::{collections::HashMap, rc::Rc, time::Instant};
+use std::{rc::Rc, time::Instant};
 
 pub type MenuHandler = Rc<dyn Fn(&mut Window, &mut App)>;
 
@@ -39,6 +53,14 @@ impl MenuItem {
         match self {
             Self::Action { label, .. } | Self::Submenu { label, .. } => Some(label),
             Self::Separator => None,
+        }
+    }
+    fn disabled_text(&self) -> Option<SharedString> {
+        match self {
+            Self::Action {
+                disabled_reason, ..
+            } => disabled_reason.clone(),
+            _ => None,
         }
     }
     fn enabled(&self) -> bool {
@@ -128,6 +150,7 @@ pub struct Menu {
     parent_selection: Option<usize>,
     focus: FocusHandle,
     previous: Option<FocusHandle>,
+    label: SharedString,
     last_type: Option<Instant>,
     presence: Entity<Presence>,
     scroll: ScrollHandle,
@@ -141,6 +164,11 @@ impl Focusable for Menu {
     }
 }
 impl Menu {
+    /// Accessible name of the menu (default "Menu").
+    pub fn label(mut self, label: impl Into<SharedString>) -> Self {
+        self.label = label.into();
+        self
+    }
     /// Opened by pointer: nothing is highlighted until the pointer or an arrow
     /// key picks a row. Keyboard opening (the default) highlights the first
     /// enabled (or checked) row.
@@ -190,6 +218,7 @@ impl Menu {
             parent_selection: None,
             focus,
             previous,
+            label: "Menu".into(),
             last_type: None,
             presence: presence.clone(),
             scroll: ScrollHandle::new(),
@@ -339,6 +368,8 @@ impl Menu {
                 &self.scroll
             })
             .occlude()
+            .role(Role::Menu)
+            .aria_label(self.label.clone())
             .bg(p.bg_overlay)
             .rounded(radius::XL)
             .border_1()
@@ -364,8 +395,23 @@ impl Menu {
             } else {
                 self.parent_selection == Some(i)
             };
+            let (role, checked, expanded) = match item {
+                MenuItem::Action { checked: true, .. } => (Role::MenuItemCheckBox, true, None),
+                MenuItem::Submenu { .. } => (Role::MenuItem, false, Some(self.submenu == Some(i))),
+                _ => (Role::MenuItem, false, None),
+            };
             let mut row = div()
                 .id(i)
+                .role(role)
+                .aria_label(SharedString::from(
+                    item.label().unwrap_or_default().to_owned(),
+                ))
+                .when(checked, |el| el.aria_toggled(Toggled::True))
+                .when_some(expanded, |el, open| el.aria_expanded(open))
+                .when(selected, |el| el.aria_active_descendant())
+                .when_some(item.disabled_text(), |el, reason| {
+                    el.aria_description(reason)
+                })
                 .h(space::ROW)
                 .flex()
                 .items_center()
@@ -477,330 +523,13 @@ impl Render for Menu {
     }
 }
 
-actions!(kinema_context_menu, [OpenContextMenu]);
-/// Install once at application startup. The wrapper supplies the dispatch context.
-pub fn bind_keys(cx: &mut App) {
-    cx.bind_keys([
-        KeyBinding::new("shift-f10", OpenContextMenu, Some("KinemaContextMenu")),
-        KeyBinding::new("menu", OpenContextMenu, Some("KinemaContextMenu")),
-    ]);
-}
-#[derive(Default)]
-struct OpenMenus(HashMap<WindowId, WeakEntity<Menu>>);
-impl Global for OpenMenus {}
-#[derive(Default)]
-struct ContextState {
-    menu: Option<Entity<Menu>>,
-    position: Point<Pixels>,
-    subscription: Option<Subscription>,
-}
+mod context;
+mod item;
+mod select;
 
-/// Adds pointer and keyboard context-menu support to an interactive element.
-/// The wrapper is not a tab stop: keyboard actions bubble from the focused
-/// descendant through its key context. Focus stays on that descendant for
-/// keyboard opening/return; pointer opening has a non-tab-stop fallback handle
-/// when the target has no focused descendant.
-pub trait ContextMenuExt: InteractiveElement + IntoElement + Sized + 'static {
-    fn context_menu(
-        self,
-        id: impl Into<ElementId>,
-        builder: impl Fn(&mut Window, &mut App) -> Vec<MenuItem> + 'static,
-    ) -> ContextMenu<Self> {
-        ContextMenu {
-            element: self,
-            id: id.into(),
-            builder: Rc::new(builder),
-            style: StyleRefinement::default(),
-        }
-    }
-}
-impl<E: InteractiveElement + IntoElement + Sized + 'static> ContextMenuExt for E {}
-type MenuBuilder = Rc<dyn Fn(&mut Window, &mut App) -> Vec<MenuItem>>;
-#[derive(IntoElement)]
-pub struct ContextMenu<E: InteractiveElement + IntoElement + 'static> {
-    element: E,
-    id: ElementId,
-    builder: MenuBuilder,
-    /// Layout/appearance of the wrapper element, so a context menu never has
-    /// to break the flex chain it sits in.
-    style: StyleRefinement,
-}
-impl<E: InteractiveElement + IntoElement + 'static> Styled for ContextMenu<E> {
-    fn style(&mut self) -> &mut StyleRefinement {
-        &mut self.style
-    }
-}
-impl<E: InteractiveElement + IntoElement + 'static> RenderOnce for ContextMenu<E> {
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let state = window.use_keyed_state(self.id.clone(), cx, |_, _| ContextState::default());
-        let focus = window.use_keyed_state((self.id.clone(), "focus"), cx, |_, cx| {
-            cx.focus_handle().tab_stop(false)
-        });
-        let focus = focus.read(cx).clone();
-        let open = {
-            let state = state.clone();
-            let builder = self.builder;
-            let focus = focus.clone();
-            Rc::new(
-                move |position: Point<Pixels>, pointer: bool, window: &mut Window, cx: &mut App| {
-                    let old = cx
-                        .try_global::<OpenMenus>()
-                        .and_then(|g| g.0.get(&window.window_handle().window_id()))
-                        .cloned();
-                    if let Some(old) = old.and_then(|m| m.upgrade()) {
-                        old.update(cx, |menu, cx| menu.dismiss(window, cx));
-                    }
-                    if !focus.contains_focused(window, cx) {
-                        focus.focus(window, cx);
-                    }
-                    let items = builder(window, cx);
-                    let menu = cx.new(|cx| Menu::new(items, window, cx).opened_by_pointer(pointer));
-                    let subscription = cx.subscribe(&menu, {
-                        let state = state.downgrade();
-                        let window_id = window.window_handle().window_id();
-                        move |menu, _: &DismissEvent, cx| {
-                            let registry = cx.global_mut::<OpenMenus>();
-                            if registry
-                                .0
-                                .get(&window_id)
-                                .is_some_and(|open| open.entity_id() == menu.entity_id())
-                            {
-                                registry.0.remove(&window_id);
-                            }
-                            let _ = state.update(cx, |state, cx| {
-                                state.menu = None;
-                                cx.notify();
-                            });
-                        }
-                    });
-                    if cx.try_global::<OpenMenus>().is_none() {
-                        cx.set_global(OpenMenus::default());
-                    }
-                    cx.global_mut::<OpenMenus>()
-                        .0
-                        .insert(window.window_handle().window_id(), menu.downgrade());
-                    state.update(cx, |state, cx| {
-                        state.menu = Some(menu);
-                        state.position = position;
-                        state.subscription = Some(subscription);
-                        cx.notify();
-                    });
-                },
-            )
-        };
-        let bounds = window.use_keyed_state((self.id.clone(), "bounds"), cx, |_, _| {
-            Bounds::<Pixels>::default()
-        });
-        let key_bounds = bounds.clone();
-        let key_open = open.clone();
-        let mut root = div()
-            .id(self.id)
-            .relative()
-            .key_context("KinemaContextMenu")
-            .track_focus(&focus)
-            .tab_stop(false)
-            .on_action(move |_: &OpenContextMenu, window, cx| {
-                key_open(key_bounds.read(cx).bottom_left(), false, window, cx);
-                cx.stop_propagation();
-            })
-            .on_mouse_down(MouseButton::Right, move |event, window, cx| {
-                open(event.position, true, window, cx);
-                cx.stop_propagation();
-            })
-            .child(self.element)
-            .child(
-                canvas(
-                    move |b, _, cx| {
-                        bounds.update(cx, |stored, _| *stored = b);
-                    },
-                    |_, _, _, _| {},
-                )
-                .absolute()
-                .size_full(),
-            );
-        root.style().refine(&self.style);
-        let state = state.read(cx);
-        if let Some(menu) = &state.menu {
-            root = root.child(
-                deferred(
-                    anchored()
-                        .position(state.position)
-                        .snap_to_window_with_margin(space::S8)
-                        .child(menu.clone()),
-                )
-                .priority(10),
-            );
-        }
-        root
-    }
-}
-
-/// A typed compact select. Subscribe to `SelectEvent::Changed` for updates.
-pub enum SelectEvent<T> {
-    Changed(T),
-}
-pub struct Select<T: Clone + PartialEq + 'static> {
-    options: Vec<(T, SharedString)>,
-    value: T,
-    focus: FocusHandle,
-    menu: Option<Entity<Menu>>,
-    subscription: Option<Subscription>,
-    icon: Option<IconName>,
-    prefix: Option<SharedString>,
-    toolbar: bool,
-}
-impl<T: Clone + PartialEq + 'static> EventEmitter<SelectEvent<T>> for Select<T> {}
-impl<T: Clone + PartialEq + 'static> Select<T> {
-    pub fn new(value: T, options: Vec<(T, SharedString)>, cx: &mut Context<Self>) -> Self {
-        Self {
-            value,
-            options,
-            focus: cx.focus_handle().tab_stop(true),
-            menu: None,
-            subscription: None,
-            icon: None,
-            prefix: None,
-            toolbar: false,
-        }
-    }
-    /// Leading glyph, e.g. a sort icon.
-    pub fn icon(mut self, icon: IconName) -> Self {
-        self.icon = Some(icon);
-        self
-    }
-    /// Muted key shown before the value ("Sort" Seeders).
-    pub fn prefix(mut self, prefix: impl Into<SharedString>) -> Self {
-        self.prefix = Some(prefix.into());
-        self
-    }
-    /// Floating-header geometry and glass material, matching `Segmented::toolbar`.
-    pub fn toolbar_style(mut self) -> Self {
-        self.toolbar = true;
-        self
-    }
-    pub fn value(&self) -> &T {
-        &self.value
-    }
-    pub fn set_value(&mut self, value: T, cx: &mut Context<Self>) {
-        self.value = value;
-        cx.notify();
-    }
-    fn open(&mut self, pointer: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if self.menu.is_some() {
-            return;
-        }
-        self.focus.focus(window, cx);
-        let weak = cx.entity().downgrade();
-        let items = self
-            .options
-            .iter()
-            .map(|(value, label)| {
-                let value = value.clone();
-                let weak = weak.clone();
-                MenuItem::Action {
-                    label: label.clone(),
-                    shortcut: None,
-                    icon: None,
-                    disabled_reason: None,
-                    checked: value == self.value,
-                    handler: Rc::new(move |_, cx| {
-                        let _ = weak.update(cx, |this, cx| {
-                            if this.value != value {
-                                this.value = value.clone();
-                                cx.emit(SelectEvent::Changed(value.clone()));
-                                cx.notify();
-                            }
-                        });
-                    }),
-                }
-            })
-            .collect();
-        let menu = cx.new(|cx| Menu::new(items, window, cx).opened_by_pointer(pointer));
-        self.subscription = Some(cx.subscribe(&menu, |this, _, _: &DismissEvent, cx| {
-            this.menu = None;
-            cx.notify();
-        }));
-        self.menu = Some(menu);
-        cx.notify();
-    }
-}
-impl<T: Clone + PartialEq + 'static> Focusable for Select<T> {
-    fn focus_handle(&self, _: &App) -> FocusHandle {
-        self.focus.clone()
-    }
-}
-impl<T: Clone + PartialEq + 'static> Render for Select<T> {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let p = palette(cx);
-        let label = self
-            .options
-            .iter()
-            .find(|(v, _)| *v == self.value)
-            .map(|(_, l)| l.clone())
-            .unwrap_or_default();
-        div()
-            .id("select")
-            .track_focus(&self.focus)
-            .focus_visible(move |s| s.border(space::FOCUS_RING).border_color(p.focus_ring))
-            .tab_stop(true)
-            .relative()
-            .rounded(if self.toolbar { radius::LG } else { radius::MD })
-            .child({
-                let face = div()
-                    .flex()
-                    .items_center()
-                    .gap(space::S6)
-                    .text_color(p.text_primary)
-                    .children(
-                        self.icon
-                            .map(|icon| Icon::new(icon).color(p.text_secondary)),
-                    )
-                    .children(
-                        self.prefix
-                            .clone()
-                            .map(|prefix| div().text_color(p.text_muted).child(prefix)),
-                    )
-                    .child(label)
-                    .child(Icon::new(IconName::ChevronDown).color(p.text_secondary));
-                if self.toolbar {
-                    let (fill, hover, edge) = p.glass();
-                    face.h(space::TOOLBAR_CONTROL)
-                        .rounded(radius::LG)
-                        .px(space::S12)
-                        .bg(fill)
-                        .border(space::HAIRLINE)
-                        .border_color(edge)
-                        .type_style(typeface::SMALL_MEDIUM)
-                        .hover(move |s| s.bg(hover))
-                } else {
-                    face.h(space::CONTROL_HEIGHT)
-                        .rounded(radius::MD)
-                        .px(space::S8)
-                        .bg(p.ctl_rest)
-                        .border_1()
-                        .border_color(p.line_control)
-                        .type_style(typeface::BODY)
-                }
-            })
-            .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
-                this.open(!event.is_keyboard(), window, cx)
-            }))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if matches!(event.keystroke.key.as_str(), "space" | "enter" | "down") {
-                    this.open(false, window, cx);
-                    cx.stop_propagation();
-                }
-            }))
-            .when_some(self.menu.clone(), |el, menu| {
-                el.child(
-                    div().absolute().top_full().left_0().child(
-                        deferred(anchored().snap_to_window_with_margin(space::S8).child(menu))
-                            .priority(10),
-                    ),
-                )
-            })
-    }
-}
+pub use context::{ContextMenu, ContextMenuExt, bind_keys};
+pub use item::{menu_item, menu_item_icon};
+pub use select::{Select, SelectEvent};
 
 #[cfg(test)]
 mod tests {
@@ -889,7 +618,12 @@ mod tests {
 }
 
 #[cfg(all(test, feature = "ui-probe-test"))]
+#[allow(
+    clippy::unwrap_used,
+    reason = "test setup and event dispatch must succeed"
+)]
 mod interaction_tests {
+    use super::context::OpenMenus;
     use super::*;
     use core::prelude::v1::test;
     use std::cell::Cell;
@@ -1033,5 +767,66 @@ mod interaction_tests {
         cx.run_until_parked();
         assert_eq!(dismissed.get(), 1);
         drop(subscription);
+    }
+
+    struct MenuHost {
+        previous: FocusHandle,
+        menu: Option<Entity<Menu>>,
+        chosen: Rc<Cell<Option<&'static str>>>,
+    }
+    impl Render for MenuHost {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .id("host")
+                .track_focus(&self.previous)
+                .children(self.menu.clone())
+        }
+    }
+
+    #[gpui::test]
+    fn arrows_activate_and_escape_returns_focus(cx: &mut TestAppContext) {
+        let chosen = Rc::new(Cell::new(None));
+        let handle = cx.add_window({
+            let chosen = chosen.clone();
+            move |window, cx| {
+                crate::ui::theme::init(cx);
+                crate::ui::theme::set_reduce_motion(true, cx);
+                let previous = cx.focus_handle();
+                previous.focus(window, cx);
+                MenuHost {
+                    previous,
+                    menu: None,
+                    chosen,
+                }
+            }
+        });
+        for (keys, expect) in [("down enter", Some("Beta")), ("escape", None)] {
+            handle
+                .update(cx, |host, window, cx| {
+                    let chosen = host.chosen.clone();
+                    let pick = |name: &'static str| {
+                        let chosen = chosen.clone();
+                        menu_item(name, move |_, _| chosen.set(Some(name)))
+                    };
+                    host.chosen.set(None);
+                    host.previous.focus(window, cx);
+                    host.menu = Some(cx.new(|cx| {
+                        Menu::new(vec![pick("Alpha"), pick("Beta")], window, cx).label("Actions")
+                    }));
+                    cx.notify();
+                })
+                .unwrap();
+            cx.update_window(handle.into(), |_, window, cx| window.draw(cx).clear(cx))
+                .unwrap();
+            cx.simulate_keystrokes(handle.into(), keys);
+            cx.run_until_parked();
+            handle
+                .update(cx, |host, window, _| {
+                    assert_eq!(host.chosen.get(), expect, "{keys}");
+                    assert!(host.previous.is_focused(window), "{keys}: focus returned");
+                })
+                .unwrap();
+        }
+        assert_eq!(chosen.get(), None);
     }
 }

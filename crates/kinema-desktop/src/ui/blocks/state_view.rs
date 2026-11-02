@@ -12,11 +12,11 @@ use crate::{
     ui::motion::{self, AnimateExt, transition::CROSSFADE},
     ui::primitives::Icon,
     ui::primitives::IconName,
+    ui::primitives::alert::{Alert, AlertTone},
     ui::primitives::button::Button,
-    ui::primitives::notice::{Notice, NoticeKind},
     ui::theme::motion::timing,
     ui::theme::typography::TypeExt,
-    ui::theme::{palette, space, typeface},
+    ui::theme::{palette, radius, space, typeface},
 };
 
 /// What a view currently shows.
@@ -241,7 +241,7 @@ fn refresh_bar(cx: &App) -> AnyElement {
                 .absolute()
                 .h_full()
                 .w(relative(0.25))
-                .rounded_full()
+                .rounded(radius::FULL)
                 .bg(p.primary)
                 .animate_loop("refresh-sweep", timing::SPIN_PERIOD, cx, |el, t| {
                     el.left(relative(t * 1.25 - 0.25))
@@ -322,7 +322,7 @@ impl RenderOnce for StateView {
                     |el, t| el.opacity(t),
                 );
                 base.when(self.stale_error && self.state == ViewState::Content, |el| {
-                    let strip = Notice::new(NoticeKind::Warning, "Showing saved results")
+                    let strip = Alert::new(AlertTone::Warning, "Showing saved results")
                         .body(
                             self.message
                                 .clone()

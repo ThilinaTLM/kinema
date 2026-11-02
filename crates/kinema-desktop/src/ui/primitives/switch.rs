@@ -1,10 +1,19 @@
 //! Controlled rounded boolean controls. Switch is for immediate settings only.
+//!
+//! Accessibility: `Switch` is `Role::Switch`, `Checkbox` is `CheckBox` and
+//! `Radio` is `RadioButton`; the label is the name and the checked state is
+//! reported as toggled. The whole row is one tab stop; Enter/Space (or a click
+//! on the label) activates it. A switch flips, a radio only selects and never
+//! clears. Disabled controls leave the tab order and ignore input (GPUI has no
+//! disabled attribute). The focus ring follows the row radius; state shows in
+//! the knob position / check / dot as well as colour. The host owns grouping,
+//! so arrow-key navigation between radios is not provided here.
 use crate::{
     ui::motion::{interaction::state_spring, transition::FEEDBACK},
     ui::primitives::Icon,
     ui::primitives::IconName,
     ui::theme::typography::TypeExt,
-    ui::theme::{palette, radius, space, typeface},
+    ui::theme::{palette, radius, size, space, typeface},
 };
 use gpui::{prelude::*, *};
 use std::rc::Rc;
@@ -47,27 +56,31 @@ impl RenderOnce for Checkbox {
         let indicator =
             match self.role {
                 Role::Switch => switch_indicator(self.checked, self.disabled, cx),
-                Role::RadioButton => div()
-                    .size(px(14.0))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded_full()
-                    .border(space::HAIRLINE)
-                    .border_color(if self.checked && !self.disabled {
-                        p.primary
-                    } else {
-                        p.line_control
-                    })
-                    .when(self.checked, |el| {
-                        el.child(div().size(space::S6).rounded_full().bg(if self.disabled {
-                            p.text_muted
-                        } else {
+                Role::RadioButton => {
+                    div()
+                        .size(size::ICON_SM)
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(radius::FULL)
+                        .border(space::HAIRLINE)
+                        .border_color(if self.checked && !self.disabled {
                             p.primary
-                        }))
-                    })
-                    .into_any_element(),
+                        } else {
+                            p.line_control
+                        })
+                        .when(self.checked, |el| {
+                            el.child(div().size(space::S6).rounded(radius::FULL).bg(
+                                if self.disabled {
+                                    p.text_muted
+                                } else {
+                                    p.primary
+                                },
+                            ))
+                        })
+                        .into_any_element()
+                }
                 _ => div()
                     .size(space::ICON)
                     .flex_none()
@@ -112,11 +125,7 @@ impl RenderOnce for Checkbox {
             .rounded(radius::MD + space::S4)
             .role(self.role)
             .aria_label(self.label.clone())
-            .aria_toggled(if self.checked {
-                Toggled::True
-            } else {
-                Toggled::False
-            })
+            .aria_toggled(toggled_state(self.checked))
             .when(!self.disabled, |el| {
                 el.focusable()
                     .tab_stop(true)
@@ -137,12 +146,19 @@ impl RenderOnce for Checkbox {
             })
     }
 }
+fn toggled_state(checked: bool) -> Toggled {
+    if checked {
+        Toggled::True
+    } else {
+        Toggled::False
+    }
+}
 fn switch_indicator(checked: bool, disabled: bool, cx: &App) -> AnyElement {
     let p = *palette(cx);
     let knob = div()
         .relative()
         .size(space::S12)
-        .rounded_full()
+        .rounded(radius::FULL)
         .bg(if disabled {
             p.text_muted
         } else if checked {
@@ -161,7 +177,7 @@ fn switch_indicator(checked: bool, disabled: bool, cx: &App) -> AnyElement {
         .flex()
         .items_center()
         .flex_none()
-        .rounded_full()
+        .rounded(radius::FULL)
         .border(space::HAIRLINE)
         .border_color(if checked && !disabled {
             p.primary
@@ -232,7 +248,7 @@ impl RenderOnce for Radio {
     reason = "test setup and event dispatch must succeed"
 )]
 mod interaction_tests {
-    use super::{Radio, Switch};
+    use super::{Radio, Switch, toggled_state};
     use gpui::{AppContext, Context, InputEvent, IntoElement, Render, TestAppContext, Window};
     use std::{cell::Cell, rc::Rc};
 
@@ -255,6 +271,53 @@ mod interaction_tests {
                     .disabled(self.disabled)
                     .on_change(move |value, _, _| changed.set(Some(value)))
                     .into_any_element()
+            }
+        }
+    }
+
+    #[test]
+    fn checked_state_maps_to_toggled() {
+        assert_eq!(toggled_state(true), gpui::Toggled::True);
+        assert_eq!(toggled_state(false), gpui::Toggled::False);
+    }
+
+    #[test]
+    fn keyboard_toggles_a_focused_switch_unless_disabled() {
+        for (disabled, expected) in [(false, Some(true)), (true, None)] {
+            let mut cx = TestAppContext::single();
+            cx.update(crate::ui::theme::init);
+            let changed = Rc::new(Cell::new(None));
+            let window = cx.add_window({
+                let changed = changed.clone();
+                move |_, _| Fixture {
+                    checked: false,
+                    radio: false,
+                    disabled,
+                    changed,
+                }
+            });
+            cx.update_window(window.into(), |_, window, cx| {
+                window.draw(cx).clear(cx);
+                window.focus_next(cx);
+            })
+            .unwrap();
+            for key in ["space", "enter"] {
+                changed.set(None);
+                let keystroke = gpui::Keystroke::parse(key).unwrap();
+                cx.update_window(window.into(), |_, window, cx| {
+                    window.dispatch_event(
+                        gpui::KeyDownEvent {
+                            keystroke: keystroke.clone(),
+                            is_held: false,
+                            prefer_character_input: false,
+                        }
+                        .to_platform_input(),
+                        cx,
+                    );
+                    window.dispatch_event(gpui::KeyUpEvent { keystroke }.to_platform_input(), cx);
+                })
+                .unwrap();
+                assert_eq!(changed.get(), expected, "{key} disabled={disabled}");
             }
         }
     }

@@ -1,4 +1,4 @@
-//! Library membership toggle built on [`ActionButton`].
+//! Library membership toggle built on [`Button`].
 //!
 //! Off reads "+ Add to Library"; on reads "In Library" with a filled bookmark
 //! and the accent `on` style, and its tooltip offers "Remove from Library".
@@ -9,7 +9,7 @@
 use crate::{
     ui::blocks::state_toggle::ToggleStatus,
     ui::primitives::IconName,
-    ui::primitives::action_button::{ActionButton, ActionKind},
+    ui::primitives::button::{Button, ButtonSize},
 };
 use gpui::{App, ElementId, IntoElement, RenderOnce, SharedString, Window};
 use std::rc::Rc;
@@ -125,22 +125,19 @@ impl LibraryToggle {
 impl RenderOnce for LibraryToggle {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
         let face = face(self.status, &self.subject);
-        let kind = if self.compact {
-            ActionKind::Icon
-        } else {
-            ActionKind::Secondary
-        };
-        let mut button = ActionButton::new(self.id, kind, face.label)
+        let mut button = Button::new(self.id, face.label)
+            .size(ButtonSize::Md)
+            .square(self.compact)
             .icon(face.icon)
-            .on(face.on)
+            .selected(face.on)
             .busy(face.busy)
             .tooltip(face.tooltip.clone())
             .name(format!("{}: {}", face.label, face.tooltip));
         if let Some(on) = face.toggled {
-            button = button.toggled(on, false);
+            button = button.toggled(on);
         }
         if let Some(reason) = face.disabled.clone() {
-            button = button.disabled(reason);
+            button = button.disabled_because(reason);
         }
         let (change, retry) = (self.on_change, self.on_retry);
         let (known, retrying) = (face.toggled, face.retry);

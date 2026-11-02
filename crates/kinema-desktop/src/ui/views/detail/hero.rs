@@ -3,7 +3,7 @@
 use super::layout;
 use super::*;
 use crate::ui::blocks::{MediaHero, MetaItem, uses_over_art};
-use crate::ui::primitives::action_button::{ActionButton, ActionKind};
+use crate::ui::primitives::button::{Button, ButtonSize, ButtonVariant};
 
 /// Wraps a page section in the shared frame: the same side gutters and
 /// maximum width as the hero content, centred only beyond that width.
@@ -90,7 +90,7 @@ impl Detail {
                 }
                 layout::MetaPart::Chip(text) => MetaItem::Badge(Badge::new(text)),
                 layout::MetaPart::Kind(text) => {
-                    MetaItem::Badge(Badge::new(text).uppercase(true).tone(BadgeTone::Accent))
+                    MetaItem::Badge(Badge::new(text).uppercase(true).tone(BadgeTone::Primary))
                 }
             });
         }
@@ -123,13 +123,15 @@ impl Detail {
             PrimaryAction::Blocked(reason) => Some(*reason),
             _ => None,
         };
-        let mut button = ActionButton::new("detail-primary", ActionKind::Primary, label)
+        let mut button = Button::new("detail-primary", label)
+            .variant(ButtonVariant::Primary)
+            .size(ButtonSize::Md)
             .icon(icon)
             .focus_handle(self.primary_focus.clone())
             .on_click(cx.listener(|this, _, _, cx| this.run_primary(cx)));
         // The reason becomes the tooltip of the disabled button.
         if let Some(reason) = blocked {
-            button = button.disabled(reason);
+            button = button.disabled_because(reason);
         }
         button.into_any_element()
     }
@@ -177,7 +179,7 @@ impl Detail {
             over_art,
         });
         // Action row: primary, Watch, Library | Refresh, IMDb. All share one
-        // ActionButton face; Watch and Library collapse to icons when narrow.
+        // Button face; Watch and Library collapse to icons when narrow.
         let compact = layout::compact_actions(viewport);
         banner = banner.secondary(if self.is_series() {
             self.series_watched_toggle(cx).compact(compact)
@@ -194,14 +196,18 @@ impl Detail {
                 .bg(p.line_hairline),
         );
         banner = banner.secondary(
-            ActionButton::new("detail-refresh", ActionKind::Icon, "Refresh")
+            Button::new("detail-refresh", "Refresh")
+                .size(ButtonSize::Md)
+                .square(true)
                 .icon(IconName::Refresh)
                 .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
         );
         if let Some(id) = title.imdb() {
             let url = format!("https://www.imdb.com/title/{}/", id.as_str());
             banner = banner.secondary(
-                ActionButton::new("detail-imdb", ActionKind::Icon, "Open on IMDb")
+                Button::new("detail-imdb", "Open on IMDb")
+                    .size(ButtonSize::Md)
+                    .square(true)
                     .icon(IconName::ExternalLink)
                     .on_click(move |_, _, cx| cx.open_url(&url)),
             );
@@ -220,8 +226,8 @@ impl Detail {
             let retry = cx.listener(|this, _, _, cx| this.retry_metadata(cx));
             section = section.child(body_shell(
                 div().w_full().pt(s::S12).child(
-                    crate::ui::primitives::notice::Notice::new(
-                        crate::ui::primitives::notice::NoticeKind::Warning,
+                    crate::ui::primitives::alert::Alert::new(
+                        crate::ui::primitives::alert::AlertTone::Warning,
                         if status.loaded {
                             "Couldn’t refresh title details"
                         } else {
@@ -298,7 +304,7 @@ impl RenderOnce for CopyTitleButton {
             (IconName::Copy, "Copy title")
         };
         let title = self.title;
-        IconButton::new("detail-copy-title", icon, label)
+        Button::icon_button("detail-copy-title", icon, label)
             .over_art(self.over_art)
             .on_click(move |_, window, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(title.to_string()));

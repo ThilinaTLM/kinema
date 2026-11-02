@@ -5,7 +5,7 @@
 //! light mode so dark ink always sits on a mostly-canvas surface). Dark art
 //! stays behind the controls only in dark mode, so over-art styling follows
 //! [`uses_over_art`]: the hero applies it to its own badges;
-//! callers pass the same value to `Button`/`IconButton`/`Badge` slots.
+//! callers pass the same value to `Button`/`Badge` slots.
 use std::{sync::Arc, time::Instant};
 
 use gpui::{prelude::*, *};

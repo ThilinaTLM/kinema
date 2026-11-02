@@ -142,7 +142,7 @@ impl StreamRow {
                         .top(space::S12 - space::S2)
                         .bottom(space::S12 - space::S2)
                         .w(space::S2)
-                        .rounded_full()
+                        .rounded(radius::FULL)
                         .bg(p.primary),
                 )
             })

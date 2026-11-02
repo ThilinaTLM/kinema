@@ -284,7 +284,7 @@ impl Detail {
 
     /// Confirmation shown below the hero before a checkpoint is deleted.
     pub(super) fn clear_confirmation(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        use crate::ui::primitives::notice::{Notice, NoticeKind};
+        use crate::ui::primitives::alert::{Alert, AlertTone};
         let target = self.clear_confirm?;
         let what = match target {
             Some((s, n)) => format!("Clear saved progress for S{s}E{n}?"),
@@ -298,9 +298,9 @@ impl Detail {
                 .gap(s::S8)
                 .child(
                     div().flex_1().min_w_0().child(
-                        Notice::new(NoticeKind::Info, what).body(CLEAR_HELP).action(
+                        Alert::new(AlertTone::Info, what).body(CLEAR_HELP).action(
                             Button::new("progress-clear-confirm", "Clear saved progress")
-                                .variant(ButtonVariant::Danger)
+                                .variant(ButtonVariant::Destructive)
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.confirm_clear(target, cx)
                                 })),

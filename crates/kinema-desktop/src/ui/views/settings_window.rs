@@ -8,7 +8,6 @@ use crate::{
     settings::{MotionChoice, PosterSize, Settings, ThemeChoice},
     ui::primitives::button::Button,
     ui::primitives::icon::IconName,
-    ui::primitives::icon_button::IconButton,
     ui::primitives::menu::{Select, SelectEvent},
     ui::primitives::segmented::{self, Segmented},
     ui::primitives::switch::Switch,
@@ -370,6 +369,7 @@ impl SettingsWindow {
         });
         let limit = cx.new(|cx| {
             let mut input = TextInput::new(window, cx);
+            input.set_label("Media cache limit (GB)", cx);
             input.set_text(
                 (settings.media_limit_bytes / 1024 / 1024 / 1024).to_string(),
                 cx,
@@ -379,6 +379,7 @@ impl SettingsWindow {
         let secret = cx.new(|cx| {
             let mut input = TextInput::new(window, cx);
             input.set_secret(true, cx);
+            input.set_label("Debrid API token", cx);
             input.set_placeholder("New token — stored only in OS secure storage", cx);
             input
         });
@@ -877,7 +878,7 @@ impl SettingsWindow {
                             }),
                     )
                     .child(
-                        IconButton::new(
+                        Button::icon_button(
                             ("provider-up", index),
                             IconName::ChevronUp,
                             format!("Move {} up", id.display_name()),
@@ -890,7 +891,7 @@ impl SettingsWindow {
                         }),
                     )
                     .child(
-                        IconButton::new(
+                        Button::icon_button(
                             ("provider-down", index),
                             IconName::ChevronDown,
                             format!("Move {} down", id.display_name()),

@@ -1520,16 +1520,15 @@ impl PlayerWindow {
                                     .child("Keyboard & mouse shortcuts"),
                             )
                             .child({
-                                let mut close = Button::new("player-shortcut-dismiss", "")
+                                Button::new("player-shortcut-dismiss", "")
                                     .variant(ButtonVariant::Ghost)
                                     .icon(IconName::Close)
+                                    .square(true)
+                                    .tooltip("Close (Escape)")
                                     .focus_handle(self.help_dismiss_focus.clone())
                                     .on_click(cx.listener(|view, _, window, cx| {
                                         view.close_help(window, cx)
-                                    }));
-                                close.square = true;
-                                close.tooltip = Some("Close (Escape)".into());
-                                close
+                                    }))
                             }),
                     )
                     .child(
@@ -2770,16 +2769,15 @@ impl PlayerWindow {
         icon: IconName,
         label: impl Into<SharedString>,
     ) -> Button {
-        let mut button = Button::new(id, "")
+        let availability = self.availability();
+        Button::new(id, "")
             .variant(ButtonVariant::Ghost)
             .icon(icon)
             .over_art(true)
-            .focus_handle(self.controls[index].clone());
-        button.square = true;
-        let availability = self.availability();
-        button.tooltip =
-            Some(disabled_reason(index, availability).map_or_else(|| label.into(), Into::into));
-        button.disabled(!control_enabled(index, availability))
+            .focus_handle(self.controls[index].clone())
+            .square(true)
+            .tooltip(disabled_reason(index, availability).map_or_else(|| label.into(), Into::into))
+            .disabled(!control_enabled(index, availability))
     }
     fn text_control(
         &self,
@@ -2789,15 +2787,17 @@ impl PlayerWindow {
         label: &'static str,
         active: bool,
     ) -> Button {
-        let mut button = Button::new(id, text)
+        let availability = self.availability();
+        Button::new(id, text)
             .variant(ButtonVariant::Ghost)
             .over_art(true)
-            .focus_handle(self.controls[index].clone());
-        let availability = self.availability();
-        button.tooltip =
-            Some(disabled_reason(index, availability).map_or_else(|| label.into(), Into::into));
-        button.toggled = active;
-        button.disabled(!control_enabled(index, availability))
+            .focus_handle(self.controls[index].clone())
+            .tooltip(
+                disabled_reason(index, availability)
+                    .map_or_else(|| SharedString::from(label), SharedString::from),
+            )
+            .selected(active)
+            .disabled(!control_enabled(index, availability))
     }
     fn volume_panel(&self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
         let p = Palette::cinema();
@@ -2850,7 +2850,7 @@ impl PlayerWindow {
                     .relative()
                     .h_full()
                     .w(VOLUME_TRACK)
-                    .rounded_full()
+                    .rounded(radius::FULL)
                     .bg(p.line_control.opacity(0.5))
                     .child(
                         div()
@@ -2858,7 +2858,7 @@ impl PlayerWindow {
                             .bottom_0()
                             .w_full()
                             .h(relative(fraction))
-                            .rounded_full()
+                            .rounded(radius::FULL)
                             .bg(fill),
                     )
                     // 100% detent: above it mpv amplifies (softvol).
@@ -2870,7 +2870,7 @@ impl PlayerWindow {
                             .w(VOLUME_TRACK + s::S8)
                             .h(s::S2)
                             .mt(-s::S2 / 2.)
-                            .rounded_full()
+                            .rounded(radius::FULL)
                             .bg(p.text_primary.opacity(0.6)),
                     )
                     .child(
@@ -2880,7 +2880,7 @@ impl PlayerWindow {
                             .mt(-VOLUME_THUMB / 2.)
                             .ml((VOLUME_TRACK - VOLUME_THUMB) / 2.)
                             .size(VOLUME_THUMB)
-                            .rounded_full()
+                            .rounded(radius::FULL)
                             .bg(p.text_primary)
                             .shadow_sm(),
                     ),
@@ -2984,7 +2984,7 @@ impl PlayerWindow {
             .relative()
             .w_full()
             .h(px(12.))
-            .rounded_full()
+            .rounded(radius::FULL)
             .overflow_hidden()
             .bg(p.line_control.opacity(0.5));
         if seekable {
@@ -3005,7 +3005,7 @@ impl PlayerWindow {
                 .absolute()
                 .h_full()
                 .w(relative(fraction))
-                .rounded_full()
+                .rounded(radius::FULL)
                 .bg(p.primary),
         );
         for tick in chapter_ticks(&self.state.chapters, duration) {
@@ -3055,7 +3055,7 @@ impl PlayerWindow {
                         .left(relative(fraction))
                         .ml(-size / 2.)
                         .size(size)
-                        .rounded_full()
+                        .rounded(radius::FULL)
                         .bg(p.text_primary)
                         .border_2()
                         .border_color(p.primary),
