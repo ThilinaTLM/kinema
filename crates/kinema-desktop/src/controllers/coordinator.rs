@@ -1213,7 +1213,7 @@ impl AppCoordinator {
         if self.embedded_sessions.remove(session_id) {
             self.closed_embedded_sessions
                 .insert(session_id.to_owned(), false);
-            crate::ui::views::player_window::close_session(session_id, cx);
+            crate::ui::views::player::close_session(session_id, cx);
         }
     }
 

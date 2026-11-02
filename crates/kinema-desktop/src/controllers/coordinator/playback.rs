@@ -1,6 +1,6 @@
 //! Application-owned playback intent and durable progress coordination.
 use super::{AppCoordinator, EpisodeRef, TitleRef};
-use crate::ui::views::player_window::{self, PlayerCheckpoint};
+use crate::ui::views::player::{self, PlayerCheckpoint};
 use crate::{
     catalog::{
         library::{LibraryOperation, LibraryResult},
@@ -178,7 +178,7 @@ impl AppCoordinator {
                     ready: None,
                 });
         }
-        let launch = snapshot.map(|s| crate::ui::views::player_window::PlaybackLaunch {
+        let launch = snapshot.map(|s| crate::ui::views::player::PlaybackLaunch {
             subject: s.target,
             epoch: s.epoch,
             run: 0,
@@ -186,7 +186,7 @@ impl AppCoordinator {
             watched: s.watch.is_some_and(|w| w.watched),
             intent: pending.intent,
         });
-        if crate::ui::views::player_window::open(
+        if crate::ui::views::player::open(
             pending.session.clone(),
             pending.mode,
             pending.url,
@@ -228,7 +228,7 @@ impl AppCoordinator {
                         run.latest = None;
                         run.retry_at = None;
                         run.retries = 0;
-                        player_window::authorize_progress(
+                        player::authorize_progress(
                             &session,
                             generation,
                             epoch,
@@ -248,7 +248,7 @@ impl AppCoordinator {
                         run.in_flight = false;
                     }
                     self.notice = Some("Progress could not be initialized. Retry in the player or play without saving.".into());
-                    player_window::progress_notice(&session, generation, true, cx);
+                    player::progress_notice(&session, generation, true, cx);
                 }
             },
             PendingProgress::Save { session, sample } => {
@@ -271,7 +271,7 @@ impl AppCoordinator {
                         run.retry_at = None;
                         if stale {
                             run.latest = None;
-                            player_window::invalidate_progress(
+                            player::invalidate_progress(
                                 &session,
                                 sample.generation,
                                 sample.epoch,
@@ -280,7 +280,7 @@ impl AppCoordinator {
                             if snapshot.active_run == sample.run && run.ready.is_none() {
                                 // A manual toggle/reset retains run ownership but advances
                                 // its epoch. Discard all pre-reset samples, including retries.
-                                player_window::authorize_progress(
+                                player::authorize_progress(
                                     &session,
                                     sample.generation,
                                     sample.epoch,
@@ -290,7 +290,7 @@ impl AppCoordinator {
                                 );
                             }
                         } else {
-                            player_window::progress_notice(&session, sample.generation, false, cx);
+                            player::progress_notice(&session, sample.generation, false, cx);
                         }
                         self.apply_playback_snapshot(*snapshot);
                         if changed_watch {
@@ -309,7 +309,7 @@ impl AppCoordinator {
                             .then(|| Instant::now() + Duration::from_secs(1 << (run.retries - 1)));
                         self.notice =
                             Some("Progress could not be saved. Playback can continue.".into());
-                        player_window::progress_notice(&session, sample.generation, true, cx);
+                        player::progress_notice(&session, sample.generation, true, cx);
                         self.send_pending_ready(&session, cx);
                     }
                 }
@@ -394,7 +394,7 @@ impl AppCoordinator {
                 run.in_flight = false;
             }
             self.notice = Some(error);
-            cx.defer(move |cx| player_window::progress_notice(&session, generation, true, cx));
+            cx.defer(move |cx| player::progress_notice(&session, generation, true, cx));
         }
     }
     fn revoke_other_writers(
@@ -412,7 +412,7 @@ impl AppCoordinator {
             {
                 run.latest = None;
                 run.retry_at = None;
-                player_window::invalidate_progress(session, run.generation, run.snapshot.epoch, cx);
+                player::invalidate_progress(session, run.generation, run.snapshot.epoch, cx);
                 duplicate = true;
             }
         }
@@ -495,9 +495,7 @@ impl AppCoordinator {
             }
             self.notice = Some(error);
             let session = session.to_owned();
-            cx.defer(move |cx| {
-                player_window::progress_notice(&session, sample.generation, true, cx)
-            });
+            cx.defer(move |cx| player::progress_notice(&session, sample.generation, true, cx));
         }
     }
     pub(super) fn retry_playback_progress(&mut self, cx: &mut Context<Self>) {
@@ -519,7 +517,7 @@ impl AppCoordinator {
     }
     pub(crate) fn flush_playback_on_quit(&mut self, cx: &mut Context<Self>) -> Task<()> {
         cx.spawn(async move |this, cx| {
-            cx.update(player_window::checkpoint_all);
+            cx.update(player::checkpoint_all);
             // Player callbacks are deferred so shutdown never reenters a borrowed
             // coordinator/player. Allow those captured final samples to arrive.
             cx.background_executor()

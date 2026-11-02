@@ -84,13 +84,13 @@ fn finish(cx: &mut App) {
     let task = cx.spawn(async move |cx| {
         let timeout = cx
             .background_executor()
-            .timer(std::time::Duration::from_secs(2));
+            .timer(crate::ui::theme::motion::timing::SHUTDOWN_GRACE);
         if race(
             async {
                 flush.await;
                 while !cx.update(|cx| crate::controllers::lifecycle::shutdown_complete(cx)) {
                     cx.background_executor()
-                        .timer(std::time::Duration::from_millis(20))
+                        .timer(crate::ui::theme::motion::timing::SHUTDOWN_POLL)
                         .await;
                 }
                 false
@@ -206,7 +206,7 @@ pub(crate) fn confirmation_for_close(
 mod interaction_tests {
     use super::*;
     use crate::ui::theme;
-    use crate::ui::views::{main_window::MainWindow, settings_window};
+    use crate::ui::views::{main_window::MainWindow, settings};
     use ::core::prelude::v1::test;
 
     fn setup(cx: &mut TestAppContext) -> (WindowHandle<MainWindow>, Entity<AppCoordinator>) {
@@ -215,7 +215,7 @@ mod interaction_tests {
             crate::ui::views::main_window::bind_keys(cx);
         });
         let coordinator = cx.new(|cx| AppCoordinator::fixture(Vec::new(), None, cx));
-        cx.update(|cx| settings_window::install(&coordinator, cx));
+        cx.update(|cx| settings::install(&coordinator, cx));
         let main = cx
             .add_window(|window, cx| MainWindow::with_coordinator(coordinator.clone(), window, cx));
         (main, coordinator)

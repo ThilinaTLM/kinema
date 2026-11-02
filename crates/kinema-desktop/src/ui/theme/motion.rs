@@ -65,6 +65,10 @@ pub mod distance {
 pub mod timing {
     use std::time::Duration;
 
+    /// Longest the quit flow waits for shutdown to complete before exiting anyway.
+    pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
+    /// Poll interval while waiting for shutdown to complete.
+    pub const SHUTDOWN_POLL: Duration = Duration::from_millis(20);
     /// Hover time before a tooltip shows.
     pub const TOOLTIP_DELAY: Duration = Duration::from_millis(500);
     /// Quiet time before a typed search is submitted.

@@ -341,9 +341,9 @@ impl Detail {
     /// (zero on the Streams page, which is inset below the header instead).
     pub(crate) fn scrolled_under_header(&self) -> Pixels {
         if self.page == Page::Overview {
-            (-self.scroll.offset().y).max(px(0.))
+            (-self.scroll.offset().y).max(Pixels::ZERO)
         } else {
-            px(0.)
+            Pixels::ZERO
         }
     }
     pub(crate) fn new(

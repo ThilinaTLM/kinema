@@ -26,7 +26,7 @@ fn run_desktop() -> ExitCode {
         ui::primitives::text_input::bind_keys(cx);
         ui::primitives::menu::bind_keys(cx);
         ui::views::main_window::bind_keys(cx);
-        ui::views::player_window::bind_keys(cx);
+        ui::views::player::bind_keys(cx);
         // MainWindow installs the strong app-global coordinator owner and
         // separate Main-close / explicit-Quit routes. Settings stays independent.
         let options = gpui::WindowOptions {

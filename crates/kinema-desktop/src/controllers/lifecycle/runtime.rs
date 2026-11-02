@@ -6,7 +6,7 @@ use crate::{
         inhibition::{Activity, PlayerActivity},
         runtime::{IconData, Runtime, RuntimeConfig, RuntimeSnapshot},
     },
-    ui::views::player_window,
+    ui::views::player,
 };
 use gpui::*;
 use std::{
@@ -101,7 +101,7 @@ impl DesktopRuntime {
             self.runtime.shutdown();
             return self.runtime.shutdown_complete();
         }
-        let players = player_window::desktop_snapshots(cx);
+        let players = player::desktop_snapshots(cx);
         let current: HashSet<_> = players.iter().map(|p| p.media.target).collect();
         for target in self.known.difference(&current) {
             self.selection.closed(*target);
@@ -112,7 +112,7 @@ impl DesktopRuntime {
             }
         }
         self.known = current;
-        for target in player_window::take_focus_events(cx) {
+        for target in player::take_focus_events(cx) {
             self.selection.focus(target);
         }
         // Commands may close player windows and update their coordinator. Never
@@ -132,13 +132,13 @@ impl DesktopRuntime {
                 Command::Quit => super::request_quit(cx),
                 Command::TrayHostLost => super::host_lost(cx),
                 Command::ShowPlayer(target) => {
-                    player_window::show_player(target, cx);
+                    player::show_player(target, cx);
                 }
                 Command::SelectPlayer(target) => {
                     self.selection.focus(target);
                 }
                 Command::Transport { target, action } => {
-                    player_window::dispatch_transport(target, action, cx);
+                    player::dispatch_transport(target, action, cx);
                 }
             }
             if cx.global::<Lifecycle>().quitting {
@@ -148,7 +148,7 @@ impl DesktopRuntime {
         }
         // A Stop command above may have removed a player. Resample before
         // publishing, so stale generations never remain the OS control target.
-        let players = player_window::desktop_snapshots(cx);
+        let players = player::desktop_snapshots(cx);
         let current: HashSet<_> = players.iter().map(|p| p.media.target).collect();
         for target in self.known.difference(&current) {
             self.selection.closed(*target);
