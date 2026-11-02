@@ -1,5 +1,6 @@
 //! Loading placeholders. They pulse in phase with each other and are fully
 //! static when reduced motion is on.
+use crate::ui::theme::opacity;
 use gpui::{prelude::*, *};
 
 use crate::{
@@ -8,7 +9,6 @@ use crate::{
     ui::theme::{palette, radius, space},
 };
 
-const PULSE_MIN: f32 = 0.5;
 /// Default footprint of a [`SkeletonShape::Line`] / circle.
 const LINE_HEIGHT: Pixels = space::S12;
 const CIRCLE_SIZE: Pixels = space::S32;
@@ -60,11 +60,11 @@ impl Styled for Skeleton {
 
 impl RenderOnce for Skeleton {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let el = self.base.bg(palette(cx).bg_placeholder);
+        let el = self.base.bg(palette(cx).muted);
         if motion::reduced(cx) {
             return el.into_any_element();
         }
-        let pulse = pulsating_between(PULSE_MIN, 1.0);
+        let pulse = pulsating_between(opacity::PULSE_MIN, 1.0);
         el.animate_loop("skeleton-pulse", timing::PULSE_PERIOD, cx, move |el, t| {
             el.opacity(pulse(t))
         })

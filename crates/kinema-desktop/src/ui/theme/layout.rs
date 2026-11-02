@@ -1,6 +1,8 @@
-//! View metrics grouped per view. Values are the module-local constants of
-//! `ui/views/**` and `ui/blocks/**`, unchanged; call sites migrate in step 5
-//! (until then the module-local originals remain next to their users).
+//! View metrics grouped per view. Values are the former module-local constants of
+//! `ui/views/**`, `ui/blocks/**` and `ui/primitives/**`, unchanged.
+
+/// Gap of poster grids and carousels.
+pub const GRID_GAP: gpui::Pixels = super::space::S12;
 
 /// Window-width breakpoints shared by several views.
 pub mod breakpoints {
@@ -47,6 +49,30 @@ pub mod detail {
     pub const STREAM_SEEDERS_WIDTH: Pixels = px(72.);
     pub const QUALITY_TILE_WIDTH: Pixels = px(56.);
     pub const QUALITY_TILE_HEIGHT: Pixels = px(40.);
+    pub const OVERVIEW_MAX_WIDTH: Pixels = px(880.);
+    pub const HERO_ASIDE_WIDTH: Pixels = px(320.);
+    /// Fraction of the hero height the backdrop fade covers.
+    pub const HERO_FADE_HEIGHT: f32 = 0.7;
+    /// Fraction of the hero width the side scrim reaches.
+    pub const HERO_SIDE_SCRIM_REACH: f32 = 0.7;
+    /// Poster and glance panel scale with the window, within these bounds.
+    pub const HERO_POSTER_FRACTION: f32 = 0.14;
+    pub const HERO_POSTER_MIN: Pixels = px(160.);
+    pub const HERO_POSTER_MAX: Pixels = px(240.);
+    pub const GLANCE_FRACTION: f32 = 0.24;
+    pub const GLANCE_MIN: Pixels = px(280.);
+    pub const GLANCE_MAX: Pixels = px(380.);
+    pub const GLANCE_RATINGS_WIDTH: Pixels = px(300.);
+    pub const FACT_GLANCE_LABEL_WIDTH: Pixels = px(84.);
+    pub const FACT_WIDE_LABEL_WIDTH: Pixels = px(112.);
+    /// Streams inspector: a fraction of the frame within bounds.
+    pub const STREAMS_INSPECTOR_FRACTION: f32 = 0.27;
+    pub const STREAMS_INSPECTOR_MIN: Pixels = px(340.);
+    pub const STREAMS_INSPECTOR_MAX: Pixels = px(400.);
+    pub const STREAMS_OVERVIEW_MAX_WIDTH: Pixels = px(920.);
+    pub const STREAMS_SEARCH_WIDTH: Pixels = px(240.);
+    pub const STREAMS_SEARCH_WIDTH_NARROW: Pixels = px(180.);
+    pub const STREAMS_BANNER_WIDTH: Pixels = px(260.);
     /// Cast rows shown before "show all" (count, not pixels).
     pub const CAST_ROWS_COLLAPSED: usize = 2;
 }
@@ -58,7 +84,16 @@ pub mod browse {
     /// Height of the header scrim ramp (`main_window.rs` SCRIM_RAMP).
     pub const SCRIM_RAMP: Pixels = px(24.);
     pub const COMPACT_BELOW: Pixels = super::breakpoints::WIDE;
-    pub const OVERLAY_BUTTON_SIZE: Pixels = px(28.);
+    /// Fraction of the header scrim ramp that stays at full strength.
+    pub const SCRIM_HOLD: f32 = 0.6;
+}
+
+pub mod settings {
+    use gpui::{Pixels, px};
+    pub const WINDOW_WIDTH: Pixels = px(860.);
+    pub const WINDOW_HEIGHT: Pixels = px(600.);
+    pub const MIN_WIDTH: Pixels = px(720.);
+    pub const MIN_HEIGHT: Pixels = px(480.);
 }
 
 pub mod transfers {
@@ -79,6 +114,19 @@ pub mod player {
     pub const VOLUME_PANEL_EXTRA: Pixels = px(84.);
     pub const VOLUME_TRACK: Pixels = px(12.);
     pub const VOLUME_THUMB: Pixels = px(18.);
+    pub const WINDOW_WIDTH: Pixels = px(1100.);
+    pub const WINDOW_HEIGHT: Pixels = px(680.);
+    pub const MIN_WIDTH: Pixels = px(720.);
+    pub const MIN_HEIGHT: Pixels = px(440.);
+    /// Timeline track thickness and its thumb at rest / while active.
+    pub const TIMELINE_TRACK: Pixels = px(12.);
+    pub const TIMELINE_THUMB: Pixels = px(14.);
+    pub const TIMELINE_THUMB_ACTIVE: Pixels = px(18.);
+    pub const HELP_HEADER_ICON: Pixels = px(18.);
+    pub const HELP_ROW_MIN_HEIGHT: Pixels = px(24.);
+    pub const HELP_MOUSE_LABEL_MAX: Pixels = px(132.);
+    pub const DIAGNOSTICS_TOP: Pixels = px(72.);
+    pub const DIAGNOSTICS_MAX_WIDTH: Pixels = px(360.);
 }
 
 /// Primitive-level metrics that are not component sizes.
@@ -88,6 +136,13 @@ pub mod controls {
     pub const CHOICE_TILE_WIDTH: Pixels = px(196.);
     /// Carousel edge slop (`carousel.rs` EDGE_SLOP).
     pub const CAROUSEL_EDGE_SLOP: Pixels = px(1.0);
+    /// Scrollbar hit area while hovered (rest is `space::S6`).
+    pub const SCROLLBAR_HOVER_WIDTH: Pixels = px(10.);
+    /// Minimum width of a menu panel.
+    pub const MENU_MIN_WIDTH: Pixels = px(200.);
+    /// Active-tab underline: distance from the bottom edge and thickness.
+    pub const INDICATOR_INSET: Pixels = px(3.);
+    pub const INDICATOR_THICKNESS: Pixels = px(2.);
 }
 
 #[cfg(test)]

@@ -1,6 +1,7 @@
 //! Session identity, telemetry and per-lease context actions.
 use super::*;
 use crate::ui::primitives::{Badge, ListRow};
+use crate::ui::theme::typography::{TextSize, TypeExt};
 
 impl Transfers {
     pub(super) fn session_row(
@@ -41,7 +42,7 @@ impl Transfers {
             .gap(s::S4)
             .pb(s::S8)
             .border_b_1()
-            .border_color(p.line_subtle)
+            .border_color(p.border)
             .child(
                 ListRow::new(("session-row", i), identity)
                     .subtitle(session.file_name.clone())
@@ -61,7 +62,7 @@ impl Transfers {
                             value,
                         )),
                 )
-                .child(div().px(s::S12).type_style(t::MONO).child(format!(
+                .child(div().px(s::S12).text(TextSize::Sm).mono().child(format!(
                     "{} / {}",
                     crate::controllers::play_session::format_bytes(progress.downloaded_bytes),
                     crate::controllers::play_session::format_bytes(progress.total_bytes)
@@ -71,8 +72,8 @@ impl Transfers {
                 row.child(
                     div()
                         .px(s::S12)
-                        .type_style(t::SMALL)
-                        .text_color(p.status_error)
+                        .text(TextSize::Sm)
+                        .text_color(p.destructive)
                         .child(error),
                 )
             })

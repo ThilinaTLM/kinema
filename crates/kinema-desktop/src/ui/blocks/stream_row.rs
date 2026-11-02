@@ -6,20 +6,18 @@
 //! The row is presentation only. [`StreamRow::build`] returns the styled
 //! element so the screen attaches focus, click, key and context-menu
 //! behaviour without this pattern knowing about sources or playback.
+use crate::ui::theme::layout::detail::{STREAM_SEEDERS_WIDTH, STREAM_SIZE_WIDTH};
 use gpui::{prelude::*, *};
 
 use crate::{
     ui::primitives::Icon,
     ui::primitives::IconName,
-    ui::theme::typography::TypeExt,
-    ui::theme::{palette, radius, space, typeface},
+    ui::theme::typography::{TextSize, TypeExt, Weight},
+    ui::theme::{palette, radius, size, space},
 };
 
 use crate::ui::motion::interaction::focus_ring;
 
-/// Right-hand numeric columns; fixed so values align down the list.
-const SIZE_WIDTH: Pixels = px(84.);
-const SEEDERS_WIDTH: Pixels = px(72.);
 /// Seeder count at which the value earns the success ink (the arrow glyph
 /// and the "seeders" caption keep the meaning without color).
 pub const HEALTHY_SEEDERS: u32 = 50;
@@ -81,16 +79,17 @@ impl StreamRow {
                 .items_end()
                 .child(
                     div()
-                        .type_style(typeface::BODY)
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(p.text_primary)
+                        .text(TextSize::Base)
+                        .weight(Weight::Medium)
+                        .text_color(p.foreground)
                         .child(value),
                 )
                 .child(
                     div()
-                        .type_style(typeface::CAPTION)
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(p.text_muted)
+                        .text(TextSize::Xs)
+                        .weight(Weight::Semibold)
+                        .weight(Weight::Medium)
+                        .text_color(p.subtle_foreground)
                         .child(caption),
                 )
         };
@@ -100,9 +99,9 @@ impl StreamRow {
         let seeders = match self.seeders {
             Some(n) => {
                 let ink = if n >= HEALTHY_SEEDERS {
-                    p.status_ok
+                    p.success
                 } else {
-                    p.text_secondary
+                    p.muted_foreground
                 };
                 div()
                     .flex()
@@ -120,7 +119,7 @@ impl StreamRow {
             .id(self.id)
             .relative()
             .w_full()
-            .min_h(space::ROW_TWO_LINE)
+            .min_h(size::ROW_TALL)
             .px(space::S12 + space::S2)
             .py(space::S12 - space::S2)
             .flex()
@@ -131,8 +130,8 @@ impl StreamRow {
             .aria_label(self.title.clone())
             .aria_selected(selected)
             .cursor_pointer()
-            .when(selected, |el| el.bg(p.accent_tint))
-            .when(!selected, |el| el.hover(move |s| s.bg(p.bg_surface)))
+            .when(selected, |el| el.bg(p.selection))
+            .when(!selected, |el| el.hover(move |s| s.bg(p.surface)))
             .focus_visible(move |s| s.shadow(vec![focus_ring(&p)]))
             .when(selected, |el| {
                 el.child(
@@ -156,9 +155,9 @@ impl StreamRow {
                     .gap(space::S6)
                     .child(
                         div()
-                            .type_style(typeface::BODY)
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(p.text_primary)
+                            .text(TextSize::Base)
+                            .weight(Weight::Medium)
+                            .text_color(p.foreground)
                             .clamp_lines(2)
                             .child(self.title),
                     )
@@ -173,7 +172,7 @@ impl StreamRow {
                         )
                     }),
             )
-            .child(numeric(size, "size", SIZE_WIDTH))
-            .child(numeric(seeders, "seeders", SEEDERS_WIDTH))
+            .child(numeric(size, "size", STREAM_SIZE_WIDTH))
+            .child(numeric(seeders, "seeders", STREAM_SEEDERS_WIDTH))
     }
 }

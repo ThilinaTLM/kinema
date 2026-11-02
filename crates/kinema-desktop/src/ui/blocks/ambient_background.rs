@@ -1,12 +1,8 @@
 //! Restrained artwork-led background only. Semantic text/control colors stay intact.
 use crate::artwork::ArtworkPalette;
-use crate::ui::theme::{Mode, Palette};
+use crate::ui::theme::{Mode, Palette, opacity};
 use gpui::{prelude::*, *};
 
-/// Maximum contribution of the muted artwork color to the canvas.
-const DARK_MAX_OPACITY: f32 = 0.14;
-const LIGHT_MAX_OPACITY: f32 = 0.07;
-const SECONDARY_STRENGTH: f32 = 0.45;
 const WASH_ANGLE: f32 = 135.0;
 
 /// Full-size composable surface; place Detail content inside using `.child(...)`.
@@ -33,8 +29,8 @@ impl ParentElement for AmbientBackground {
 }
 fn wash_colors(palette: Option<ArtworkPalette>, mode: Mode) -> [Rgba; 2] {
     let (base, opacity) = match mode {
-        Mode::Dark => (Palette::dark().bg_canvas, DARK_MAX_OPACITY),
-        Mode::Light => (Palette::light().bg_canvas, LIGHT_MAX_OPACITY),
+        Mode::Dark => (Palette::dark().background, opacity::AMBIENT_DARK),
+        Mode::Light => (Palette::light().background, opacity::AMBIENT_LIGHT),
     };
     let base: Rgba = base.into();
     let Some(palette) = palette else {
@@ -48,7 +44,7 @@ fn wash_colors(palette: Option<ArtworkPalette>, mode: Mode) -> [Rgba; 2] {
     };
     [
         blend(palette.primary, opacity),
-        blend(palette.secondary, opacity * SECONDARY_STRENGTH),
+        blend(palette.secondary, opacity * opacity::AMBIENT_SECONDARY),
     ]
 }
 impl RenderOnce for AmbientBackground {
@@ -85,9 +81,9 @@ mod tests {
                     for channel in [color.r, color.g, color.b, color.a] {
                         assert!(channel.is_finite() && (0.0..=1.0).contains(&channel));
                     }
-                    assert!((color.r - base[0].r).abs() <= DARK_MAX_OPACITY);
-                    assert!((color.g - base[0].g).abs() <= DARK_MAX_OPACITY);
-                    assert!((color.b - base[0].b).abs() <= DARK_MAX_OPACITY);
+                    assert!((color.r - base[0].r).abs() <= opacity::AMBIENT_DARK);
+                    assert!((color.g - base[0].g).abs() <= opacity::AMBIENT_DARK);
+                    assert!((color.b - base[0].b).abs() <= opacity::AMBIENT_DARK);
                     assert_eq!(color.a, 1.0);
                 }
             }

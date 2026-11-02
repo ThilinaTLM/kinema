@@ -1,5 +1,6 @@
 //! Noninteractive loading placeholder using the poster card's geometry.
 //! A gentle pulse runs unless reduced motion is on, where it is static.
+use crate::ui::theme::opacity;
 use crate::{
     ui::motion::{self, AnimateExt},
     ui::theme::motion::timing,
@@ -21,18 +22,17 @@ impl SkeletonCard {
 impl RenderOnce for SkeletonCard {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let p = theme::palette(cx);
-        let sheen = div()
-            .absolute()
-            .inset_0()
-            .rounded(radius::LG)
-            .bg(p.ctl_hover);
+        let sheen = div().absolute().inset_0().rounded(radius::LG).bg(p.accent);
         let sheen = if motion::reduced(cx) {
-            sheen.opacity(0.35).into_any_element()
+            sheen.opacity(opacity::SKELETON_SHEEN).into_any_element()
         } else {
             sheen.animate_loop("skeleton-pulse", timing::PULSE_PERIOD, cx, |el, t| {
                 // 0 -> 1 -> 0 smooth triangle wave.
                 let w = 1. - (2. * t - 1.).abs();
-                el.opacity(0.15 + 0.5 * (w * w * (3. - 2. * w)))
+                el.opacity(
+                    opacity::SKELETON_PULSE_MIN
+                        + opacity::SKELETON_PULSE_SPAN * (w * w * (3. - 2. * w)),
+                )
             })
         };
         div()
@@ -41,7 +41,7 @@ impl RenderOnce for SkeletonCard {
             .flex_none()
             .relative()
             .rounded(radius::LG)
-            .bg(p.bg_placeholder)
+            .bg(p.muted)
             .child(sheen)
             .child(
                 div()

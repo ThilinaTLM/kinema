@@ -1,14 +1,12 @@
 //! Pure Cinema Dock policies: pointer-to-value mapping, scrub display state,
 //! chapter lookup and label formatting. No GPUI types, so they are unit-tested.
-use std::time::{Duration, Instant};
+use crate::ui::theme::motion::timing;
+use std::time::Instant;
 
 use kinema_mpv::{Chapter, MAX_VOLUME, Track};
 
 /// Volume change for the Up/Down keys.
 pub const VOLUME_STEP: f64 = 5.;
-/// A committed seek keeps the thumb at its target until mpv reports it or this
-/// long passes, so the thumb does not snap back to the stale position.
-const PENDING_SEEK_TTL: Duration = Duration::from_millis(1200);
 const PENDING_SEEK_TOLERANCE: f64 = 2.;
 
 /// Horizontal position within `[left, left + width]` as 0..=1; NaN/zero width → 0.
@@ -98,7 +96,7 @@ pub fn displayed_position(scrub: Option<Scrub>, position: f64, duration: f64, no
     match scrub {
         Some(Scrub::Dragging(ratio)) => ratio.clamp(0., 1.) * duration,
         Some(Scrub::Pending { target, since })
-            if now.duration_since(since) < PENDING_SEEK_TTL
+            if now.duration_since(since) < timing::REQUEST_PENDING
                 && (position - target).abs() > PENDING_SEEK_TOLERANCE =>
         {
             target
@@ -111,7 +109,7 @@ pub fn displayed_position(scrub: Option<Scrub>, position: f64, duration: f64, no
 pub fn scrub_settled(scrub: Option<Scrub>, position: f64, now: Instant) -> bool {
     match scrub {
         Some(Scrub::Pending { target, since }) => {
-            now.duration_since(since) >= PENDING_SEEK_TTL
+            now.duration_since(since) >= timing::REQUEST_PENDING
                 || (position - target).abs() <= PENDING_SEEK_TOLERANCE
         }
         _ => false,
@@ -167,7 +165,7 @@ pub fn displayed_volume(requested: Option<(f64, Instant)>, actual: f64, now: Ins
 
 pub fn volume_settled(requested: Option<(f64, Instant)>, actual: f64, now: Instant) -> bool {
     requested.is_some_and(|(volume, since)| {
-        now.duration_since(since) >= PENDING_SEEK_TTL || (actual - volume).abs() < 0.5
+        now.duration_since(since) >= timing::REQUEST_PENDING || (actual - volume).abs() < 0.5
     })
 }
 
@@ -227,6 +225,7 @@ pub fn format_remaining(position: f64, duration: f64) -> String {
 mod tests {
     use super::*;
     use ::core::prelude::v1::test;
+    use std::time::Duration;
 
     fn chapters() -> Vec<Chapter> {
         [0., 100., 300.]

@@ -4,6 +4,7 @@ use super::layout;
 use super::*;
 use crate::ui::blocks::{MediaHero, MetaItem, uses_over_art};
 use crate::ui::primitives::button::{Button, ButtonSize, ButtonVariant};
+use crate::ui::theme::typography::{TextSize, TypeExt, Weight};
 
 /// Wraps a page section in the shared frame: the same side gutters and
 /// maximum width as the hero content, centred only beyond that width.
@@ -32,7 +33,7 @@ impl Detail {
             .size_full()
             .relative()
             .overflow_hidden()
-            .bg(p.bg_placeholder)
+            .bg(p.muted)
             .child(
                 div()
                     .size_full()
@@ -42,18 +43,19 @@ impl Detail {
                     .justify_center()
                     .px(s::S12)
                     .gap(s::S8)
-                    .text_color(p.text_primary)
+                    .text_color(p.foreground)
                     .child(
                         div()
-                            .type_style(t::HEADING)
+                            .text(TextSize::Lg)
+                            .weight(Weight::Semibold)
                             .text_center()
                             .child(title.name().to_owned()),
                     )
                     .when_some(title.year(), |el, year| {
                         el.child(
                             div()
-                                .type_style(t::SMALL)
-                                .text_color(p.text_muted)
+                                .text(TextSize::Sm)
+                                .text_color(p.subtle_foreground)
                                 .child(year.to_string()),
                         )
                     }),
@@ -155,14 +157,14 @@ impl Detail {
         let mut banner = MediaHero::new("detail-hero", title.name().to_owned())
             .backdrop(backdrop)
             .poster(poster)
-            .fade_into(p.bg_canvas)
-            .min_height(px(0.))
-            .top_inset(s::TOOLBAR_HEIGHT)
+            .fade_into(p.background)
+            .min_height(Pixels::ZERO)
+            .top_inset(size::TOOLBAR_HEIGHT)
             .frame(GUTTER, geometry::PAGE_MAX_WIDTH)
             .sizing(hero_layout.poster, hero_layout.overview_max)
             .overview_loading(status.busy && !status.loaded)
             .primary(self.primary_button(cx));
-        for item in Self::meta_items(view.meta.clone(), p.text_muted) {
+        for item in Self::meta_items(view.meta.clone(), p.subtle_foreground) {
             banner = banner.meta_item(item);
         }
         if let Some(tagline) = view.tagline.clone() {
@@ -190,10 +192,10 @@ impl Detail {
         banner = banner.secondary(
             div()
                 .flex_none()
-                .w(s::HAIRLINE)
+                .w(size::HAIRLINE)
                 .h(s::S20)
                 .mx(s::S4)
-                .bg(p.line_hairline),
+                .bg(p.border),
         );
         banner = banner.secondary(
             Button::new("detail-refresh", "Refresh")
@@ -280,7 +282,7 @@ impl Detail {
         }
         div()
             .size_full()
-            .bg(p.bg_canvas)
+            .bg(p.background)
             .child(scroll.child(body_shell(similar)).child(body_shell(footer)))
             .into_any_element()
     }

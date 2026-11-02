@@ -16,9 +16,7 @@ pub mod size;
 pub mod space;
 pub mod typography;
 
-pub use color::Palette;
-// TEMP: removed in step 5 (old type-style API).
-pub use typography::{TypeStyle, typeface};
+pub use color::{Palette, transparent};
 
 /// Effective color scheme. Dark is the product default.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

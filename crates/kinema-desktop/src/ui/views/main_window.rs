@@ -7,10 +7,10 @@ use super::{
     detail::{Detail, OpenDetailTitle},
 };
 use crate::controllers::coordinator::{AppCoordinator, BrowseTitle, CoordinatorEvent};
+use crate::ui::theme::layout::browse::{SCRIM_RAMP, SEARCH_MIN_WIDTH, SEARCH_WIDTH};
+use crate::ui::theme::{motion::timing, opacity};
 use crate::{
-    ui::blocks::toolbar::{
-        TRANSFER_DETAIL_MIN_WIDTH, Toolbar, ToolbarChip, ToolbarGroup, TransferStatus, icon_cell,
-    },
+    ui::blocks::toolbar::{Toolbar, ToolbarChip, ToolbarGroup, TransferStatus, icon_cell},
     ui::motion::{AnimateExt, transition::DISCLOSE},
     ui::primitives::alert::{Alert, AlertTone},
     ui::primitives::button::Button,
@@ -21,15 +21,12 @@ use crate::{
     ui::primitives::search_field::{SearchField, SearchFieldEvent},
     ui::primitives::segmented::Segmented,
     ui::primitives::text_input::TextInputEvent,
-    ui::theme::typography::TypeExt,
-    ui::theme::{self, space as s, typeface as t},
+    ui::theme::typography::{TextSize, TypeExt},
+    ui::theme::{self, size, space as s},
 };
 use gpui::{prelude::*, *};
 use kinema_core::{MediaKind, library::LibraryKind, provider::ProviderId};
-use std::{cell::RefCell, rc::Rc, time::Duration};
-
-/// How long a non-actionable personal-state notice stays visible.
-const NOTICE_TIMEOUT: Duration = Duration::from_secs(10);
+use std::{cell::RefCell, rc::Rc};
 
 actions!(
     v3_main,
@@ -68,9 +65,6 @@ const SEARCH_HINT: &str = if cfg!(target_os = "macos") {
 } else {
     "Ctrl K"
 };
-/// Preferred search width; it yields space to the side groups when narrow.
-const SEARCH_WIDTH: Pixels = px(440.);
-const SEARCH_MIN_WIDTH: Pixels = px(180.);
 
 pub(crate) enum Route {
     Browse,
@@ -168,7 +162,7 @@ impl MainWindow {
                         && !coordinator.read(cx).personal_notice_failed()
                     {
                         this.notice_task = Some(cx.spawn(async move |this, cx| {
-                            cx.background_executor().timer(NOTICE_TIMEOUT).await;
+                            cx.background_executor().timer(timing::NOTICE_TIMEOUT).await;
                             let _ = this.update(cx, |this, cx| {
                                 this.coordinator.update(cx, |c, cx| {
                                     if c.personal_notice.as_deref() == Some(message.as_str())
@@ -506,13 +500,10 @@ impl MainWindow {
     }
 }
 
-/// Scroll distance over which the scrim fades in.
-const SCRIM_RAMP: Pixels = px(24.);
-
 /// Top fade behind the floating header. Offset is read at paint time so it
 /// tracks scrolling without re-rendering the window; it is invisible at scroll top.
 fn scroll_scrim(scrolled: Rc<dyn Fn(&App) -> Pixels>, canvas_color: Hsla) -> impl IntoElement {
-    let height = s::TOOLBAR_HEIGHT + s::S24;
+    let height = size::TOOLBAR_HEIGHT + s::S24;
     canvas(
         |_, _, _| (),
         move |bounds, _, window, cx| {
@@ -525,20 +516,17 @@ fn scroll_scrim(scrolled: Rc<dyn Fn(&App) -> Pixels>, canvas_color: Hsla) -> imp
             let step = height / SCRIM_STEPS as f32;
             for i in 0..SCRIM_STEPS {
                 let t = (i as f32 + 0.5) / SCRIM_STEPS as f32;
-                let hold = SCRIM_HOLD;
+                let hold = theme::layout::browse::SCRIM_HOLD;
                 let falloff = if t <= hold {
                     1.
                 } else {
                     let u = (t - hold) / (1. - hold);
                     1. - u * u * (3. - 2. * u)
                 };
-                let color = Hsla {
-                    a: SCRIM_ALPHA * strength * falloff,
-                    ..canvas_color
-                };
+                let color = canvas_color.alpha(opacity::HEADER_SCRIM * strength * falloff);
                 let strip = Bounds::new(
                     point(bounds.origin.x, bounds.origin.y + step * i as f32),
-                    size(bounds.size.width, step + px(0.5)),
+                    size(bounds.size.width, step + size::SUBPIXEL),
                 );
                 window.paint_quad(fill(strip, color));
             }
@@ -550,10 +538,6 @@ fn scroll_scrim(scrolled: Rc<dyn Fn(&App) -> Pixels>, canvas_color: Hsla) -> imp
     .right_0()
     .h(height)
 }
-/// Peak opacity of the scrim at the window edge.
-const SCRIM_ALPHA: f32 = 0.92;
-/// Fraction of the scrim band (from the top) that stays at peak opacity.
-const SCRIM_HOLD: f32 = 0.6;
 const SCRIM_STEPS: usize = 36;
 
 /// Header controls. Every view composes the same primitives (see
@@ -575,7 +559,7 @@ impl MainWindow {
             .aria_label(SharedString::from(format!("{label}. {hint}")))
             .focusable()
             .tab_stop(true)
-            .focus_visible(move |s| s.border(s::FOCUS_RING).border_color(p.focus_ring))
+            .focus_visible(move |s| s.border(size::FOCUS_RING).border_color(p.ring))
             .tooltip(crate::ui::primitives::tooltip::tooltip(hint))
             .on_click(cx.listener(move |this, _, window, cx| this.switch_scope(next, window, cx)))
             .child(
@@ -713,14 +697,16 @@ impl MainWindow {
         let coordinator = self.coordinator.read(cx);
         let summary = coordinator.transfer_summary();
         let speed = coordinator.transfer_bytes_per_second();
-        let compact = window.viewport_size().width < TRANSFER_DETAIL_MIN_WIDTH;
+        let compact = window.viewport_size().width < theme::layout::breakpoints::WIDE;
         let transfer_trigger = div().child(TransferStatus::new(summary, speed, compact));
         let transfer_trigger = if self.launch_pulse > 0 {
             transfer_trigger.animate_with(
                 ("transfer-launch", self.launch_pulse),
                 DISCLOSE,
                 cx,
-                |el, t| el.opacity(0.5 + 0.5 * t),
+                |el, t| {
+                    el.opacity(opacity::CONTENT_FADE_MIN + (1. - opacity::CONTENT_FADE_MIN) * t)
+                },
             )
         } else {
             transfer_trigger.into_any_element()
@@ -787,9 +773,9 @@ impl Render for MainWindow {
         let inset = if in_detail {
             super::detail::page_inset(window.viewport_size().width)
         } else {
-            s::PAGE_INSET
+            size::PAGE_INSET
         };
-        let compact = window.viewport_size().width < filters::COMPACT_BELOW;
+        let compact = window.viewport_size().width < theme::layout::browse::COMPACT_BELOW;
         let toolbar = if in_detail {
             let on_streams =
                 matches!(&self.route, Route::Detail(d) if d.read(cx).on_streams_page());
@@ -814,7 +800,7 @@ impl Render for MainWindow {
                         .aria_label(SharedString::from(back_name))
                         .focusable()
                         .tab_stop(true)
-                        .focus_visible(move |s| s.border(s::FOCUS_RING).border_color(p.focus_ring))
+                        .focus_visible(move |s| s.border(size::FOCUS_RING).border_color(p.ring))
                         .tooltip(crate::ui::primitives::tooltip::tooltip(back_name))
                         .on_click(cx.listener(|this, _, window, cx| this.back(window, cx)))
                         .child(ToolbarChip::new(IconName::ArrowLeft, back_label).chevron(false))
@@ -913,16 +899,16 @@ impl Render for MainWindow {
             .relative()
             .flex()
             .flex_col()
-            .bg(p.bg_canvas)
-            .text_color(p.text_primary)
-            .type_style(t::BODY)
+            .bg(p.background)
+            .text_color(p.foreground)
+            .text(TextSize::Base)
             .child(div().flex_1().min_h_0().child(body))
-            .child(scroll_scrim(scrolled, p.bg_canvas))
+            .child(scroll_scrim(scrolled, p.background))
             .child({
                 let notice = self.coordinator.read(cx).notice.clone();
                 div()
                     .absolute()
-                    .top(s::TOOLBAR_HEIGHT)
+                    .top(size::TOOLBAR_HEIGHT)
                     .left_0()
                     .right_0()
                     .p(s::S8)
@@ -940,7 +926,7 @@ impl Render for MainWindow {
                             .anchor(Anchor::TopRight)
                             .position(point(
                                 window.viewport_size().width - inset,
-                                s::TOOLBAR_HEIGHT + s::S8,
+                                size::TOOLBAR_HEIGHT + s::S8,
                             ))
                             .child(menu),
                     )
@@ -1403,7 +1389,7 @@ mod interaction_tests {
                     .expect("each scope shows exactly one Filters control");
                 // Single 48px toolbar row, fully inside the window.
                 assert!(
-                    bounds.top() >= px(0.) && bounds.bottom() <= s::TOOLBAR_HEIGHT,
+                    bounds.top() >= Pixels::ZERO && bounds.bottom() <= size::TOOLBAR_HEIGHT,
                     "{bounds:?}"
                 );
                 assert!(bounds.right() <= px(width), "{bounds:?}");
@@ -1439,10 +1425,10 @@ mod interaction_tests {
             let filters = visual.debug_bounds("discover-filters").unwrap();
             let global = visual.debug_bounds("toolbar-global").unwrap();
             // Transfers, divider, Settings and overflow: three icon targets at least.
-            assert!(global.size.width >= s::ICON_TARGET * 3., "{global:?}");
+            assert!(global.size.width >= size::ICON_TARGET * 3., "{global:?}");
             assert!(filters.right() <= global.left(), "{filters:?} {global:?}");
             assert!(global.right() <= px(width) - s::S20 + px(0.5), "{global:?}");
-            assert!(global.bottom() <= s::TOOLBAR_HEIGHT, "{global:?}");
+            assert!(global.bottom() <= size::TOOLBAR_HEIGHT, "{global:?}");
         }
     }
 
@@ -1471,11 +1457,11 @@ mod interaction_tests {
         let empty_header = point(px(380.), px(24.));
         visual.simulate_event(ScrollWheelEvent {
             position: empty_header,
-            delta: ScrollDelta::Pixels(point(px(0.), px(-160.))),
+            delta: ScrollDelta::Pixels(point(Pixels::ZERO, px(-160.))),
             ..Default::default()
         });
         draw(main, cx);
-        assert!(browse.read_with(cx, |b, _| b.scrolled_under_header()) > px(0.));
+        assert!(browse.read_with(cx, |b, _| b.scrolled_under_header()) > Pixels::ZERO);
         // A card now sits under the header; clicking the header must not open it.
         visual.simulate_click(empty_header, Modifiers::default());
         draw(main, cx);

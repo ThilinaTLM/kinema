@@ -4,15 +4,12 @@
 //! Width is constant so release names align down a list. 4K is the only
 //! resolution that earns the accent tint; everything else stays neutral so
 //! accent remains scarce.
+use crate::ui::theme::layout::detail::{QUALITY_TILE_HEIGHT, QUALITY_TILE_WIDTH};
 use crate::{
-    ui::theme::typography::TypeExt,
-    ui::theme::{palette, radius, typeface},
+    ui::theme::typography::{TextSize, TypeExt, Weight},
+    ui::theme::{palette, radius},
 };
 use gpui::{prelude::*, *};
-
-/// Tile footprint; fits "1080p" in `type.small` bold with side padding.
-pub const WIDTH: Pixels = px(56.);
-pub const HEIGHT: Pixels = px(40.);
 
 #[derive(IntoElement)]
 pub struct QualityTile {
@@ -46,13 +43,13 @@ impl RenderOnce for QualityTile {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let p = *palette(cx);
         let (fill, ink) = if self.emphasized {
-            (p.accent_tint, p.accent_text)
+            (p.selection, p.primary_text)
         } else {
-            (p.ctl_rest, p.text_primary)
+            (p.secondary, p.foreground)
         };
         div()
-            .w(WIDTH)
-            .h(HEIGHT)
+            .w(QUALITY_TILE_WIDTH)
+            .h(QUALITY_TILE_HEIGHT)
             .flex_none()
             .flex()
             .flex_col()
@@ -62,15 +59,17 @@ impl RenderOnce for QualityTile {
             .bg(fill)
             .child(
                 div()
-                    .type_style(typeface::SMALL_MEDIUM)
-                    .font_weight(FontWeight::BOLD)
+                    .text(TextSize::Sm)
+                    .weight(Weight::Medium)
+                    .weight(Weight::Bold)
                     .text_color(ink)
                     .child(self.resolution.unwrap_or_else(|| "\u{2014}".into())),
             )
             .children(self.dynamic_range.map(|range| {
                 div()
-                    .type_style(typeface::CAPTION)
-                    .text_color(p.text_secondary)
+                    .text(TextSize::Xs)
+                    .weight(Weight::Semibold)
+                    .text_color(p.muted_foreground)
                     .child(range.to_uppercase())
             }))
     }

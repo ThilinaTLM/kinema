@@ -11,7 +11,7 @@ use crate::{
         Presence,
         transition::{POPUP_IN, POPUP_OUT},
     },
-    ui::theme::{elevation, palette, radius, space},
+    ui::theme::{elevation, palette, radius, size, space},
 };
 use gpui::{prelude::*, *};
 
@@ -169,7 +169,7 @@ impl RenderOnce for Popover {
                 .aria_expanded(open)
                 .when_some(self.label, |el, label| el.aria_label(label))
                 .rounded(radius::LG)
-                .focus_visible(move |s| s.border(space::FOCUS_RING).border_color(p.focus_ring))
+                .focus_visible(move |s| s.border(size::FOCUS_RING).border_color(p.ring))
                 .on_click(move |_, window, cx| {
                     click_state.update(cx, |this, cx| {
                         if this.is_open(cx) {
@@ -199,13 +199,13 @@ impl RenderOnce for Popover {
                 .track_focus(&state.read(cx).focus)
                 .occlude()
                 .max_w(window.viewport_size().width - space::S16)
-                .bg(p.bg_overlay)
+                .bg(p.popover)
                 .rounded(radius::XL)
                 .border_1()
-                .border_color(p.line_subtle)
+                .border_color(p.border)
                 .shadow(elevation::lg(&p))
-                .text_color(p.text_primary)
-                .max_h((window.viewport_size().height - space::S16).max(space::ROW))
+                .text_color(p.foreground)
+                .max_h((window.viewport_size().height - space::S16).max(size::ROW))
                 .overflow_y_scroll()
                 .p(space::S12)
                 .on_mouse_down_out(move |_, window, cx| {
@@ -231,7 +231,7 @@ impl RenderOnce for Popover {
                     deferred(
                         anchored()
                             .anchor(corner)
-                            .offset(point(px(0.), space::S6))
+                            .offset(point(Pixels::ZERO, space::S6))
                             .snap_to_window_with_margin(space::S8)
                             .child(panel),
                     )

@@ -22,7 +22,7 @@ pub mod toolbar;
 pub mod watch_mark;
 pub mod watched_toggle;
 
-pub use media_hero::{MediaHero, MetaItem, POSTER_ASPECT, POSTER_WIDTH, uses_over_art};
+pub use media_hero::{MediaHero, MetaItem, POSTER_ASPECT, uses_over_art};
 pub use state_toggle::{StateToggle, ToggleKind, ToggleStatus};
 #[cfg_attr(not(feature = "ui-probe"), allow(unused_imports))]
 pub(crate) use state_view::ResourceView;

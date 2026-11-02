@@ -1,19 +1,17 @@
 //! Contrast-safe controls drawn on top of artwork.
 //!
-//! Both pieces sit on a dark backing (`chip_over_art`, #0B0C0E at 80 %, the same
+//! Both pieces sit on a dark backing (`chip_on_art`, #0B0C0E at 80 %, the same
 //! in both themes) with fixed light ink, so legibility never depends on the
 //! image beneath. Hosts position them absolutely inside a `Thumb`.
+use crate::ui::theme::opacity;
 use crate::{
     ui::motion::interaction::focus_ring,
     ui::primitives::tooltip::tooltip,
-    ui::theme::typography::TypeExt,
-    ui::theme::{Palette, palette, radius, space, typeface},
+    ui::theme::typography::{TextSize, TypeExt, Weight},
+    ui::theme::{Palette, palette, radius, size, space},
 };
 use gpui::{prelude::*, *};
 use std::rc::Rc;
-
-/// Edge of an [`OverlayButton`].
-pub const OVERLAY_BUTTON_SIZE: Pixels = px(28.);
 
 /// A 20 px label chip, e.g. "Next up".
 #[derive(IntoElement)]
@@ -41,19 +39,20 @@ impl RenderOnce for OverlayBadge {
         let dark = Palette::dark();
         let (bg, ink) = if self.accent {
             let p = palette(cx);
-            (p.primary, p.on_accent)
+            (p.primary, p.primary_foreground)
         } else {
-            (dark.chip_over_art, dark.text_secondary)
+            (dark.chip_on_art, dark.muted_foreground)
         };
         div()
-            .h(space::CHIP_HEIGHT)
+            .h(size::CHIP)
             .px(space::S6)
             .flex()
             .items_center()
             .rounded(radius::SM)
             .bg(bg)
             .text_color(ink)
-            .type_style(typeface::CAPTION)
+            .text(TextSize::Xs)
+            .weight(Weight::Semibold)
             .child(self.text)
     }
 }
@@ -111,25 +110,25 @@ impl RenderOnce for OverlayButton {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let dark = Palette::dark();
         let p = *palette(cx);
-        let hover = dark.bg_overlay.opacity(0.95);
+        let hover = dark.popover.opacity(opacity::OVERLAY_HOVER);
         let mut button = div()
             .id(self.id)
             .role(Role::Button)
             .aria_label(self.accessible.unwrap_or_else(|| self.name.clone()))
-            .size(OVERLAY_BUTTON_SIZE)
+            .size(size::CONTROL_SM)
             .flex_none()
             .flex()
             .items_center()
             .justify_center()
             .rounded(radius::MD)
-            .bg(dark.chip_over_art)
+            .bg(dark.chip_on_art)
             .children(self.child)
             // The card below never sees this activation.
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_mouse_up(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .tooltip(tooltip(self.name));
         if self.inert {
-            button = button.opacity(0.6).cursor_default();
+            button = button.opacity(opacity::DISABLED_OVER_ART).cursor_default();
         } else {
             let handler = self.on_click;
             button = button

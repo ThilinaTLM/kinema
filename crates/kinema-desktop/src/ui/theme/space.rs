@@ -15,28 +15,6 @@ pub const S24: Pixels = px(24.0);
 pub const S32: Pixels = px(32.0);
 pub const S48: Pixels = px(48.0);
 
-// --- TEMP: removed in step 5 (old names; use `theme::size` instead) -----------
-use super::size;
-pub const PAGE_INSET: Pixels = size::PAGE_INSET; // TEMP step-5
-pub const TOOLBAR_TOP: Pixels = size::TOOLBAR_TOP; // TEMP step-5
-pub const TOOLBAR_HEIGHT: Pixels = size::TOOLBAR_HEIGHT; // TEMP step-5
-pub const PAGE_TOP: Pixels = size::PAGE_TOP; // TEMP step-5
-pub const CONTROL_HEIGHT: Pixels = size::CONTROL_SM; // TEMP step-5
-pub const CONTROL_HEIGHT_LARGE: Pixels = size::CONTROL; // TEMP step-5
-pub const TOOLBAR_CONTROL: Pixels = size::TOOLBAR_CONTROL; // TEMP step-5
-pub const ICON: Pixels = size::ICON; // TEMP step-5
-pub const ICON_TARGET: Pixels = size::ICON_TARGET; // TEMP step-5
-pub const ROW: Pixels = size::ROW; // TEMP step-5
-pub const ROW_TWO_LINE: Pixels = size::ROW_TALL; // TEMP step-5
-pub const CHIP_HEIGHT: Pixels = size::CHIP; // TEMP step-5
-pub const GRID_INSET: Pixels = size::PAGE_INSET; // TEMP step-5
-pub const GRID_GAP: Pixels = S12; // TEMP step-5 (becomes layout::browse)
-pub const HAIRLINE: Pixels = size::HAIRLINE; // TEMP step-5
-pub const FOCUS_RING: Pixels = size::FOCUS_RING; // TEMP step-5
-pub const ACTION_COLUMN: Pixels = size::ACTION_COLUMN; // TEMP step-5
-pub const SHEET_WIDTH: Pixels = size::SHEET_WIDTH; // TEMP step-5
-pub const POPOVER_WIDTH: Pixels = size::POPOVER_WIDTH; // TEMP step-5
-
 #[cfg(test)]
 mod tests {
     use super::*;

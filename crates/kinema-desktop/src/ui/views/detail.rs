@@ -22,8 +22,7 @@ use crate::{
     ui::primitives::menu_item,
     ui::primitives::scroll_area::ScrollArea,
     ui::primitives::tooltip::tooltip,
-    ui::theme::typography::TypeExt,
-    ui::theme::{self, radius, space as s, typeface as t},
+    ui::theme::{self, radius, size, space as s},
 };
 use gpui::{prelude::*, *};
 use kinema_core::{
@@ -59,25 +58,13 @@ use std::{cell::Cell, collections::HashMap, rc::Rc};
 // Detail-specific geometry. Shared spacing, row, typography and chrome
 // dimensions remain in ui::theme.
 mod geometry {
-    use gpui::{Pixels, px};
-    /// Hero and body share one frame; it only centres beyond this width.
-    pub const PAGE_MAX_WIDTH: Pixels = px(2400.);
-    pub const EPISODE_CARD_MIN_WIDTH: Pixels = px(280.);
-    pub const EPISODE_CARD_MAX_WIDTH: Pixels = px(360.);
-    pub const EPISODE_GRID_GAP: Pixels = px(16.);
-    pub const SIMILAR_MIN_WIDTH: Pixels = px(140.);
-    pub const SIMILAR_MAX_WIDTH: Pixels = px(200.);
-    pub const SIMILAR_GAP: Pixels = px(14.);
-    pub const CAST_MIN_WIDTH: Pixels = px(112.);
-    pub const CAST_MAX_WIDTH: Pixels = px(160.);
-    pub const FACT_LABEL_WIDTH: Pixels = px(120.);
+    pub use crate::ui::theme::layout::detail::{
+        CAST_MAX, CAST_MIN, EPISODE_CARD_MAX, EPISODE_CARD_MIN, EPISODE_GRID_GAP, FACT_LABEL_WIDTH,
+        PAGE_MAX_WIDTH, SIMILAR_GAP, SIMILAR_MAX, SIMILAR_MIN, STREAMS_INSPECTOR_MIN_FRAME,
+        STREAMS_POSTER_WIDTH, STREAMS_POSTER_WIDTH_NARROW,
+    };
     /// Skeleton row counts, roughly one screenful.
     pub const STREAM_SKELETON_ROWS: usize = 6;
-    /// Frame width from which the Streams inspector sits beside the list;
-    /// narrower frames use the floating play dock.
-    pub const STREAMS_INSPECTOR_MIN_FRAME: Pixels = px(1040.);
-    pub const STREAMS_POSTER_WIDTH: Pixels = px(104.);
-    pub const STREAMS_POSTER_WIDTH_NARROW: Pixels = px(80.);
     pub const EPISODE_SKELETON_CARDS: usize = 4;
 }
 
@@ -270,7 +257,7 @@ fn fit_grid(available: Pixels, min: Pixels, max: Pixels, gap: Pixels) -> GridFit
     }
 }
 /// Side gutter of the page frame: the same inset as every main-window page.
-const GUTTER: Pixels = s::PAGE_INSET;
+const GUTTER: Pixels = size::PAGE_INSET;
 /// Left edge shared by the detail content and its floating toolbar.
 pub(super) fn page_inset(viewport: Pixels) -> Pixels {
     (viewport - viewport.min(geometry::PAGE_MAX_WIDTH)) / 2. + GUTTER

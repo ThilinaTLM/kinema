@@ -2,8 +2,8 @@
 //! by an optional lighter origin label. No boxes: rows stay calm and tags
 //! never compete with badges or selection.
 use crate::{
-    ui::theme::typography::TypeExt,
-    ui::theme::{palette, space, typeface},
+    ui::theme::typography::{TextSize, TypeExt, Weight},
+    ui::theme::{palette, space},
 };
 use gpui::{prelude::*, *};
 
@@ -36,12 +36,13 @@ impl RenderOnce for TagList {
             .items_center()
             .gap_x(space::S12 - space::S2)
             .gap_y(space::S2)
-            .type_style(typeface::CAPTION)
-            .text_color(p.text_muted)
+            .text(TextSize::Xs)
+            .weight(Weight::Semibold)
+            .text_color(p.subtle_foreground)
             .children(self.tags.into_iter().map(|tag| div().child(tag)))
             .children(
                 self.origin
-                    .map(|origin| div().font_weight(FontWeight::MEDIUM).child(origin)),
+                    .map(|origin| div().weight(Weight::Medium).child(origin)),
             )
     }
 }

@@ -66,10 +66,7 @@ pub(crate) fn lerp_shadows(from: &[BoxShadow], to: &[BoxShadow], t: f32) -> Vec<
     from.iter()
         .zip(to)
         .map(|(a, b)| BoxShadow {
-            color: Hsla {
-                a: mix(a.color.a, b.color.a),
-                ..a.color
-            },
+            color: a.color.alpha(mix(a.color.a, b.color.a)),
             offset: point(
                 px(mix(f32::from(a.offset.x), f32::from(b.offset.x))),
                 px(mix(f32::from(a.offset.y), f32::from(b.offset.y))),
@@ -83,7 +80,7 @@ pub(crate) fn lerp_shadows(from: &[BoxShadow], to: &[BoxShadow], t: f32) -> Vec<
 
 /// Inset focus ring that follows the host's radius and never shifts layout.
 pub(crate) fn focus_ring(palette: &Palette) -> BoxShadow {
-    BoxShadow::new(px(0.0), px(0.0), palette.focus_ring)
+    BoxShadow::new(Pixels::ZERO, Pixels::ZERO, palette.ring)
         .spread_radius(size::FOCUS_RING)
         .inset()
 }
@@ -109,7 +106,7 @@ impl StateStyle {
             pressed,
             ring: focus_ring(palette),
             ink,
-            disabled_ink: palette.text_muted,
+            disabled_ink: palette.subtle_foreground,
         }
     }
 

@@ -1,6 +1,5 @@
 //! Named alpha / mix levels (0..=1). Gathered from the `.opacity(n)` literals and
-//! module-local alpha constants in `ui/`; values are unchanged. Call sites
-//! migrate in step 5, where nearby levels may be snapped together.
+//! module-local alpha constants that used to live in `ui/`; values are unchanged.
 
 // --- State mixes (see `Palette::hover` & co) -----------------------------------
 /// Neutral fill mixed toward `foreground` on hover.
@@ -31,6 +30,8 @@ pub const ALERT_EDGE: f32 = 0.28;
 pub const SELECTED_EDGE: f32 = 0.35;
 /// Highlighted card edge of `primary` (`media_card.rs` ACCENT_EDGE_ALPHA).
 pub const SELECTED_EDGE_STRONG: f32 = 0.55;
+/// Edge brightness at full card lift, relative to the resting edge alpha.
+pub const EDGE_HOVER_GAIN: f32 = 1.75;
 /// Hover gain of the `selection` alpha on selected buttons (`button.rs` 1.4).
 pub const SELECTION_HOVER_GAIN: f32 = 1.4;
 /// Destructive button edge (`button.rs` 0.4).

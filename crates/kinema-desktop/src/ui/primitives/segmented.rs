@@ -10,8 +10,8 @@ use crate::{
     ui::motion::{interaction::state_spring, transition::FEEDBACK},
     ui::primitives::Icon,
     ui::primitives::IconName,
-    ui::theme::typography::TypeExt,
-    ui::theme::{elevation, opacity, palette, radius, space, typeface},
+    ui::theme::typography::{TextSize, TypeExt, Weight},
+    ui::theme::{elevation, opacity, palette, radius, size, space},
 };
 use gpui::{prelude::*, *};
 use std::rc::Rc;
@@ -96,18 +96,18 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for Segmented<T> {
         let keyboard_handler = self.on_change.clone();
         let icons = self.icons;
         let counts = self.counts;
-        let muted = p.text_muted;
+        let muted = p.subtle_foreground;
         let in_toolbar = self.toolbar;
         let group_label = self.label.clone();
         let count = self.options.len();
         let (track, track_edge, height, outer, inner) = if in_toolbar {
             let (fill, _, edge) = p.glass();
-            (fill, edge, space::TOOLBAR_CONTROL, radius::LG, radius::MD)
+            (fill, edge, size::TOOLBAR_CONTROL, radius::LG, radius::MD)
         } else {
             (
-                p.ctl_rest,
-                p.line_subtle,
-                space::CONTROL_HEIGHT,
+                p.secondary,
+                p.border,
+                size::CONTROL_SM,
                 radius::MD,
                 radius::SM,
             )
@@ -125,13 +125,13 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for Segmented<T> {
                 .child(label)
                 .children(counts.get(index).copied().flatten().map(|count| {
                     // Counts read as secondary: muted at rest, softened accent when active.
-                    let ink = if ink == p.accent_text {
+                    let ink = if ink == p.primary_text {
                         ink.opacity(opacity::INK_SOFT)
                     } else {
                         muted
                     };
                     div()
-                        .font_weight(FontWeight::NORMAL)
+                        .weight(Weight::Regular)
                         .text_color(ink)
                         .child(count.to_string())
                 }))
@@ -139,7 +139,7 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for Segmented<T> {
         div()
             .id(self.id)
             .flex()
-            .border(space::FOCUS_RING)
+            .border(size::FOCUS_RING)
             .border_color(transparent_black())
             .p(space::S2)
             .m(-space::S4)
@@ -148,7 +148,7 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for Segmented<T> {
             .tab_stop(true)
             .role(Role::TabList)
             .when_some(group_label, |el, label| el.aria_label(label))
-            .focus_visible(move |s| s.border_color(p.focus_ring))
+            .focus_visible(move |s| s.border_color(p.ring))
             .on_key_down(move |event, window, cx| {
                 if let Some(index) = navigate(selected, options.len(), &event.keystroke.key) {
                     cx.stop_propagation();
@@ -164,15 +164,15 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for Segmented<T> {
                     .p(space::S2)
                     .rounded(outer)
                     .bg(track)
-                    .border(space::HAIRLINE)
+                    .border(size::HAIRLINE)
                     .border_color(track_edge)
                     .children(self.options.into_iter().enumerate().map(
                         |(index, (value, label))| {
                             let active = value == self.selected;
                             let handler = self.on_change.clone();
-                            let inactive_ink = p.text_secondary;
-                            let active_ink = p.accent_text;
-                            let pill = p.bg_raised;
+                            let inactive_ink = p.muted_foreground;
+                            let active_ink = p.primary_text;
+                            let pill = p.card;
                             let face = div()
                                 .absolute()
                                 .size_full()
@@ -181,15 +181,16 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for Segmented<T> {
                                 .items_center()
                                 .justify_center()
                                 .rounded(inner)
-                                .type_style(typeface::SMALL_MEDIUM)
+                                .text(TextSize::Sm)
+                                .weight(Weight::Medium)
                                 .when(active, |el| el.shadow(elevation::sm(&p)))
                                 .child(content(
                                     index,
                                     label.clone(),
                                     if active {
-                                        p.accent_text
+                                        p.primary_text
                                     } else {
-                                        p.text_secondary
+                                        p.muted_foreground
                                     },
                                 ));
                             // Selected state is a raised pill that cross-fades, not an underline.
@@ -215,18 +216,19 @@ impl<T: Clone + PartialEq + 'static> RenderOnce for Segmented<T> {
                                 .items_center()
                                 .justify_center()
                                 .rounded(inner)
-                                .type_style(typeface::SMALL_MEDIUM)
+                                .text(TextSize::Sm)
+                                .weight(Weight::Medium)
                                 .role(Role::Tab)
                                 .aria_label(label.clone())
                                 .aria_selected(active)
                                 .aria_position_in_set(index + 1)
                                 .aria_size_of_set(count)
                                 .cursor_pointer()
-                                .when(!active, |el| el.hover(move |s| s.bg(p.ctl_hover)))
+                                .when(!active, |el| el.hover(move |s| s.bg(p.accent)))
                                 .child(div().invisible().child(content(
                                     index,
                                     label,
-                                    p.text_secondary,
+                                    p.muted_foreground,
                                 )))
                                 .child(face)
                                 .on_click(move |_, window, cx| {

@@ -8,8 +8,8 @@
 use crate::{
     ui::primitives::icon::{Icon, IconName},
     ui::primitives::text_input::{TextInput, TextInputEvent},
-    ui::theme::typography::TypeExt,
-    ui::theme::{palette, radius, space, typeface},
+    ui::theme::typography::{TextSize, TypeExt, Weight},
+    ui::theme::{palette, radius, size, space},
 };
 use gpui::{prelude::*, *};
 
@@ -122,14 +122,14 @@ impl Render for SearchField {
         let (fill, hover, edge) = if self.toolbar {
             p.glass()
         } else {
-            (p.ctl_rest, p.ctl_rest, p.line_control)
+            (p.secondary, p.secondary, p.input)
         };
         let nonempty = !self.text(cx).is_empty();
         let focus = self.input.read(cx).focus_handle(cx);
         let focused = focus.is_focused(window);
         let ring = focused && window.last_input_was_keyboard();
         let gap_ring = |color: Hsla, spread: Pixels| {
-            BoxShadow::new(px(0.), px(0.), color).spread_radius(spread)
+            BoxShadow::new(Pixels::ZERO, Pixels::ZERO, color).spread_radius(spread)
         };
         div()
             .id("kinema-search-field")
@@ -137,9 +137,9 @@ impl Render for SearchField {
             .items_center()
             .gap(space::S4)
             .h(if self.toolbar {
-                space::TOOLBAR_CONTROL
+                size::TOOLBAR_CONTROL
             } else {
-                space::CONTROL_HEIGHT
+                size::CONTROL_SM
             })
             .w_full()
             .pl(if self.toolbar { space::S12 } else { space::S8 })
@@ -149,17 +149,17 @@ impl Render for SearchField {
             .when(self.toolbar && !focused, |el| {
                 el.hover(move |s| s.bg(hover))
             })
-            .border(space::HAIRLINE)
+            .border(size::HAIRLINE)
             .border_color(if focused { p.primary } else { edge })
             // Keyboard focus ring follows the host radius: 2 px gap, then 2 px ring.
             .when(ring, |el| {
                 el.shadow(vec![
-                    gap_ring(p.bg_canvas, space::FOCUS_RING),
-                    gap_ring(p.focus_ring, space::FOCUS_RING * 2.),
+                    gap_ring(p.background, size::FOCUS_RING),
+                    gap_ring(p.ring, size::FOCUS_RING * 2.),
                 ])
             })
-            .child(Icon::new(IconName::Search).color(p.text_secondary))
-            .child(div().flex_1().min_w(px(0.)).child(self.input.clone()))
+            .child(Icon::new(IconName::Search).color(p.muted_foreground))
+            .child(div().flex_1().min_w(Pixels::ZERO).child(self.input.clone()))
             .when_some(
                 self.shortcut_hint.clone().filter(|_| !nonempty),
                 |s, hint| {
@@ -168,13 +168,14 @@ impl Render for SearchField {
                             .flex_none()
                             .mr(space::S6)
                             .px(space::S6)
-                            .h(space::CHIP_HEIGHT)
+                            .h(size::CHIP)
                             .flex()
                             .items_center()
                             .rounded(radius::SM)
-                            .bg(p.ctl_hover)
-                            .type_style(typeface::CAPTION)
-                            .text_color(p.text_muted)
+                            .bg(p.accent)
+                            .text(TextSize::Xs)
+                            .weight(Weight::Semibold)
+                            .text_color(p.subtle_foreground)
                             .child(hint),
                     )
                 },
@@ -188,7 +189,7 @@ impl Render for SearchField {
                         .tab_stop(true)
                         .track_focus(&self.clear_focus)
                         .rounded(radius::SM)
-                        .focus_visible(move |s| s.border_2().border_color(p.focus_ring))
+                        .focus_visible(move |s| s.border_2().border_color(p.ring))
                         .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                             if event.keystroke.key == "enter" || event.keystroke.key == "space" {
                                 this.input.update(cx, |input, cx| input.set_text("", cx));
@@ -196,13 +197,13 @@ impl Render for SearchField {
                                 cx.stop_propagation();
                             }
                         }))
-                        .size(space::ICON_TARGET - space::S4)
+                        .size(size::ICON_TARGET - space::S4)
                         .flex()
                         .items_center()
                         .justify_center()
                         .cursor_pointer()
-                        .hover(move |s| s.bg(p.ctl_hover).text_color(p.text_primary))
-                        .child(Icon::new(IconName::Close).color(p.text_secondary))
+                        .hover(move |s| s.bg(p.accent).text_color(p.foreground))
+                        .child(Icon::new(IconName::Close).color(p.muted_foreground))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.input.update(cx, |input, cx| input.set_text("", cx));
                             this.focus(window, cx);

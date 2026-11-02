@@ -2,7 +2,7 @@
 use crate::{
     ui::motion::{self, AnimateExt},
     ui::theme::motion::timing,
-    ui::theme::{palette, radius, space},
+    ui::theme::{palette, radius, size, space},
 };
 use gpui::{prelude::*, *};
 
@@ -61,7 +61,7 @@ impl RenderOnce for Progress {
             .h(space::S4)
             .rounded(radius::FULL)
             .overflow_hidden()
-            .bg(p.ctl_rest)
+            .bg(p.secondary)
             .child(fill)
     }
 }
@@ -90,13 +90,13 @@ impl RenderOnce for Spinner {
             .id(self.id)
             .size(self.size)
             .flex_none()
-            .border(space::HAIRLINE)
-            .border_color(palette(cx).text_muted)
+            .border(size::HAIRLINE)
+            .border_color(palette(cx).subtle_foreground)
             .child(
                 div()
                     .size_full()
                     .border_l(space::S2)
-                    .border_color(palette(cx).accent_text),
+                    .border_color(palette(cx).primary_text),
             )
     }
 }

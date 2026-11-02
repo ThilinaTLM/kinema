@@ -96,10 +96,9 @@ pub struct Button {
 
 /// Colours of the selected state: `(rest, hover, ink, edge)`.
 pub(crate) fn selected_colors(p: &Palette) -> (Hsla, Hsla, Hsla, Hsla) {
-    let hover = Hsla {
-        a: (p.selection.a * opacity::SELECTION_HOVER_GAIN).min(1.0),
-        ..p.selection
-    };
+    let hover = p
+        .selection
+        .alpha((p.selection.a * opacity::SELECTION_HOVER_GAIN).min(1.0));
     (
         p.selection,
         hover,
@@ -401,7 +400,7 @@ impl RenderOnce for Button {
             .text(TextSize::Base)
             .weight(Weight::Semibold)
             .when(square && self.badge.is_none(), |el| {
-                el.w(size::ICON_TARGET).px_0()
+                el.w(size::ICON_TARGET).px(space::NONE)
             })
             .when(square && self.badge.is_some(), |el| {
                 el.min_w(size::ICON_TARGET).px(space::S6).gap(space::S4)

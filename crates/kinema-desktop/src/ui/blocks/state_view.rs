@@ -3,6 +3,7 @@
 //! [`select_view`] is the pure policy. [`StateView`] renders an explicit
 //! [`ViewState`]; [`ResourceView`] derives the state from an
 //! `app_state::Resource`, keeping a stale value on screen while it refreshes.
+use crate::ui::theme::opacity;
 use std::{rc::Rc, time::Instant};
 
 use gpui::{prelude::*, *};
@@ -15,8 +16,8 @@ use crate::{
     ui::primitives::alert::{Alert, AlertTone},
     ui::primitives::button::Button,
     ui::theme::motion::timing,
-    ui::theme::typography::TypeExt,
-    ui::theme::{palette, radius, space, typeface},
+    ui::theme::typography::{TextSize, TypeExt, Weight},
+    ui::theme::{palette, radius, space},
 };
 
 /// What a view currently shows.
@@ -206,16 +207,17 @@ fn centered(icon: IconName, ink: Hsla, title: SharedString, hint: Option<SharedS
         .child(Icon::new(icon).color(ink))
         .child(
             div()
-                .type_style(typeface::HEADING)
+                .text(TextSize::Lg)
+                .weight(Weight::Semibold)
                 .text_center()
                 .child(title),
         )
         .when_some(hint, |el, hint| {
             el.child(
                 div()
-                    .type_style(typeface::SMALL)
+                    .text(TextSize::Sm)
                     .text_center()
-                    .opacity(0.8)
+                    .opacity(opacity::INK_REFRESH)
                     .child(hint),
             )
         })
@@ -232,7 +234,7 @@ fn refresh_bar(cx: &App) -> AnyElement {
         .overflow_hidden();
     if motion::reduced(cx) {
         return track
-            .child(div().size_full().bg(p.text_muted))
+            .child(div().size_full().bg(p.subtle_foreground))
             .into_any_element();
     }
     track
@@ -282,8 +284,8 @@ impl RenderOnce for StateView {
                     .message
                     .unwrap_or_else(|| "Something went wrong.".into());
                 base.child(
-                    centered(IconName::Warning, p.status_warn, message, self.hint)
-                        .text_color(p.text_primary)
+                    centered(IconName::Warning, p.warning, message, self.hint)
+                        .text_color(p.foreground)
                         .when_some(self.retry, |el, retry| {
                             el.child(
                                 div()
@@ -303,8 +305,8 @@ impl RenderOnce for StateView {
                         title: "Nothing here yet.".into(),
                         hint: None,
                     });
-                    centered(spec.icon, p.text_secondary, spec.title, spec.hint)
-                        .text_color(p.text_primary)
+                    centered(spec.icon, p.muted_foreground, spec.title, spec.hint)
+                        .text_color(p.foreground)
                         .into_any_element()
                 } else {
                     div()

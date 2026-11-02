@@ -5,15 +5,14 @@
 //! Up/Down scroll by a line, PageUp/PageDown by a page, Home/End jump to the
 //! ends. The overlay scrollbar is pointer-only and hidden from assistive
 //! technology; scrolling itself is not announced.
+use crate::ui::theme::layout::controls;
+use crate::ui::theme::opacity;
 use crate::{
     ui::motion::{self, transition::CROSSFADE},
-    ui::theme::{palette, space},
+    ui::theme::{palette, size, space},
 };
 use gpui::{prelude::*, *};
 use std::{cell::Cell, rc::Rc, time::Instant};
-
-/// Idle thumb opacity; the thumb rises to 1.0 while scrolling or hovered.
-const IDLE_ALPHA: f32 = 0.35;
 
 /// Offset targets for a scroll key: `offset` is the current (non-positive)
 /// vertical offset, `max` the scrollable extent. `None` for other keys.
@@ -24,17 +23,17 @@ fn key_target(key: &str, offset: Pixels, viewport: Pixels, max: Pixels) -> Optio
         "down" => offset - line,
         "pageup" => offset + viewport,
         "pagedown" => offset - viewport,
-        "home" => px(0.0),
+        "home" => Pixels::ZERO,
         "end" => -max,
         _ => return None,
     };
-    Some(target.clamp(-max, px(0.0)))
+    Some(target.clamp(-max, Pixels::ZERO))
 }
 
 fn thumb_height(handle: &ScrollHandle) -> Pixels {
     let viewport = handle.bounds().size.height;
     let content = viewport + handle.max_offset().y;
-    if content <= px(0.0) {
+    if content <= Pixels::ZERO {
         return viewport;
     }
     (viewport * (viewport / content))
@@ -54,7 +53,7 @@ impl ScrollArea {
         Self {
             id: id.into(),
             handle,
-            gutter: px(0.0),
+            gutter: Pixels::ZERO,
             label: None,
             children: Vec::new(),
         }
@@ -98,7 +97,7 @@ impl RenderOnce for ScrollArea {
         let drag_handle = self.handle.clone();
         let activity = window
             .use_keyed_state((self.id.clone(), "activity"), cx, |_, _| {
-                Rc::new(Cell::new((px(0.0), Instant::now())))
+                Rc::new(Cell::new((Pixels::ZERO, Instant::now())))
             })
             .read(cx)
             .clone();
@@ -114,10 +113,10 @@ impl RenderOnce for ScrollArea {
                 if let Some((start_y, start_offset)) = drag.get() {
                     let max = drag_handle.max_offset().y;
                     let travel = drag_handle.bounds().size.height - thumb_height(&drag_handle);
-                    if travel > px(0.0) {
+                    if travel > Pixels::ZERO {
                         let mut offset = drag_handle.offset();
                         offset.y = (start_offset - max * ((event.position.y - start_y) / travel))
-                            .clamp(-max, px(0.0));
+                            .clamp(-max, Pixels::ZERO);
                         drag_handle.set_offset(offset);
                         window.refresh();
                     }
@@ -137,7 +136,7 @@ impl RenderOnce for ScrollArea {
                     .track_scroll(&self.handle)
                     .focusable()
                     .tab_stop(true)
-                    .focus_visible(move |s| s.border(space::FOCUS_RING).border_color(p.focus_ring))
+                    .focus_visible(move |s| s.border(size::FOCUS_RING).border_color(p.ring))
                     .on_key_down(move |event, window, cx| {
                         let mut offset = keys.offset();
                         let Some(y) = key_target(
@@ -163,14 +162,14 @@ impl RenderOnce for ScrollArea {
                     .top_0()
                     .bottom_0()
                     .w(space::S6)
-                    .hover(|s| s.w(px(10.0)))
+                    .hover(|s| s.w(controls::SCROLLBAR_HOVER_WIDTH))
                     .cursor_pointer()
                     .on_mouse_down(MouseButton::Left, move |event, window, cx| {
                         let bounds = pointer.bounds();
                         let max = pointer.max_offset().y;
                         let height = thumb_height(&pointer);
                         let travel = bounds.size.height - height;
-                        if max > px(0.0) && travel > px(0.0) {
+                        if max > Pixels::ZERO && travel > Pixels::ZERO {
                             let top =
                                 bounds.top() + travel * (-pointer.offset().y / max).clamp(0.0, 1.0);
                             if event.position.y < top || event.position.y > top + height {
@@ -192,7 +191,7 @@ impl RenderOnce for ScrollArea {
                             move |bounds, _, window, _| {
                                 let viewport = paint_handle.bounds().size.height;
                                 let max = paint_handle.max_offset().y;
-                                if max <= px(0.0) || viewport <= px(0.0) {
+                                if max <= Pixels::ZERO || viewport <= Pixels::ZERO {
                                     return;
                                 }
                                 let fraction = viewport / (viewport + max);
@@ -204,7 +203,7 @@ impl RenderOnce for ScrollArea {
                                 // Fade: full while scrolling/dragging/hovered, then ease to idle.
                                 let offset = paint_handle.offset().y;
                                 let (last, _) = activity.get();
-                                if (last - offset).abs() > px(0.5) {
+                                if (last - offset).abs() > size::SUBPIXEL {
                                     activity.set((offset, Instant::now()));
                                 }
                                 let active = fade_drag.get().is_some()
@@ -229,19 +228,19 @@ impl RenderOnce for ScrollArea {
                                         }
                                         fade.ease.apply(t)
                                     };
-                                    1.0 - t * (1.0 - IDLE_ALPHA)
+                                    1.0 - t * (1.0 - opacity::SCROLLBAR_IDLE)
                                 };
                                 // Slim rounded thumb inset from the edge; widens on hover.
                                 let width = if active {
-                                    bounds.size.width.min(px(6.0))
+                                    bounds.size.width.min(space::S6)
                                 } else {
-                                    bounds.size.width.min(px(4.0))
+                                    bounds.size.width.min(space::S4)
                                 };
-                                let left = bounds.right() - width - px(2.0);
+                                let left = bounds.right() - width - space::S2;
                                 window.paint_quad(
                                     fill(
                                         Bounds::new(point(left, top), size(width, height)),
-                                        p.line_control.opacity(p.line_control.a * alpha),
+                                        p.input.opacity(p.input.a * alpha),
                                     )
                                     .corner_radii(width / 2.0),
                                 );

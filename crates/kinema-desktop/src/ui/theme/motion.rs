@@ -79,6 +79,27 @@ pub mod timing {
     pub const PULSE_PERIOD: Duration = Duration::from_millis(1600);
     /// How long a "Copied" confirmation stays visible.
     pub const COPIED_FEEDBACK: Duration = Duration::from_millis(1500);
+    /// Player chrome auto-hides after this much inactivity while playing.
+    pub const CHROME_IDLE: Duration = Duration::from_millis(2500);
+    /// How long a transient banner notice stays before it dismisses itself.
+    pub const NOTICE_TIMEOUT: Duration = Duration::from_secs(10);
+    /// A requested value (seek, speed, subtitle delay) stays authoritative
+    /// until the player confirms it or this long passes.
+    pub const REQUEST_PENDING: Duration = Duration::from_millis(1200);
+    /// Rolling window for the recent download speed.
+    pub const RATE_WINDOW: Duration = Duration::from_secs(5);
+    /// Shortest observed span that yields a speed rather than noise.
+    pub const RATE_MIN_SPAN: Duration = Duration::from_secs(1);
+    /// Samples closer together than this with unchanged bytes are dropped.
+    pub const RATE_SAMPLE_DEDUP: Duration = Duration::from_millis(250);
+    /// Poll interval of the player transfer readout.
+    pub const TRANSFER_POLL: Duration = Duration::from_secs(1);
+    /// Interval of the player cadence sampler.
+    pub const CADENCE_INTERVAL: Duration = Duration::from_secs(1);
+    /// Player state sampling tick (about 60 Hz).
+    pub const FRAME_TICK: Duration = Duration::from_millis(16);
+    /// Period of the player metrics report.
+    pub const METRICS_REPORT: Duration = Duration::from_secs(5);
     /// Period of one indeterminate spinner/progress sweep.
     pub const SPIN_PERIOD: Duration = Duration::from_millis(1000);
 }

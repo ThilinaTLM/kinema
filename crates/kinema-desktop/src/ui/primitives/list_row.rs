@@ -16,8 +16,8 @@ use crate::{
         transition::FEEDBACK,
     },
     ui::primitives::button::ClickHandler,
-    ui::theme::typography::TypeExt,
-    ui::theme::{opacity, palette, radius, space, typeface},
+    ui::theme::typography::{TextSize, TypeExt},
+    ui::theme::{opacity, palette, radius, size, space},
 };
 
 /// Gap between the row highlight and the container edge.
@@ -95,14 +95,14 @@ impl RenderOnce for ListRow {
                 p.selection.blend(p.accent.opacity(opacity::SELECTED_HOVER)),
             )
         } else {
-            (transparent_black(), p.ctl_hover)
+            (transparent_black(), p.accent)
         };
-        let state = StateStyle::new(&p, rest, hover, hover, p.text_primary);
+        let state = StateStyle::new(&p, rest, hover, hover, p.foreground);
         // The focus ring is an inset shadow: no border, so focus never shifts layout.
         let min_height = if self.subtitle.is_some() {
-            space::ROW_TWO_LINE
+            size::ROW_TALL
         } else {
-            space::ROW
+            size::ROW
         };
         let lines = self.subtitle_lines;
         let face = div()
@@ -154,16 +154,16 @@ impl RenderOnce for ListRow {
                     .flex_col()
                     .child(
                         div()
-                            .type_style(typeface::BODY)
-                            .text_color(p.text_primary)
+                            .text(TextSize::Base)
+                            .text_color(p.foreground)
                             .truncate()
                             .child(self.title),
                     )
                     .when_some(self.subtitle, |el, subtitle| {
                         el.child(
                             div()
-                                .type_style(typeface::SMALL)
-                                .text_color(p.text_secondary)
+                                .text(TextSize::Sm)
+                                .text_color(p.muted_foreground)
                                 .when(lines <= 1, |el| el.truncate())
                                 .when(lines > 1, |el| el.clamp_lines(lines))
                                 .child(subtitle),

@@ -8,8 +8,8 @@ use crate::{
     ui::primitives::Icon,
     ui::primitives::IconName,
     ui::primitives::button::Button,
-    ui::theme::typography::TypeExt,
-    ui::theme::{opacity, palette, radius, space, typeface},
+    ui::theme::typography::{TextSize, TypeExt, Weight},
+    ui::theme::{opacity, palette, radius, size, space},
 };
 use gpui::{prelude::*, *};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,7 +94,7 @@ impl RenderOnce for Alert {
             .px(space::S12)
             .py(if self.strip { space::S4 } else { space::S12 })
             .bg(fill)
-            .border(space::HAIRLINE)
+            .border(size::HAIRLINE)
             .border_color(edge)
             .child(Icon::new(icon).color(ink))
             .child(
@@ -106,10 +106,15 @@ impl RenderOnce for Alert {
                     .when(!self.strip, |el| el.flex_col())
                     .child(
                         div()
-                            .type_style(if self.strip {
-                                typeface::SMALL
+                            .text(if self.strip {
+                                TextSize::Sm
                             } else {
-                                typeface::BODY_STRONG
+                                TextSize::Base
+                            })
+                            .weight(if self.strip {
+                                Weight::Regular
+                            } else {
+                                Weight::Semibold
                             })
                             .text_color(p.foreground)
                             .child(self.title),
@@ -117,7 +122,7 @@ impl RenderOnce for Alert {
                     .when_some(self.body, |el, body| {
                         el.child(
                             div()
-                                .type_style(typeface::SMALL)
+                                .text(TextSize::Sm)
                                 .text_color(p.muted_foreground)
                                 .child(body),
                         )

@@ -3,6 +3,8 @@
 //! The view model below is filled from the fields the providers expose today;
 //! richer title facts plug into `facts_view` without changing the layout.
 use super::*;
+use crate::ui::theme::opacity;
+use crate::ui::theme::typography::{TextSize, TypeExt, Weight};
 use kinema_core::catalog::TitleFacts;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -246,7 +248,10 @@ impl Detail {
         let tiles = div()
             .flex()
             .gap(s::S8)
-            .when(stacked, |el| el.w(px(300.)).flex_none())
+            .when(stacked, |el| {
+                el.w(crate::ui::theme::layout::detail::GLANCE_RATINGS_WIDTH)
+                    .flex_none()
+            })
             .children(view.ratings.iter().enumerate().map(|(i, tile)| {
                 div()
                     .id(("detail-rating", i))
@@ -255,25 +260,24 @@ impl Detail {
                     .px(s::S12)
                     .py(s::S8)
                     .rounded(radius::MD)
-                    .bg(p.ctl_rest)
+                    .bg(p.secondary)
                     .child(
                         div()
                             .flex()
                             .items_center()
                             .gap(s::S4)
-                            .child(Icon::new(IconName::StarFilled).color(p.accent_text))
+                            .child(Icon::new(IconName::StarFilled).color(p.primary_text))
                             .child(
                                 div()
-                                    .text_size(px(24.))
-                                    .line_height(px(28.))
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(p.text_primary)
+                                    .text(TextSize::Xl)
+                                    .weight(Weight::Bold)
+                                    .text_color(p.foreground)
                                     .child(tile.value.clone()),
                             )
                             .child(
                                 div()
-                                    .type_style(t::SMALL)
-                                    .text_color(p.text_muted)
+                                    .text(TextSize::Sm)
+                                    .text_color(p.subtle_foreground)
                                     .child("/10"),
                             ),
                     )
@@ -282,12 +286,13 @@ impl Detail {
                             .flex()
                             .gap(s::S6)
                             .pt(s::S2)
-                            .type_style(t::CAPTION)
-                            .child(div().text_color(p.text_secondary).child(tile.label))
+                            .text(TextSize::Xs)
+                            .weight(Weight::Semibold)
+                            .child(div().text_color(p.muted_foreground).child(tile.label))
                             .children(
                                 tile.detail
                                     .clone()
-                                    .map(|d| div().text_color(p.text_muted).child(d)),
+                                    .map(|d| div().text_color(p.subtle_foreground).child(d)),
                             ),
                     )
             }));
@@ -300,19 +305,19 @@ impl Detail {
                 div()
                     .flex()
                     .gap(s::S16)
-                    .type_style(t::SMALL)
+                    .text(TextSize::Sm)
                     .child(
                         div()
-                            .w(px(84.))
+                            .w(crate::ui::theme::layout::detail::FACT_GLANCE_LABEL_WIDTH)
                             .flex_none()
-                            .text_color(p.text_muted)
+                            .text_color(p.subtle_foreground)
                             .child(*label),
                     )
                     .child(
                         div()
                             .flex_1()
                             .min_w_0()
-                            .text_color(p.text_primary)
+                            .text_color(p.foreground)
                             .child(value.clone()),
                     )
             }));
@@ -326,9 +331,9 @@ impl Detail {
                 .when(!stacked, |el| el.flex_col())
                 .when(stacked, |el| el.items_start())
                 .rounded(radius::XL)
-                .bg(p.bg_raised.opacity(0.86))
-                .border(s::HAIRLINE)
-                .border_color(p.line_subtle)
+                .bg(p.card.opacity(opacity::CARD_TRANSLUCENT))
+                .border(size::HAIRLINE)
+                .border_color(p.border)
                 .shadow(theme::elevation::sm(&p))
                 .when(!view.ratings.is_empty(), |el| el.child(tiles))
                 .when(!view.glance.is_empty(), |el| el.child(rows)),
@@ -347,32 +352,33 @@ impl Detail {
             .flex_col()
             .gap(s::S8)
             .rounded(radius::XL)
-            .bg(p.bg_raised)
-            .border(s::HAIRLINE)
-            .border_color(p.line_subtle)
+            .bg(p.card)
+            .border(size::HAIRLINE)
+            .border_color(p.border)
             .child(
                 div()
-                    .type_style(t::CAPTION)
-                    .text_color(p.text_muted)
+                    .text(TextSize::Xs)
+                    .weight(Weight::Semibold)
+                    .text_color(p.subtle_foreground)
                     .child(group.title.to_uppercase()),
             )
             .children(group.rows.iter().map(|(label, value)| {
                 div()
                     .flex()
                     .gap(s::S12)
-                    .type_style(t::BODY)
+                    .text(TextSize::Base)
                     .child(
                         div()
-                            .w(px(112.))
+                            .w(crate::ui::theme::layout::detail::FACT_WIDE_LABEL_WIDTH)
                             .flex_none()
-                            .text_color(p.text_muted)
+                            .text_color(p.subtle_foreground)
                             .child(*label),
                     )
                     .child(
                         div()
                             .flex_1()
                             .min_w_0()
-                            .text_color(p.text_primary)
+                            .text_color(p.foreground)
                             .child(value.clone()),
                     )
             }))
@@ -387,14 +393,15 @@ impl Detail {
             .relative()
             .overflow_hidden()
             .rounded(radius::LG)
-            .bg(p.bg_placeholder)
-            .border(s::HAIRLINE)
+            .bg(p.muted)
+            .border(size::HAIRLINE)
             .border_color(p.poster_edge)
             .flex()
             .items_center()
             .justify_center()
-            .type_style(t::TITLE)
-            .text_color(p.text_muted)
+            .text(TextSize::Xl)
+            .weight(Weight::Semibold)
+            .text_color(p.subtle_foreground)
             .child(initials(&member.name));
         if let Some(image) = self.image(
             member.profile_url.as_deref(),
@@ -420,16 +427,17 @@ impl Detail {
             .child(
                 div()
                     .pt(s::S4)
-                    .type_style(t::SMALL_MEDIUM)
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(p.text_primary)
+                    .text(TextSize::Sm)
+                    .weight(Weight::Medium)
+                    .weight(Weight::Semibold)
+                    .text_color(p.foreground)
                     .truncate()
                     .child(member.name.clone()),
             )
             .children(member.role.clone().map(|role| {
                 div()
-                    .type_style(t::SMALL)
-                    .text_color(p.text_muted)
+                    .text(TextSize::Sm)
+                    .text_color(p.subtle_foreground)
                     .truncate()
                     .child(role)
             }))
@@ -442,12 +450,7 @@ impl Detail {
         width: Pixels,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
-        let fit = fit_grid(
-            width,
-            geometry::CAST_MIN_WIDTH,
-            geometry::CAST_MAX_WIDTH,
-            s::S12,
-        );
+        let fit = fit_grid(width, geometry::CAST_MIN, geometry::CAST_MAX, s::S12);
         let total = cast.len();
         let visible = layout::cast_visible(total, fit.cols, self.cast_expanded);
         let toggle = layout::cast_has_toggle(total, fit.cols);
@@ -530,8 +533,9 @@ impl Detail {
             section = section.child(
                 div()
                     .id("detail-about")
-                    .type_style(t::TITLE)
-                    .text_color(p.text_primary)
+                    .text(TextSize::Xl)
+                    .weight(Weight::Semibold)
+                    .text_color(p.foreground)
                     .child("About the series"),
             );
         }
@@ -539,8 +543,13 @@ impl Detail {
             let gap = s::S16;
             let fit = fit_grid(
                 width,
-                layout::FACT_CARD_MIN,
-                layout::fact_card_max(width, view.groups.len(), layout::FACT_CARD_MIN, gap),
+                crate::ui::theme::layout::detail::FACT_CARD_MIN,
+                layout::fact_card_max(
+                    width,
+                    view.groups.len(),
+                    crate::ui::theme::layout::detail::FACT_CARD_MIN,
+                    gap,
+                ),
                 gap,
             );
             section = section.child(
@@ -628,8 +637,8 @@ impl Detail {
                         div()
                             .flex()
                             .gap(s::S12)
-                            .type_style(t::SMALL)
-                            .text_color(p.text_muted)
+                            .text(TextSize::Sm)
+                            .text_color(p.subtle_foreground)
                             .child(div().w(geometry::FACT_LABEL_WIDTH).flex_none().child(label))
                             .child(div().flex_1().min_w_0().child(value))
                     }),
@@ -638,8 +647,8 @@ impl Detail {
                 div()
                     .id("detail-attribution")
                     .pt(s::S4)
-                    .type_style(t::SMALL)
-                    .text_color(p.text_muted)
+                    .text(TextSize::Sm)
+                    .text_color(p.subtle_foreground)
                     .child(text)
             }))
             .into_any_element()

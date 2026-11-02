@@ -1,4 +1,5 @@
 //! Surface container: radius MD, soft edge, optional elevation and hover lift.
+use crate::ui::theme::transparent;
 use std::rc::Rc;
 
 use gpui::{prelude::*, *};
@@ -9,7 +10,7 @@ use crate::{
         transition::HOVER,
     },
     ui::primitives::button::ClickHandler,
-    ui::theme::{elevation, palette, radius, space},
+    ui::theme::{elevation, palette, radius, size},
 };
 
 #[derive(IntoElement)]
@@ -75,12 +76,8 @@ impl Styled for Card {
 impl RenderOnce for Card {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let p = *palette(cx);
-        let rest_fill = if self.raised {
-            p.bg_raised
-        } else {
-            p.bg_surface
-        };
-        let hover_fill = p.bg_overlay;
+        let rest_fill = if self.raised { p.card } else { p.surface };
+        let hover_fill = p.popover;
         let rest_shadow = if self.raised {
             elevation::sm(&p)
         } else {
@@ -89,8 +86,8 @@ impl RenderOnce for Card {
         let face = self
             .base
             .bg(rest_fill)
-            .border(space::HAIRLINE)
-            .border_color(p.line_subtle)
+            .border(size::HAIRLINE)
+            .border_color(p.border)
             .rounded(radius::LG)
             .shadow(rest_shadow.clone())
             .children(self.children);
@@ -120,7 +117,7 @@ impl RenderOnce for Card {
         let mut from = elevation::sm(&p);
         if !self.raised {
             for shadow in &mut from {
-                shadow.color = shadow.color.opacity(0.0);
+                shadow.color = transparent(shadow.color);
             }
         }
         let to = elevation::md(&p);

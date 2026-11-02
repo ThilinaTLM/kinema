@@ -129,5 +129,5 @@ fn hero_and_body_share_one_frame() {
         assert!(hero_layout(v).poster >= px(160.));
     }
     // Detail pages share the browse page inset.
-    assert_eq!(page_inset(px(1280.)), crate::ui::theme::space::PAGE_INSET);
+    assert_eq!(page_inset(px(1280.)), crate::ui::theme::size::PAGE_INSET);
 }

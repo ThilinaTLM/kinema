@@ -16,6 +16,7 @@
 //!
 //! A window-keyed registry owns only a weak reference: opening a context menu
 //! dismisses the previous one without keeping an unmounted trigger alive.
+use crate::ui::theme::layout::controls;
 use crate::{
     ui::motion::{
         Closed, Presence,
@@ -23,8 +24,8 @@ use crate::{
     },
     ui::primitives::icon::{Icon, IconName},
     ui::primitives::tooltip::tooltip,
-    ui::theme::typography::TypeExt,
-    ui::theme::{elevation, palette, radius, space, typeface},
+    ui::theme::typography::{TextSize, TypeExt},
+    ui::theme::{elevation, palette, radius, size, space},
 };
 use gpui::{prelude::*, *};
 use std::{rc::Rc, time::Instant};
@@ -358,9 +359,9 @@ impl Menu {
         let p = *palette(cx);
         let mut panel = div()
             .id(if child { "submenu-panel" } else { "menu-panel" })
-            .min_w(px(200.))
+            .min_w(controls::MENU_MIN_WIDTH)
             .max_w(window.viewport_size().width - space::S16)
-            .max_h((window.viewport_size().height - space::S16).max(space::ROW))
+            .max_h((window.viewport_size().height - space::S16).max(size::ROW))
             .overflow_y_scroll()
             .track_scroll(if child {
                 &self.child_scroll
@@ -370,22 +371,22 @@ impl Menu {
             .occlude()
             .role(Role::Menu)
             .aria_label(self.label.clone())
-            .bg(p.bg_overlay)
+            .bg(p.popover)
             .rounded(radius::XL)
             .border_1()
-            .border_color(p.line_subtle)
+            .border_color(p.border)
             .shadow(elevation::lg(&p))
             .p(space::S4)
-            .type_style(typeface::BODY)
-            .text_color(p.text_primary);
+            .text(TextSize::Base)
+            .text_color(p.foreground);
         for (i, item) in items.iter().enumerate() {
             if matches!(item, MenuItem::Separator) {
                 panel = panel.child(
                     div()
-                        .h(space::HAIRLINE)
+                        .h(size::HAIRLINE)
                         .mx(space::S8)
                         .my(space::S4)
-                        .bg(p.line_subtle),
+                        .bg(p.border),
                 );
                 continue;
             }
@@ -412,16 +413,16 @@ impl Menu {
                 .when_some(item.disabled_text(), |el, reason| {
                     el.aria_description(reason)
                 })
-                .h(space::ROW)
+                .h(size::ROW)
                 .flex()
                 .items_center()
                 .gap(space::S8)
                 .px(space::S8)
                 .rounded(radius::MD)
                 .text_color(if enabled {
-                    p.text_primary
+                    p.foreground
                 } else {
-                    p.text_muted
+                    p.subtle_foreground
                 })
                 .when(enabled, |row| {
                     row.on_mouse_move(cx.listener(move |this, _, _, cx| {
@@ -459,7 +460,7 @@ impl Menu {
                     ..
                 } => {
                     row = row
-                        .child(div().w(space::ICON).when(*checked || icon.is_some(), |d| {
+                        .child(div().w(size::ICON).when(*checked || icon.is_some(), |d| {
                             d.child(
                                 Icon::new(if *checked {
                                     IconName::Check
@@ -467,9 +468,9 @@ impl Menu {
                                     icon.unwrap_or(IconName::Check)
                                 })
                                 .color(if enabled {
-                                    p.text_secondary
+                                    p.muted_foreground
                                 } else {
-                                    p.text_muted
+                                    p.subtle_foreground
                                 }),
                             )
                         }))
@@ -477,8 +478,8 @@ impl Menu {
                     if let Some(shortcut) = shortcut {
                         row = row.child(
                             div()
-                                .type_style(typeface::SMALL)
-                                .text_color(p.text_muted)
+                                .text(TextSize::Sm)
+                                .text_color(p.subtle_foreground)
                                 .child(shortcut.clone()),
                         );
                     }
@@ -490,13 +491,13 @@ impl Menu {
                 }
                 MenuItem::Submenu { label, .. } => {
                     row = row
-                        .child(div().w(space::ICON))
+                        .child(div().w(size::ICON))
                         .child(div().flex_1().child(label.clone()))
                         .child(Icon::new(IconName::ChevronRight));
                 }
                 MenuItem::Separator => unreachable!(),
             }
-            let row = row.bg(if selected { p.ctl_hover } else { p.bg_overlay });
+            let row = row.bg(if selected { p.accent } else { p.popover });
             panel = panel.child(row);
         }
         panel

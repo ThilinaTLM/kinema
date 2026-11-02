@@ -13,22 +13,26 @@
 //! - [`ToolbarChip`]: the visual face of a popover trigger — icon, label,
 //!   optional count and chevron — that collapses to icon-only when narrow.
 //!
-//! Every control is [`space::TOOLBAR_CONTROL`] tall with [`radius::LG`] corners.
+//! Every control is [`size::TOOLBAR_CONTROL`] tall with [`radius::LG`] corners.
+use crate::ui::theme::layout::{
+    browse::{SEARCH_MIN_WIDTH, SEARCH_WIDTH},
+    controls,
+};
 use crate::{
     ui::primitives::Icon,
     ui::primitives::IconName,
-    ui::theme::typography::TypeExt,
-    ui::theme::{Palette, palette, radius, space, typeface},
+    ui::theme::typography::{TextSize, TypeExt, Weight},
+    ui::theme::{Palette, palette, radius, size, space},
 };
 use gpui::{prelude::*, *};
 
 /// Apply the header material and geometry to a control surface.
 pub fn glass_surface<E: Styled>(el: E, p: &Palette) -> E {
     let (fill, _, edge) = p.glass();
-    el.h(space::TOOLBAR_CONTROL)
+    el.h(size::TOOLBAR_CONTROL)
         .rounded(radius::LG)
         .bg(fill)
-        .border(space::HAIRLINE)
+        .border(size::HAIRLINE)
         .border_color(edge)
 }
 
@@ -54,9 +58,9 @@ impl Toolbar {
             leading: Vec::new(),
             center: None,
             trailing: Vec::new(),
-            inset: space::PAGE_INSET,
-            center_width: px(440.),
-            center_min_width: px(180.),
+            inset: size::PAGE_INSET,
+            center_width: SEARCH_WIDTH,
+            center_min_width: SEARCH_MIN_WIDTH,
         }
     }
     /// Horizontal inset so the row lines up with the page content beneath.
@@ -100,8 +104,8 @@ impl RenderOnce for Toolbar {
             .top_0()
             .left_0()
             .right_0()
-            .h(space::TOOLBAR_HEIGHT)
-            .pt(space::TOOLBAR_TOP)
+            .h(size::TOOLBAR_HEIGHT)
+            .pt(size::TOOLBAR_TOP)
             // The row floats over scrolling content: it must own clicks and
             // hover across its full height, but let the wheel scroll the page.
             .block_mouse_except_scroll()
@@ -186,8 +190,8 @@ impl RenderOnce for ToolbarGroup {
 pub fn icon_cell(child: impl IntoElement) -> Div {
     div()
         .flex_none()
-        .min_w(space::ICON_TARGET)
-        .h(space::ICON_TARGET)
+        .min_w(size::ICON_TARGET)
+        .h(size::ICON_TARGET)
         .flex()
         .items_center()
         .justify_center()
@@ -201,10 +205,10 @@ impl RenderOnce for ToolbarDivider {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         div()
             .flex_none()
-            .w(space::HAIRLINE)
+            .w(size::HAIRLINE)
             .h(space::S16)
             .mx(space::S2)
-            .bg(palette(cx).line_hairline)
+            .bg(palette(cx).border)
     }
 }
 
@@ -254,18 +258,14 @@ impl RenderOnce for ToolbarChip {
         let p = *palette(cx);
         let (_, hover, _) = p.glass();
         let active = self.count > 0;
-        let ink = if active {
-            p.accent_text
-        } else {
-            p.text_primary
-        };
+        let ink = if active { p.primary_text } else { p.foreground };
         glass_surface(div(), &p)
             .flex_none()
             .flex()
             .items_center()
             .gap(space::S6)
             .when(self.compact, |el| {
-                el.min_w(space::TOOLBAR_CONTROL)
+                el.min_w(size::TOOLBAR_CONTROL)
                     .px(space::S6)
                     .justify_center()
             })
@@ -278,13 +278,14 @@ impl RenderOnce for ToolbarChip {
             // chip reads like a pressed header control, not a brighter outline.
             .when(self.open, |el| el.bg(hover))
             .when(!self.open, |el| el.hover(move |s| s.bg(hover)))
-            .when(active && !self.open, |el| el.border_color(p.accent_tint))
+            .when(active && !self.open, |el| el.border_color(p.selection))
             .child(Icon::new(self.icon).color(ink))
             .when(!self.compact, |el| {
                 el.child(
                     div()
-                        .type_style(typeface::SMALL_MEDIUM)
-                        .text_color(p.text_primary)
+                        .text(TextSize::Sm)
+                        .weight(Weight::Medium)
+                        .text_color(p.foreground)
                         .whitespace_nowrap()
                         .child(self.label),
                 )
@@ -301,8 +302,9 @@ impl RenderOnce for ToolbarChip {
                         .justify_center()
                         .rounded(radius::XL)
                         .bg(p.primary)
-                        .type_style(typeface::CAPTION)
-                        .text_color(p.on_accent)
+                        .text(TextSize::Xs)
+                        .weight(Weight::Semibold)
+                        .text_color(p.primary_foreground)
                         .child(self.count.to_string()),
                 )
             })
@@ -314,15 +316,11 @@ impl RenderOnce for ToolbarChip {
                         IconName::ChevronDown
                     })
                     .size(space::S12)
-                    .color(p.text_secondary),
+                    .color(p.muted_foreground),
                 )
             })
     }
 }
-
-/// Below this window width the downloading button drops its detail text and
-/// keeps only the speed and the combined progress bar.
-pub const TRANSFER_DETAIL_MIN_WIDTH: Pixels = px(1100.);
 
 /// Decimal speed, e.g. `12.4 MB/s`.
 pub fn format_rate(bytes_per_second: u64) -> String {
@@ -415,7 +413,7 @@ impl RenderOnce for TransferStatus {
         let mut face = div()
             .id("transfers-status")
             .relative()
-            .h(space::ICON_TARGET)
+            .h(size::ICON_TARGET)
             .flex_none()
             .flex()
             .items_center()
@@ -424,13 +422,13 @@ impl RenderOnce for TransferStatus {
             .pr(space::S12)
             .rounded(radius::MD)
             .cursor_pointer()
-            .text_color(p.text_secondary)
-            .type_style(typeface::SMALL)
+            .text_color(p.muted_foreground)
+            .text(TextSize::Sm)
             .whitespace_nowrap()
             .hover(move |s| s.bg(hover))
             .aria_label(SharedString::from(description.clone()))
             .tooltip(crate::ui::primitives::tooltip::tooltip(description))
-            .child(Icon::new(IconName::Transfers).color(p.text_secondary));
+            .child(Icon::new(IconName::Transfers).color(p.muted_foreground));
         match self.summary {
             S::Idle => face = face.child("No transfers"),
             S::Serving { count } => face = face.child(format!("{count} serving")),
@@ -441,9 +439,10 @@ impl RenderOnce for TransferStatus {
             } => {
                 face = face.child(
                     div()
-                        .type_style(typeface::MONO)
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(p.text_primary)
+                        .text(TextSize::Sm)
+                        .mono()
+                        .weight(Weight::Semibold)
+                        .text_color(p.foreground)
                         .child(format_rate(self.bytes_per_second)),
                 );
                 if !self.compact {
@@ -458,10 +457,10 @@ impl RenderOnce for TransferStatus {
                         .absolute()
                         .left(space::S8)
                         .right(space::S12)
-                        .bottom(px(3.))
-                        .h(px(2.))
-                        .rounded(px(1.))
-                        .bg(p.line_subtle)
+                        .bottom(controls::INDICATOR_INSET)
+                        .h(controls::INDICATOR_THICKNESS)
+                        .rounded(size::HAIRLINE)
+                        .bg(p.border)
                         .overflow_hidden()
                         .child(div().h_full().w(relative(fraction)).bg(p.primary)),
                 );

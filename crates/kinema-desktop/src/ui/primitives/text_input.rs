@@ -10,8 +10,8 @@
 // Element painting and IME integration adapted from gpui-pre 0.3.9 examples/input.rs
 // (Zed Industries contributors, Apache-2.0).
 use crate::{
-    ui::theme::typography::TypeExt,
-    ui::theme::{palette, radius, space, typeface},
+    ui::theme::typography::{TextSize, TypeExt},
+    ui::theme::{palette, radius, size, space},
 };
 use gpui::{prelude::*, *};
 use std::ops::Range;
@@ -252,7 +252,7 @@ impl TextInput {
             last_layout: None,
             last_bounds: None,
             is_selecting: false,
-            scroll: px(0.),
+            scroll: Pixels::ZERO,
             _subscriptions: subscriptions,
         }
     }
@@ -456,7 +456,7 @@ impl Element for TextElement {
         let style = window.text_style();
 
         let (display_text, text_color) = if content.is_empty() {
-            (input.placeholder.clone(), palette(cx).text_muted)
+            (input.placeholder.clone(), palette(cx).subtle_foreground)
         } else {
             (input.display_text().into(), style.color)
         };
@@ -480,7 +480,7 @@ impl Element for TextElement {
                         - input.display_offset(marked_range.start),
                     underline: Some(UnderlineStyle {
                         color: Some(run.color),
-                        thickness: px(1.0),
+                        thickness: size::HAIRLINE,
                         wavy: false,
                     }),
                     ..run.clone()
@@ -505,9 +505,9 @@ impl Element for TextElement {
         let cursor_pos = line.x_for_index(cursor);
         let scroll = input
             .scroll
-            .max(cursor_pos - bounds.size.width + px(1.))
+            .max(cursor_pos - bounds.size.width + size::HAIRLINE)
             .min(cursor_pos)
-            .max(px(0.));
+            .max(Pixels::ZERO);
         self.input.update(cx, |input, _| input.scroll = scroll);
         let (selection, cursor) = if selected_range.is_empty() {
             (
@@ -515,9 +515,9 @@ impl Element for TextElement {
                 Some(fill(
                     Bounds::new(
                         point(bounds.left() - scroll + cursor_pos, bounds.top()),
-                        size(px(1.), bounds.bottom() - bounds.top()),
+                        size(size::HAIRLINE, bounds.bottom() - bounds.top()),
                     ),
-                    palette(cx).text_primary,
+                    palette(cx).foreground,
                 )),
             )
         } else {
@@ -533,7 +533,7 @@ impl Element for TextElement {
                             bounds.bottom(),
                         ),
                     ),
-                    palette(cx).accent_tint,
+                    palette(cx).selection,
                 )),
                 None,
             )
@@ -743,7 +743,7 @@ impl EntityInputHandler for TextInput {
             point(
                 b.left() - self.scroll
                     + l.x_for_index(self.display_offset(from_utf16(&self.buffer.text, r.end)))
-                    + px(1.),
+                    + size::HAIRLINE,
                 b.bottom(),
             ),
         ))
@@ -810,28 +810,28 @@ impl Render for TextInput {
             .key_context("KinemaTextInput")
             .track_focus(&self.focus_handle)
             .w_full()
-            .min_w(px(0.))
-            .h(space::CONTROL_HEIGHT)
+            .min_w(Pixels::ZERO)
+            .h(size::CONTROL_SM)
             .px(space::S6)
             .flex()
             .items_center()
             .when(!chromeless, |el| {
                 el.rounded(radius::MD)
-                    .bg(p.ctl_rest)
+                    .bg(p.secondary)
                     .border_1()
                     .border_color(if self.invalid {
-                        p.status_error
+                        p.destructive
                     } else if focused {
                         p.primary
                     } else {
-                        p.line_control
+                        p.input
                     })
             })
-            .type_style(typeface::BODY)
+            .text(TextSize::Base)
             .text_color(if self.disabled {
-                p.text_muted
+                p.subtle_foreground
             } else {
-                p.text_primary
+                p.foreground
             })
             .cursor(CursorStyle::IBeam)
             .on_action(cx.listener(|s, _: &Left, _, cx| s.navigate(false, false, false, cx)))
@@ -938,19 +938,19 @@ impl Render for TextInput {
                         {
                             window.paint_quad(
                                 outline(
-                                    bounds.dilate(space::FOCUS_RING * 2.),
-                                    p.focus_ring,
+                                    bounds.dilate(size::FOCUS_RING * 2.),
+                                    p.ring,
                                     BorderStyle::Solid,
                                 )
-                                .corner_radii(radius::MD + space::FOCUS_RING * 2.)
-                                .border_widths(space::FOCUS_RING),
+                                .corner_radii(radius::MD + size::FOCUS_RING * 2.)
+                                .border_widths(size::FOCUS_RING),
                             );
                         }
                     },
                 )
                 .absolute()
-                .left(px(0.))
-                .top(px(0.))
+                .left(Pixels::ZERO)
+                .top(Pixels::ZERO)
                 .size_full(),
             )
     }

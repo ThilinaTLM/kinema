@@ -3,6 +3,8 @@
 use super::streams::stream_skeleton;
 use super::*;
 use crate::ui::blocks::MediaHero;
+use crate::ui::theme::layout::detail as layout_detail;
+use crate::ui::theme::typography::{TextSize, TypeExt, Weight};
 use crate::{
     app::{AppAction, CredentialState},
     credentials::CredentialStore,
@@ -406,43 +408,45 @@ impl Detail {
                 prefs.quality.label()
             ));
         }
-        let heading =
-            div()
-                .w_full()
-                .flex()
-                .flex_wrap()
-                .items_baseline()
-                .gap_x(s::S8)
-                .gap_y(s::S4)
-                .pb(s::S8)
-                .child(
+        let heading = div()
+            .w_full()
+            .flex()
+            .flex_wrap()
+            .items_baseline()
+            .gap_x(s::S8)
+            .gap_y(s::S4)
+            .pb(s::S8)
+            .child(
+                div()
+                    .text(TextSize::Lg)
+                    .weight(Weight::Semibold)
+                    .text_color(p.foreground)
+                    .child("Streams"),
+            )
+            .when(sources.is_some(), |el| {
+                el.child(
                     div()
-                        .type_style(t::HEADING)
-                        .text_color(p.text_primary)
-                        .child("Streams"),
+                        .text(TextSize::Sm)
+                        .text_color(p.subtle_foreground)
+                        .child(format!("{visible} of {total}")),
                 )
-                .when(sources.is_some(), |el| {
-                    el.child(
-                        div()
-                            .type_style(t::SMALL)
-                            .text_color(p.text_muted)
-                            .child(format!("{visible} of {total}")),
-                    )
-                })
-                .children(notes.into_iter().map(|note| {
-                    div()
-                        .type_style(t::SMALL)
-                        .text_color(p.status_warn)
-                        .child(note)
-                }))
-                .child(div().flex_1())
-                .child(div().type_style(t::SMALL).text_color(p.text_muted).child(
-                    if has_accounts {
+            })
+            .children(
+                notes
+                    .into_iter()
+                    .map(|note| div().text(TextSize::Sm).text_color(p.warning).child(note)),
+            )
+            .child(div().flex_1())
+            .child(
+                div()
+                    .text(TextSize::Sm)
+                    .text_color(p.subtle_foreground)
+                    .child(if has_accounts {
                         "Provider, quality, sort and account filter are remembered"
                     } else {
                         "Provider, quality and sort are remembered"
-                    },
-                ));
+                    }),
+            );
 
         let sel = selection(
             sources.is_some(),
@@ -492,7 +496,10 @@ impl Detail {
             .gap(s::S24)
             .child(list);
         if wide && let Some(candidate) = &selected {
-            let width = (frame * 0.27).clamp(px(340.), px(400.));
+            let width = (frame * layout_detail::STREAMS_INSPECTOR_FRACTION).clamp(
+                layout_detail::STREAMS_INSPECTOR_MIN,
+                layout_detail::STREAMS_INSPECTOR_MAX,
+            );
             // Sticky: the inspector column never scrolls with the list; it
             // scrolls internally only when taller than the viewport.
             body = body.child(
@@ -535,7 +542,7 @@ impl Detail {
             .track_focus(&self.page_focus)
             .size_full()
             .relative()
-            .bg(p.bg_canvas)
+            .bg(p.background)
             .child(
                 div().size_full().flex().flex_col().child(hero).child(
                     div()
@@ -570,7 +577,7 @@ impl Detail {
     ) -> AnyElement {
         let p = self.tinted_palette(cx);
         let (poster_url, backdrop) = self.hero_art(title, cx);
-        let mut poster = div().size_full().bg(p.bg_placeholder);
+        let mut poster = div().size_full().bg(p.muted);
         if let Some(image) = self.image(
             poster_url.as_deref(),
             ArtworkKind::Poster,
@@ -583,9 +590,9 @@ impl Detail {
             .eyebrow("Choose a stream")
             .backdrop(backdrop)
             .poster(poster)
-            .fade_into(p.bg_canvas)
-            .min_height(px(0.))
-            .top_inset(s::TOOLBAR_HEIGHT)
+            .fade_into(p.background)
+            .min_height(Pixels::ZERO)
+            .top_inset(size::TOOLBAR_HEIGHT)
             .frame(GUTTER, geometry::PAGE_MAX_WIDTH)
             .sizing(
                 if wide {
@@ -593,7 +600,7 @@ impl Detail {
                 } else {
                     geometry::STREAMS_POSTER_WIDTH_NARROW
                 },
-                px(920.),
+                layout_detail::STREAMS_OVERVIEW_MAX_WIDTH,
             );
 
         // Episode marker + name, then plain facts as chips.
@@ -602,8 +609,9 @@ impl Detail {
             if let Some(name) = episode.name.as_deref().filter(|n| !n.trim().is_empty()) {
                 hero = hero.meta(
                     div()
-                        .type_style(t::HEADING)
-                        .text_color(p.text_primary)
+                        .text(TextSize::Lg)
+                        .weight(Weight::Semibold)
+                        .text_color(p.foreground)
                         .child(name.to_owned()),
                 );
             }
@@ -670,14 +678,18 @@ impl Detail {
             .secondary(
                 div()
                     .flex_none()
-                    .w(s::HAIRLINE)
+                    .w(size::HAIRLINE)
                     .h(s::S20)
                     .mx(s::S4)
-                    .bg(p.line_hairline),
+                    .bg(p.border),
             )
             .secondary(
                 div()
-                    .w(if wide { px(240.) } else { px(180.) })
+                    .w(if wide {
+                        layout_detail::STREAMS_SEARCH_WIDTH
+                    } else {
+                        layout_detail::STREAMS_SEARCH_WIDTH_NARROW
+                    })
                     .children(self.stream_page.search.clone()),
             );
         if let Some(sort) = self.stream_page.sort.clone() {

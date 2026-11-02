@@ -1,5 +1,6 @@
 //! Transfer controls use session snapshots, never infer external player state.
 use crate::controllers::coordinator::{AppCoordinator, CoordinatorEvent};
+use crate::ui::theme::layout::transfers::{LIST_MAX_HEIGHT, PANEL_WIDTH};
 use crate::{
     app::{AppAction, AppOutcome},
     ui::blocks::StateView,
@@ -10,15 +11,12 @@ use crate::{
     ui::primitives::button::{Button, ButtonVariant},
     ui::primitives::icon::IconName,
     ui::primitives::menu::ContextMenuExt,
-    ui::theme::typography::TypeExt,
-    ui::theme::{self, space as s, typeface as t},
+    ui::theme::typography::{TextSize, TypeExt, Weight},
+    ui::theme::{self, space as s},
 };
 use gpui::{prelude::*, *};
 mod rows;
 
-const PANEL_WIDTH: Pixels = px(352.);
-/// Session list scrolls beyond this height instead of growing the popover.
-const LIST_MAX_HEIGHT: Pixels = px(336.);
 pub(crate) struct Transfers {
     coordinator: Entity<AppCoordinator>,
     stop: Option<String>,
@@ -77,7 +75,7 @@ impl Render for Transfers {
         let mut content = div()
             .w(PANEL_WIDTH)
             .flex_none()
-            .type_style(t::BODY)
+            .text(TextSize::Base)
             .p(s::S16)
             .flex()
             .flex_col()
@@ -87,7 +85,12 @@ impl Render for Transfers {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(div().type_style(t::HEADING).child("Transfers"))
+                    .child(
+                        div()
+                            .text(TextSize::Lg)
+                            .weight(Weight::Semibold)
+                            .child("Transfers"),
+                    )
                     .when(!sessions.is_empty(), |el| {
                         el.child(
                             Badge::new(format!("{} active", sessions.len()))
@@ -146,8 +149,8 @@ impl Render for Transfers {
         }
         let muted = |text: String| {
             div()
-                .type_style(t::SMALL)
-                .text_color(p.text_secondary)
+                .text(TextSize::Sm)
+                .text_color(p.muted_foreground)
                 .child(text)
         };
         content = content.child(match usage {

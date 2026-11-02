@@ -2,8 +2,8 @@
 use gpui::{prelude::*, *};
 
 use crate::{
-    ui::theme::typography::TypeExt,
-    ui::theme::{palette, space, typeface},
+    ui::theme::typography::{TextSize, TypeExt, Weight},
+    ui::theme::{palette, size, space},
 };
 
 /// Heading row shared by [`Section`] and `Carousel`.
@@ -17,7 +17,7 @@ pub(super) fn header(
         .flex()
         .items_center()
         .gap(space::S8)
-        .min_h(space::CONTROL_HEIGHT)
+        .min_h(size::CONTROL_SM)
         .child(
             div()
                 .flex_1()
@@ -27,17 +27,18 @@ pub(super) fn header(
                 .gap(space::S8)
                 .child(
                     div()
-                        .type_style(typeface::HEADING)
-                        .text_color(palette.text_primary)
+                        .text(TextSize::Lg)
+                        .weight(Weight::Semibold)
+                        .text_color(palette.foreground)
                         .truncate()
                         .child(title),
                 )
                 .when_some(count, |el, count| {
                     el.child(
                         div()
-                            .type_style(typeface::SMALL)
+                            .text(TextSize::Sm)
                             .font_features(FontFeatures(vec![("tnum".into(), 1)].into()))
-                            .text_color(palette.text_muted)
+                            .text_color(palette.subtle_foreground)
                             .child(count.to_string()),
                     )
                 }),

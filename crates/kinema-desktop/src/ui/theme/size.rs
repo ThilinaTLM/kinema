@@ -23,6 +23,10 @@ pub const CHIP: Pixels = px(20.0);
 pub const HAIRLINE: Pixels = px(1.0);
 pub const FOCUS_RING: Pixels = px(2.0);
 
+/// Tolerance for comparing laid-out offsets, and the overlap that hides seams
+/// between stacked paint strips.
+pub const SUBPIXEL: Pixels = px(0.5);
+
 // Toolbar and page
 /// Side, top and bottom inset of every main-window page.
 pub const PAGE_INSET: Pixels = px(20.0);

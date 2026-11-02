@@ -10,12 +10,13 @@
 //! is also shown by an edge and fill (and a check on multi-select chips), not
 //! by colour alone. Arrow keys between siblings are not provided: each option
 //! is a separate tab stop and the owner owns the group.
+use crate::ui::theme::layout::controls::CHOICE_TILE_WIDTH;
 use crate::{
     ui::motion::interaction::focus_ring,
     ui::primitives::Icon,
     ui::primitives::IconName,
-    ui::theme::typography::TypeExt,
-    ui::theme::{palette, radius, space, typeface},
+    ui::theme::typography::{TextSize, TypeExt, Weight},
+    ui::theme::{palette, radius, size, space},
 };
 use gpui::{prelude::*, *};
 use std::rc::Rc;
@@ -72,9 +73,9 @@ impl RenderOnce for ChoiceCard {
                 IconName::Circle
             })
             .color(if selected {
-                p.accent_text
+                p.primary_text
             } else {
-                p.text_muted
+                p.subtle_foreground
             }),
         );
         div()
@@ -86,16 +87,16 @@ impl RenderOnce for ChoiceCard {
             .items_center()
             .gap(space::S12)
             .rounded(radius::MD)
-            .border(space::HAIRLINE)
-            .border_color(if selected { p.primary } else { p.line_subtle })
-            .bg(if selected { p.accent_tint } else { p.ctl_rest })
+            .border(size::HAIRLINE)
+            .border_color(if selected { p.primary } else { p.border })
+            .bg(if selected { p.selection } else { p.secondary })
             .cursor_pointer()
             .focusable()
             .tab_stop(true)
             .role(Role::RadioButton)
             .aria_label(label)
             .aria_selected(selected)
-            .when(!selected, |el| el.hover(move |s| s.bg(p.ctl_hover)))
+            .when(!selected, |el| el.hover(move |s| s.bg(p.accent)))
             .focus_visible(move |s| s.shadow(vec![focus_ring(&p)]))
             .child(mark)
             .child(
@@ -106,17 +107,18 @@ impl RenderOnce for ChoiceCard {
                     .flex_col()
                     .child(
                         div()
-                            .type_style(typeface::BODY_STRONG)
-                            .text_color(p.text_primary)
+                            .text(TextSize::Base)
+                            .weight(Weight::Semibold)
+                            .text_color(p.foreground)
                             .child(self.title),
                     )
                     .children(self.subtitle.map(|sub| {
                         div()
-                            .type_style(typeface::SMALL)
+                            .text(TextSize::Sm)
                             .text_color(if selected {
-                                p.accent_text
+                                p.primary_text
                             } else {
-                                p.text_muted
+                                p.subtle_foreground
                             })
                             .truncate()
                             .child(sub)
@@ -182,16 +184,16 @@ impl RenderOnce for ChoiceChip {
         };
         div()
             .id(self.id)
-            .h(space::CONTROL_HEIGHT)
+            .h(size::CONTROL_SM)
             .px(space::S12)
             .flex()
             .items_center()
             .justify_center()
             .gap(space::S6)
             .rounded(radius::MD)
-            .border(space::HAIRLINE)
-            .border_color(if selected { p.primary } else { p.line_subtle })
-            .bg(if selected { p.accent_tint } else { p.ctl_rest })
+            .border(size::HAIRLINE)
+            .border_color(if selected { p.primary } else { p.border })
+            .bg(if selected { p.selection } else { p.secondary })
             .cursor_pointer()
             .focusable()
             .tab_stop(true)
@@ -202,32 +204,33 @@ impl RenderOnce for ChoiceChip {
             })
             .aria_label(label)
             .aria_selected(selected)
-            .when(!selected, |el| el.hover(move |s| s.bg(p.ctl_hover)))
+            .when(!selected, |el| el.hover(move |s| s.bg(p.accent)))
             .focus_visible(move |s| s.shadow(vec![focus_ring(&p)]))
             .when(self.multi && selected, |el| {
                 el.pl(space::S8).child(
                     Icon::new(IconName::Check)
                         .size(space::S12)
-                        .color(p.accent_text),
+                        .color(p.primary_text),
                 )
             })
             .child(
                 div()
-                    .type_style(typeface::SMALL_MEDIUM)
+                    .text(TextSize::Sm)
+                    .weight(Weight::Medium)
                     .text_color(if selected {
-                        p.accent_text
+                        p.primary_text
                     } else {
-                        p.text_primary
+                        p.foreground
                     })
                     .child(self.label),
             )
             .children(self.count.map(|n| {
                 div()
-                    .type_style(typeface::SMALL)
+                    .text(TextSize::Sm)
                     .text_color(if selected {
-                        p.accent_text
+                        p.primary_text
                     } else {
-                        p.text_muted
+                        p.subtle_foreground
                     })
                     .child(n.to_string())
             }))
@@ -284,9 +287,6 @@ impl ChoiceTile {
     }
 }
 
-/// Fixed tile width so a row of tiles reads as a deliberate set.
-pub const TILE_WIDTH: Pixels = px(196.);
-
 impl RenderOnce for ChoiceTile {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let p = *palette(cx);
@@ -294,36 +294,36 @@ impl RenderOnce for ChoiceTile {
         let handler = self.on_click;
         let label: SharedString = format!("{}, {}", self.title, self.description).into();
         let glyph = div()
-            .size(space::TOOLBAR_CONTROL)
+            .size(size::TOOLBAR_CONTROL)
             .flex_none()
             .flex()
             .items_center()
             .justify_center()
             .rounded(radius::LG)
-            .bg(if selected { p.accent_tint } else { p.ctl_hover })
+            .bg(if selected { p.selection } else { p.accent })
             .child(Icon::new(self.icon).color(if selected {
-                p.accent_text
+                p.primary_text
             } else {
-                p.text_primary
+                p.foreground
             }));
         div()
             .id(self.id)
-            .w(TILE_WIDTH)
+            .w(CHOICE_TILE_WIDTH)
             .p(space::S12)
             .flex()
             .flex_col()
             .gap(space::S8)
             .rounded(radius::LG)
-            .border(space::HAIRLINE)
-            .border_color(if selected { p.primary } else { p.line_subtle })
-            .bg(if selected { p.accent_tint } else { p.ctl_rest })
+            .border(size::HAIRLINE)
+            .border_color(if selected { p.primary } else { p.border })
+            .bg(if selected { p.selection } else { p.secondary })
             .cursor_pointer()
             .focusable()
             .tab_stop(true)
             .role(Role::RadioButton)
             .aria_label(label)
             .aria_selected(selected)
-            .when(!selected, |el| el.hover(move |s| s.bg(p.ctl_hover)))
+            .when(!selected, |el| el.hover(move |s| s.bg(p.accent)))
             .focus_visible(move |s| s.shadow(vec![focus_ring(&p)]))
             .child(
                 div()
@@ -332,7 +332,7 @@ impl RenderOnce for ChoiceTile {
                     .justify_between()
                     .child(glyph)
                     .when(selected, |el| {
-                        el.child(Icon::new(IconName::CircleCheck).color(p.accent_text))
+                        el.child(Icon::new(IconName::CircleCheck).color(p.primary_text))
                     }),
             )
             .child(
@@ -342,27 +342,29 @@ impl RenderOnce for ChoiceTile {
                     .gap(space::S2)
                     .child(
                         div()
-                            .type_style(typeface::BODY_STRONG)
-                            .text_color(p.text_primary)
+                            .text(TextSize::Base)
+                            .weight(Weight::Semibold)
+                            .text_color(p.foreground)
                             .child(self.title),
                     )
                     .child(
                         div()
-                            .type_style(typeface::SMALL)
-                            .text_color(p.text_secondary)
+                            .text(TextSize::Sm)
+                            .text_color(p.muted_foreground)
                             .child(self.description),
                     ),
             )
             .children(self.meta.map(|meta| {
                 div()
                     .pt(space::S4)
-                    .border_t(space::HAIRLINE)
-                    .border_color(p.line_subtle)
-                    .type_style(typeface::CAPTION)
+                    .border_t(size::HAIRLINE)
+                    .border_color(p.border)
+                    .text(TextSize::Xs)
+                    .weight(Weight::Semibold)
                     .text_color(if selected {
-                        p.accent_text
+                        p.primary_text
                     } else {
-                        p.text_muted
+                        p.subtle_foreground
                     })
                     .child(meta)
             }))

@@ -6,6 +6,8 @@
 //! leave the tab order. Items keep their own roles and focus. Known gap: a
 //! focused item is not scrolled into view automatically, so keyboard users
 //! page with the buttons.
+use crate::ui::theme::layout::controls::CAROUSEL_EDGE_SLOP;
+use crate::ui::theme::transparent;
 use std::time::{Duration, Instant};
 
 use gpui::{prelude::*, *};
@@ -14,7 +16,7 @@ use crate::{
     ui::motion::{self, transition::COLUMN},
     ui::primitives::IconName,
     ui::primitives::button::Button,
-    ui::theme::{palette, space},
+    ui::theme::{layout, palette, size, space},
 };
 
 use super::section::header;
@@ -23,8 +25,6 @@ use super::section::header;
 const FADE_WIDTH: Pixels = space::S32;
 /// Fraction of the viewport a paging click scrolls.
 const PAGE_FRACTION: f32 = 0.8;
-/// Offsets within this distance of an end count as "at the end".
-const EDGE_SLOP: Pixels = px(1.0);
 
 #[derive(IntoElement)]
 pub struct Carousel {
@@ -49,8 +49,8 @@ impl Carousel {
             count: None,
             trailing: None,
             items: Vec::new(),
-            gap: space::GRID_GAP,
-            inset: space::GRID_INSET,
+            gap: layout::GRID_GAP,
+            inset: size::PAGE_INSET,
             edge: None,
             handle: None,
             paging: true,
@@ -110,12 +110,15 @@ fn overflow_edges(offset: Pixels, max: Pixels, measured: bool) -> (bool, bool) {
     if !measured {
         return (false, true);
     }
-    (offset < -EDGE_SLOP, max + offset > EDGE_SLOP)
+    (
+        offset < -CAROUSEL_EDGE_SLOP,
+        max + offset > CAROUSEL_EDGE_SLOP,
+    )
 }
 
 /// Scroll offset a paging click moves to, clamped to the scrollable range.
 fn page_target(offset: Pixels, viewport: Pixels, direction: f32, max: Pixels) -> Pixels {
-    (offset + viewport * PAGE_FRACTION * direction).clamp(-max, px(0.0))
+    (offset + viewport * PAGE_FRACTION * direction).clamp(-max, Pixels::ZERO)
 }
 
 /// An in-flight animated page. `last` is the offset we wrote last frame: if
@@ -140,7 +143,7 @@ fn animate_page(
         return;
     };
     let mut offset = handle.offset();
-    if (offset.x - anim.last).abs() > px(0.5) {
+    if (offset.x - anim.last).abs() > size::SUBPIXEL {
         state.update(cx, |state, _| *state = None);
         return;
     }
@@ -169,9 +172,9 @@ fn animate_page(
 
 fn fade(color: Hsla, leading: bool) -> Div {
     let (from, to) = if leading {
-        (color, color.opacity(0.0))
+        (color, transparent(color))
     } else {
-        (color.opacity(0.0), color)
+        (transparent(color), color)
     };
     div()
         .absolute()
@@ -204,7 +207,7 @@ impl RenderOnce for Carousel {
                 .read(cx)
                 .clone()
         });
-        let measured = handle.bounds().size.width > px(0.0);
+        let measured = handle.bounds().size.width > Pixels::ZERO;
         if !measured {
             window.request_animation_frame();
         }
@@ -262,7 +265,7 @@ impl RenderOnce for Carousel {
                     .into_any_element(),
             );
         }
-        let edge = self.edge.unwrap_or(p.bg_canvas);
+        let edge = self.edge.unwrap_or(p.background);
         div()
             .w_full()
             .min_w_0()

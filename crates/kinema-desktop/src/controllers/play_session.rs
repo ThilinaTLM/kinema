@@ -16,8 +16,8 @@ use crate::{
     ui::primitives::alert::{Alert, AlertTone},
     ui::primitives::button::{Button, ButtonSize, ButtonVariant},
     ui::primitives::progress::Progress,
-    ui::theme::typography::TypeExt,
-    ui::theme::{self, space as s, typeface as t},
+    ui::theme::typography::{TextSize, TypeExt, Weight},
+    ui::theme::{self, size, space as s},
 };
 use gpui::{prelude::*, *};
 use kinema_core::sources::{
@@ -101,18 +101,19 @@ impl PlaySession {
     fn step(&self, label: String, state: StepState, cx: &App) -> Div {
         let p = *theme::palette(cx);
         let (icon, ink, text) = match state {
-            StepState::Done => (IconName::CircleCheck, p.status_ok, p.text_secondary),
-            StepState::Now => (IconName::CircleDot, p.accent_text, p.text_primary),
-            StepState::Later => (IconName::Circle, p.text_muted, p.text_muted),
+            StepState::Done => (IconName::CircleCheck, p.success, p.muted_foreground),
+            StepState::Now => (IconName::CircleDot, p.primary_text, p.foreground),
+            StepState::Later => (IconName::Circle, p.subtle_foreground, p.subtle_foreground),
         };
         div()
             .flex()
             .items_center()
             .gap(s::S8)
-            .type_style(if state == StepState::Now {
-                t::SMALL_MEDIUM
+            .text(TextSize::Sm)
+            .weight(if state == StepState::Now {
+                Weight::Medium
             } else {
-                t::SMALL
+                Weight::Regular
             })
             .text_color(text)
             .child(Icon::new(icon).size(s::S12 + s::S2).color(ink))
@@ -183,7 +184,7 @@ impl Render for PlaySession {
                     )
                     .child(Progress::indeterminate("prepare-progress"))
                     .child(button_slot(
-                        s::CONTROL_HEIGHT_LARGE,
+                        size::CONTROL,
                         Button::new("play-cancel", "Cancel")
                             .size(ButtonSize::Md)
                             .on_click(cx.listener(|this, _, _, cx| this.dismiss(cx))),
@@ -216,7 +217,7 @@ impl Render for PlaySession {
                         .gap(s::S8)
                         .child(
                             div().flex_1().child(button_slot(
-                                s::CONTROL_HEIGHT_LARGE,
+                                size::CONTROL,
                                 Button::new("play-retry", "Try again")
                                     .size(ButtonSize::Md)
                                     .icon(IconName::Refresh)
@@ -227,7 +228,7 @@ impl Render for PlaySession {
                         )
                         .child(
                             div().flex_1().child(button_slot(
-                                s::CONTROL_HEIGHT_LARGE,
+                                size::CONTROL,
                                 Button::new("play-dismiss", "Dismiss")
                                     .size(ButtonSize::Md)
                                     .variant(ButtonVariant::Ghost)
@@ -251,7 +252,7 @@ impl Render for PlaySession {
                             .gap(s::S8)
                             .child(
                                 div().flex_1().child(button_slot(
-                                    s::CONTROL_HEIGHT_LARGE,
+                                    size::CONTROL,
                                     Button::new("play-settings", "Open Settings")
                                         .size(ButtonSize::Md)
                                         .icon(IconName::Settings)
@@ -264,7 +265,7 @@ impl Render for PlaySession {
                             )
                             .child(
                                 div().flex_1().child(button_slot(
-                                    s::CONTROL_HEIGHT_LARGE,
+                                    size::CONTROL,
                                     Button::new("play-dismiss", "Dismiss")
                                         .size(ButtonSize::Md)
                                         .variant(ButtonVariant::Ghost)

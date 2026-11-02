@@ -72,37 +72,6 @@ pub struct Palette {
     /// The one allowed addition: violet hue of the Browse brand wash (same in
     /// both themes; amber is `primary`).
     pub brand_wash: Hsla,
-
-    // --- TEMP: removed in step 5 (old names, kept so the tree compiles) -------
-    // Each is an alias of a new token (kept in sync by `sync_legacy`) or, where
-    // noted, a distinct old value.
-    pub bg_canvas: Hsla,      // TEMP: removed in step 5 -> background
-    pub bg_surface: Hsla,     // TEMP: removed in step 5 -> surface
-    pub bg_raised: Hsla,      // TEMP: removed in step 5 -> card
-    pub bg_placeholder: Hsla, // TEMP: removed in step 5 -> muted
-    pub bg_overlay: Hsla,     // TEMP: removed in step 5 -> popover
-    pub line_subtle: Hsla,    // TEMP: removed in step 5 -> border
-    pub line_hairline: Hsla,  // TEMP: removed in step 5 -> border (old distinct value)
-    pub line_control: Hsla,   // TEMP: removed in step 5 -> input
-    pub backdrop_scrim: Hsla, // TEMP: removed in step 5 -> overlay (old distinct value)
-    pub dialog_scrim: Hsla,   // TEMP: removed in step 5 -> overlay
-    pub ctl_rest: Hsla,       // TEMP: removed in step 5 -> secondary
-    pub ctl_hover: Hsla,      // TEMP: removed in step 5 -> accent
-    pub ctl_pressed: Hsla,    // TEMP: removed in step 5 -> pressed(secondary)
-    pub text_primary: Hsla,   // TEMP: removed in step 5 -> foreground
-    pub text_secondary: Hsla, // TEMP: removed in step 5 -> muted_foreground
-    pub text_muted: Hsla,     // TEMP: removed in step 5 -> subtle_foreground
-    pub accent_hover: Hsla,   // TEMP: removed in step 5 -> primary_hover()
-    pub accent_pressed: Hsla, // TEMP: removed in step 5 -> primary_pressed()
-    pub on_accent: Hsla,      // TEMP: removed in step 5 -> primary_foreground
-    pub accent_text: Hsla,    // TEMP: removed in step 5 -> primary_text
-    pub accent_tint: Hsla,    // TEMP: removed in step 5 -> selection
-    pub focus_ring: Hsla,     // TEMP: removed in step 5 -> ring
-    pub status_ok: Hsla,      // TEMP: removed in step 5 -> success
-    pub status_warn: Hsla,    // TEMP: removed in step 5 -> warning
-    pub status_error: Hsla,   // TEMP: removed in step 5 -> destructive
-    pub scrim_max: Hsla,      // TEMP: removed in step 5 -> scrim
-    pub chip_over_art: Hsla,  // TEMP: removed in step 5 -> chip_on_art
 }
 
 fn c(hex: u32) -> Hsla {
@@ -113,6 +82,12 @@ fn c(hex: u32) -> Hsla {
 fn ca(hex_rgba: u32) -> Hsla {
     let color: Rgba = rgba(hex_rgba);
     color.into()
+}
+
+/// Same hue with zero alpha: the transparent end of a gradient or fade, so the
+/// colour does not drift through grey.
+pub fn transparent(color: Hsla) -> Hsla {
+    color.opacity(0.0)
 }
 
 /// Mix `base` toward `toward` by `amount` (0..=1) in sRGB; `base` alpha is kept.
@@ -164,11 +139,7 @@ impl Palette {
             rating: c(0xF5C451),
             rating_on_art: c(0xF5C451),
             brand_wash: Self::violet(),
-            line_hairline: c(0x25282E),
-            backdrop_scrim: ca(0x0B0C0EB8),
-            ..Self::blank()
         }
-        .sync_legacy()
     }
 
     pub fn light() -> Self {
@@ -201,109 +172,13 @@ impl Palette {
             rating: c(0x8A5D00),
             rating_on_art: c(0xF5C451),
             brand_wash: Self::violet(),
-            line_hairline: c(0xDCDDE3),
-            backdrop_scrim: ca(0x0B0C0E99),
-            ..Self::blank()
         }
-        .sync_legacy()
     }
 
     /// The palette of the cinema surface (player window): always dark,
     /// whatever the app theme.
     pub fn cinema() -> Self {
         Self::dark()
-    }
-
-    /// Placeholder for fields that `sync_legacy` or the caller fills in.
-    fn blank() -> Self {
-        let z = Hsla::transparent_black();
-        Self {
-            background: z,
-            surface: z,
-            card: z,
-            popover: z,
-            muted: z,
-            foreground: z,
-            muted_foreground: z,
-            subtle_foreground: z,
-            primary_text: z,
-            primary: z,
-            primary_foreground: z,
-            secondary: z,
-            accent: z,
-            selection: z,
-            border: z,
-            input: z,
-            ring: z,
-            success: z,
-            warning: z,
-            destructive: z,
-            shadow: z,
-            overlay: z,
-            scrim: z,
-            chip_on_art: z,
-            poster_edge: z,
-            rating: z,
-            rating_on_art: z,
-            brand_wash: z,
-            bg_canvas: z,
-            bg_surface: z,
-            bg_raised: z,
-            bg_placeholder: z,
-            bg_overlay: z,
-            line_subtle: z,
-            line_hairline: z,
-            line_control: z,
-            backdrop_scrim: z,
-            dialog_scrim: z,
-            ctl_rest: z,
-            ctl_hover: z,
-            ctl_pressed: z,
-            text_primary: z,
-            text_secondary: z,
-            text_muted: z,
-            accent_hover: z,
-            accent_pressed: z,
-            on_accent: z,
-            accent_text: z,
-            accent_tint: z,
-            focus_ring: z,
-            status_ok: z,
-            status_warn: z,
-            status_error: z,
-            scrim_max: z,
-            chip_over_art: z,
-        }
-    }
-
-    /// TEMP: removed in step 5. Refresh the old-name aliases from the new tokens.
-    fn sync_legacy(mut self) -> Self {
-        self.bg_canvas = self.background;
-        self.bg_surface = self.surface;
-        self.bg_raised = self.card;
-        self.bg_placeholder = self.muted;
-        self.bg_overlay = self.popover;
-        self.line_subtle = self.border;
-        self.line_control = self.input;
-        self.dialog_scrim = self.overlay;
-        self.ctl_rest = self.secondary;
-        self.ctl_hover = self.accent;
-        self.ctl_pressed = self.pressed(self.secondary);
-        self.text_primary = self.foreground;
-        self.text_secondary = self.muted_foreground;
-        self.text_muted = self.subtle_foreground;
-        self.accent_hover = self.primary_hover();
-        self.accent_pressed = self.primary_pressed();
-        self.on_accent = self.primary_foreground;
-        self.accent_text = self.primary_text;
-        self.accent_tint = self.selection;
-        self.focus_ring = self.ring;
-        self.status_ok = self.success;
-        self.status_warn = self.warning;
-        self.status_error = self.destructive;
-        self.scrim_max = self.scrim;
-        self.chip_over_art = self.chip_on_art;
-        self
     }
 
     /// Hover state of a neutral fill: `base` mixed toward `foreground`.
@@ -347,11 +222,6 @@ impl Palette {
         )
     }
 
-    /// TEMP: removed in step 5 -> `rating_on_art` field.
-    pub fn rating_over_art(&self) -> Hsla {
-        self.rating_on_art
-    }
-
     /// Derive restrained background washes and a selection fill from artwork.
     ///
     /// `None` returns this palette unchanged. `mode` must match the palette's
@@ -389,7 +259,7 @@ impl Palette {
             },
             a: self.selection.a,
         };
-        result.sync_legacy()
+        result
     }
 }
 
@@ -706,9 +576,6 @@ mod tests {
                             });
                             assert_eq!(wash.a, 1.0);
                         }
-                        // Legacy aliases follow the washed surfaces.
-                        assert_eq!(tinted.bg_canvas, tinted.background);
-                        assert_eq!(tinted.accent_tint, tinted.selection);
                     }
                 }
             }

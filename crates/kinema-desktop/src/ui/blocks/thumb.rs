@@ -5,11 +5,12 @@
 //! GPUI has no image blur, so a Loading frame with a fallback shows the
 //! fallback dimmed under the pulsing skeleton. Reduced motion makes the pulse
 //! static. Overlays (badges, buttons) are added with [`Thumb::overlay`].
+use crate::ui::theme::opacity;
 use crate::{
     ui::motion::{self, AnimateExt},
     ui::theme::motion::timing,
-    ui::theme::typography::TypeExt,
-    ui::theme::{Palette, palette, space, typeface},
+    ui::theme::typography::{TextSize, TypeExt, Weight},
+    ui::theme::{Palette, palette, space},
 };
 use gpui::{prelude::*, *};
 use std::sync::Arc;
@@ -43,19 +44,12 @@ pub struct ThumbLayers<'a, T> {
     pub label: Option<&'a str>,
 }
 
-/// Darkening applied to a substitute image.
-pub const FALLBACK_DIM: f32 = 0.4;
-/// Darkening applied to a substitute image while the real one loads.
-pub const LOADING_DIM: f32 = 0.55;
-/// Extra darkening for a muted (e.g. watched) frame.
-pub const MUTED_DIM: f32 = 0.3;
-
 impl<T> ThumbState<T> {
     pub fn layers(&self) -> ThumbLayers<'_, T> {
         let (image, dim, skeleton, label) = match self {
             Self::Ready(image) => (Some(image), 0., false, None),
-            Self::Loading { fallback } => (fallback.as_ref(), LOADING_DIM, true, None),
-            Self::Fallback(image) => (Some(image), FALLBACK_DIM, false, None),
+            Self::Loading { fallback } => (fallback.as_ref(), opacity::DIM_LOADING, true, None),
+            Self::Fallback(image) => (Some(image), opacity::DIM_FALLBACK, false, None),
             Self::Missing(label) => (
                 None,
                 0.,
@@ -78,9 +72,6 @@ pub fn pulse_opacity(t: f32) -> f32 {
     let w = 1. - (2. * t.clamp(0., 1.) - 1.).abs();
     0.15 + 0.5 * w * w * (3. - 2. * w)
 }
-
-/// Opacity of the skeleton sheen when motion is reduced.
-pub const STATIC_PULSE: f32 = 0.35;
 
 #[derive(IntoElement)]
 pub struct Thumb {
@@ -128,7 +119,7 @@ impl RenderOnce for Thumb {
         let layers = self.state.layers();
         let dim = (layers.dim.0
             + if self.muted && layers.image.is_some() {
-                MUTED_DIM
+                opacity::DIM_MUTED
             } else {
                 0.
             })
@@ -138,7 +129,7 @@ impl RenderOnce for Thumb {
             .flex_none()
             .overflow_hidden()
             .rounded(self.radius)
-            .bg(p.bg_placeholder)
+            .bg(p.muted)
             .aspect_ratio(self.ratio);
         frame = match self.width {
             Some(width) => frame.w(width),
@@ -159,12 +150,12 @@ impl RenderOnce for Thumb {
             );
         }
         if dim > 0. {
-            frame = frame.child(div().absolute().inset_0().bg(ink.bg_canvas.opacity(dim)));
+            frame = frame.child(div().absolute().inset_0().bg(ink.background.opacity(dim)));
         }
         if layers.skeleton {
-            let sheen = div().absolute().inset_0().bg(p.ctl_hover);
+            let sheen = div().absolute().inset_0().bg(p.accent);
             frame = frame.child(if motion::reduced(cx) {
-                sheen.opacity(STATIC_PULSE).into_any_element()
+                sheen.opacity(opacity::STATIC_PULSE).into_any_element()
             } else {
                 sheen.animate_loop("thumb-pulse", timing::PULSE_PERIOD, cx, |el, t| {
                     el.opacity(pulse_opacity(t))
@@ -180,8 +171,9 @@ impl RenderOnce for Thumb {
                     .items_center()
                     .justify_center()
                     .px(space::S8)
-                    .type_style(typeface::BODY_STRONG)
-                    .text_color(p.text_muted)
+                    .text(TextSize::Base)
+                    .weight(Weight::Semibold)
+                    .text_color(p.subtle_foreground)
                     .child(label.to_owned()),
             );
         }
@@ -209,14 +201,17 @@ mod tests {
     fn loading_with_a_fallback_dims_it_under_the_skeleton() {
         let l = S::Loading { fallback: Some(2) }.layers();
         assert_eq!(l.image, Some(&2));
-        assert_eq!(l.dim, Dim(LOADING_DIM));
+        assert_eq!(l.dim, Dim(opacity::DIM_LOADING));
         assert!(l.skeleton && l.label.is_none());
     }
 
     #[test]
     fn loading_without_a_fallback_is_a_plain_skeleton() {
         let l = S::Loading { fallback: None }.layers();
-        assert_eq!((l.image, l.skeleton, l.dim), (None, true, Dim(LOADING_DIM)));
+        assert_eq!(
+            (l.image, l.skeleton, l.dim),
+            (None, true, Dim(opacity::DIM_LOADING))
+        );
     }
 
     #[test]
@@ -224,7 +219,7 @@ mod tests {
         let l = S::Fallback(3).layers();
         assert_eq!(
             (l.image, l.dim, l.skeleton),
-            (Some(&3), Dim(FALLBACK_DIM), false)
+            (Some(&3), Dim(opacity::DIM_FALLBACK), false)
         );
     }
 

@@ -4,7 +4,7 @@
 
 use gpui::{App, Hsla, IntoElement, Pixels, RenderOnce, Styled, Window, svg};
 
-use crate::ui::theme::space;
+use crate::ui::theme::size;
 
 /// Every icon used by v3 screens. Add a variant only together with its SVG.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -193,7 +193,7 @@ impl Icon {
     pub fn new(name: IconName) -> Self {
         Self {
             name,
-            size: space::ICON,
+            size: size::ICON,
             color: None,
         }
     }
@@ -213,7 +213,7 @@ impl RenderOnce for Icon {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let color = self
             .color
-            .unwrap_or_else(|| crate::ui::theme::palette(cx).text_secondary);
+            .unwrap_or_else(|| crate::ui::theme::palette(cx).muted_foreground);
         svg()
             .path(self.name.path())
             .size(self.size)

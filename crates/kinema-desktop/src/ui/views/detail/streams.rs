@@ -8,21 +8,17 @@ use super::streams_page::{AccountPresence, service_name};
 use super::*;
 use crate::controllers::play_session::{button_slot, player_label};
 use crate::metadata_bridge::SourceSet;
+use crate::ui::theme::layout::detail as layout_detail;
+use crate::ui::theme::layout::detail::{
+    QUALITY_TILE_HEIGHT, QUALITY_TILE_WIDTH, STREAMS_DOCK_CLEARANCE, STREAMS_DOCK_SESSION_WIDTH,
+};
+use crate::ui::theme::typography::{TextSize, TypeExt, Weight};
 use crate::{
-    ui::blocks::HEALTHY_SEEDERS,
-    ui::blocks::StreamRow,
-    ui::blocks::ViewState,
-    ui::blocks::quality_tile::{self, QualityTile},
-    ui::blocks::stat_tile::StatTile,
-    ui::primitives::segmented::Segmented,
-    ui::primitives::tag_list::TagList,
+    ui::blocks::HEALTHY_SEEDERS, ui::blocks::StreamRow, ui::blocks::ViewState,
+    ui::blocks::quality_tile::QualityTile, ui::blocks::stat_tile::StatTile,
+    ui::primitives::segmented::Segmented, ui::primitives::tag_list::TagList,
 };
 use kinema_core::sources::{DebridKind, InfoHash, parse_release_tags};
-
-/// Bottom padding that keeps the last row clear of the floating play dock.
-const DOCK_CLEARANCE: Pixels = px(96.);
-/// Fixed width of the session column inside the play dock.
-const DOCK_SESSION_WIDTH: Pixels = px(340.);
 
 pub(super) fn stream_skeleton() -> AnyElement {
     div()
@@ -33,15 +29,15 @@ pub(super) fn stream_skeleton() -> AnyElement {
         .children((0..geometry::STREAM_SKELETON_ROWS).map(|_| {
             div()
                 .w_full()
-                .h(s::ROW_TWO_LINE)
+                .h(size::ROW_TALL)
                 .px(s::S12)
                 .flex()
                 .items_center()
                 .gap(s::S16)
                 .child(
                     Skeleton::line()
-                        .w(quality_tile::WIDTH)
-                        .h(quality_tile::HEIGHT),
+                        .w(QUALITY_TILE_WIDTH)
+                        .h(QUALITY_TILE_HEIGHT),
                 )
                 .child(div().flex_1().child(Skeleton::line().w(relative(0.7))))
         }))
@@ -138,8 +134,8 @@ impl Detail {
                 div()
                     .px(s::S12)
                     .pt(s::S8)
-                    .type_style(t::SMALL)
-                    .text_color(p.text_muted)
+                    .text(TextSize::Sm)
+                    .text_color(p.subtle_foreground)
                     .child(format!(
                         "{} more streams hidden by the provider’s limit",
                         sources.omitted
@@ -345,8 +341,9 @@ impl Detail {
             .unwrap_or_else(|| self.saved_service(cx));
         if self.stream_page.accounts.len() < 2 {
             return div()
-                .type_style(t::SMALL_MEDIUM)
-                .text_color(p.text_secondary)
+                .text(TextSize::Sm)
+                .weight(Weight::Medium)
+                .text_color(p.muted_foreground)
                 .child(service_name(current))
                 .into_any_element();
         }
@@ -377,7 +374,7 @@ impl Detail {
             .flex_col()
             .gap(s::S8)
             .child(button_slot(
-                s::CONTROL_HEIGHT_LARGE + s::S4,
+                size::CONTROL + s::S4,
                 Button::new(
                     "streams-drawer-play",
                     match resume {
@@ -394,7 +391,7 @@ impl Detail {
             ));
         if resume.is_some() {
             actions = actions.child(button_slot(
-                s::CONTROL_HEIGHT,
+                size::CONTROL_SM,
                 Button::new("streams-drawer-restart", "Play from beginning")
                     .variant(ButtonVariant::Ghost)
                     .on_click(
@@ -403,12 +400,16 @@ impl Detail {
             ));
         }
         if let (Some(point), None) = (saved, resume) {
-            actions = actions.child(div().type_style(t::CAPTION).text_color(p.text_muted).child(
-                format!(
-                    "Saved at {}. External players start from the beginning.",
-                    point.timestamp()
-                ),
-            ));
+            actions = actions.child(
+                div()
+                    .text(TextSize::Xs)
+                    .weight(Weight::Semibold)
+                    .text_color(p.subtle_foreground)
+                    .child(format!(
+                        "Saved at {}. External players start from the beginning.",
+                        point.timestamp()
+                    )),
+            );
         }
         actions
     }
@@ -427,13 +428,13 @@ impl Detail {
                 .pr(s::S4)
                 .py(s::S4)
                 .rounded(radius::LG)
-                .bg(p.bg_raised)
+                .bg(p.card)
                 .flex()
                 .items_center()
                 .gap(s::S8)
-                .type_style(t::SMALL)
-                .text_color(p.text_secondary)
-                .child(Icon::new(IconName::Info).color(p.text_muted))
+                .text(TextSize::Sm)
+                .text_color(p.muted_foreground)
+                .child(Icon::new(IconName::Info).color(p.subtle_foreground))
                 .child(div().flex_1().child("Preparing another stream"))
                 .child(
                     Button::new("streams-other-cancel", "Cancel")
@@ -470,8 +471,9 @@ impl Detail {
                 .gap(s::S12)
                 .child(
                     div()
-                        .type_style(t::CAPTION)
-                        .text_color(p.text_muted)
+                        .text(TextSize::Xs)
+                        .weight(Weight::Semibold)
+                        .text_color(p.subtle_foreground)
                         .child("Play with"),
                 )
                 .child(self.service_choice(cx)),
@@ -480,8 +482,9 @@ impl Detail {
         if let Some(player) = player_label(self.coordinator.read(cx).settings.as_ref()) {
             footer = footer.child(
                 div()
-                    .type_style(t::CAPTION)
-                    .text_color(p.text_muted)
+                    .text(TextSize::Xs)
+                    .weight(Weight::Semibold)
+                    .text_color(p.subtle_foreground)
                     .child(format!("Opens in {player}")),
             );
         }
@@ -502,8 +505,9 @@ impl Detail {
         let badges = stream_badges(candidate);
         let section = |title: &'static str| {
             div()
-                .type_style(t::CAPTION)
-                .text_color(p.text_muted)
+                .text(TextSize::Xs)
+                .weight(Weight::Semibold)
+                .text_color(p.subtle_foreground)
                 .child(title)
         };
 
@@ -537,15 +541,16 @@ impl Detail {
             .child(chips)
             .child(
                 div()
-                    .type_style(t::HEADING)
-                    .text_color(p.text_primary)
+                    .text(TextSize::Lg)
+                    .weight(Weight::Semibold)
+                    .text_color(p.foreground)
                     .clamp_lines(3)
                     .child(tags.release_name),
             )
             .child(
                 div()
-                    .type_style(t::SMALL)
-                    .text_color(p.text_muted)
+                    .text(TextSize::Sm)
+                    .text_color(p.subtle_foreground)
                     .child(origin.join(" \u{b7} ")),
             );
 
@@ -553,7 +558,7 @@ impl Detail {
         let healthy = candidate.seeders.is_some_and(|n| n >= HEALTHY_SEEDERS);
         let mut seeders = StatTile::new("Seeders", seeders);
         if healthy {
-            seeders = seeders.ink(p.status_ok);
+            seeders = seeders.ink(p.success);
         }
         let stats = div()
             .w_full()
@@ -590,13 +595,13 @@ impl Detail {
                 };
                 accounts = accounts.child(
                     div()
-                        .h(s::CONTROL_HEIGHT)
+                        .h(size::CONTROL_SM)
                         .flex()
                         .items_center()
                         .justify_between()
                         .gap(s::S8)
-                        .type_style(t::BODY)
-                        .text_color(p.text_primary)
+                        .text(TextSize::Base)
+                        .text_color(p.foreground)
                         .child(service_name(*kind))
                         .child(mark),
                 );
@@ -604,8 +609,9 @@ impl Detail {
             details = details.child(
                 accounts.child(
                     div()
-                        .type_style(t::CAPTION)
-                        .text_color(p.text_muted)
+                        .text(TextSize::Xs)
+                        .weight(Weight::Semibold)
+                        .text_color(p.subtle_foreground)
                         .child("Account presence only. This is not a cache or readiness check."),
                 ),
             );
@@ -615,7 +621,7 @@ impl Detail {
         if let Some(file) = &candidate.torrent.filename {
             let open = self.stream_page.file_detail_open;
             let mut files = div().flex().flex_col().gap(s::S6).child(
-                div().h(s::CONTROL_HEIGHT).flex_none().flex().child(
+                div().h(size::CONTROL_SM).flex_none().flex().child(
                     Button::new(
                         "streams-drawer-file",
                         if open {
@@ -642,9 +648,9 @@ impl Detail {
                         .px(s::S12 - s::S2)
                         .py(s::S8)
                         .rounded(radius::MD)
-                        .bg(p.bg_raised)
-                        .type_style(t::SMALL)
-                        .text_color(p.text_secondary)
+                        .bg(p.card)
+                        .text(TextSize::Sm)
+                        .text_color(p.muted_foreground)
                         .child(file.clone()),
                 );
             }
@@ -658,9 +664,9 @@ impl Detail {
             .flex()
             .flex_col()
             .rounded(radius::XL)
-            .bg(p.bg_surface)
-            .border(s::HAIRLINE)
-            .border_color(p.line_subtle)
+            .bg(p.surface)
+            .border(size::HAIRLINE)
+            .border_color(p.border)
             .shadow(theme::elevation::sm(&p))
             .overflow_hidden()
             .child(details)
@@ -670,8 +676,8 @@ impl Detail {
                     .px(s::S20)
                     .pt(s::S16)
                     .pb(s::S20)
-                    .border_t(s::HAIRLINE)
-                    .border_color(p.line_hairline)
+                    .border_t(size::HAIRLINE)
+                    .border_color(p.border)
                     .child(self.play_footer(cx)),
             )
     }
@@ -694,8 +700,8 @@ impl Detail {
             .child(
                 div()
                     .clamp_lines(1)
-                    .type_style(t::SMALL)
-                    .text_color(p.text_muted)
+                    .text(TextSize::Sm)
+                    .text_color(p.subtle_foreground)
                     .child(stream_summary(candidate, provider)),
             )
             .children(self.account_marks(&candidate.torrent.hash));
@@ -705,7 +711,7 @@ impl Detail {
         if let Some(session) = self.selected_session() {
             trailing.push(
                 div()
-                    .w(DOCK_SESSION_WIDTH)
+                    .w(STREAMS_DOCK_SESSION_WIDTH)
                     .flex_none()
                     .child(session)
                     .into_any_element(),
@@ -714,7 +720,12 @@ impl Detail {
             let resume =
                 self.resume_offered(self.episode.as_ref().map(|e| (e.season, e.number)), cx);
             if let Some(banner) = self.other_session_banner(cx) {
-                trailing.push(banner.w(px(260.)).flex_none().into_any_element());
+                trailing.push(
+                    banner
+                        .w(layout_detail::STREAMS_BANNER_WIDTH)
+                        .flex_none()
+                        .into_any_element(),
+                );
             }
             trailing.push(
                 div()
@@ -754,15 +765,15 @@ impl Detail {
             .items_center()
             .gap(s::S12 + s::S2)
             .rounded(radius::XL)
-            .bg(p.bg_overlay)
-            .border(s::HAIRLINE)
-            .border_color(p.line_subtle)
+            .bg(p.popover)
+            .border(size::HAIRLINE)
+            .border_color(p.border)
             .shadow(theme::elevation::xl(&p))
             .child(quality_tile(candidate))
             .child(
                 div()
                     .flex_1()
-                    .w_0()
+                    .w(Pixels::ZERO)
                     .min_w_0()
                     .overflow_hidden()
                     .flex()
@@ -772,8 +783,9 @@ impl Detail {
                         div()
                             .w_full()
                             .min_w_0()
-                            .type_style(t::BODY_STRONG)
-                            .text_color(p.text_primary)
+                            .text(TextSize::Base)
+                            .weight(Weight::Semibold)
+                            .text_color(p.foreground)
                             .clamp_lines(1)
                             .child(release),
                     )
@@ -786,7 +798,11 @@ impl Detail {
 
 /// Bottom padding for the list when the dock floats over it.
 pub(super) fn dock_clearance(narrow: bool) -> Pixels {
-    if narrow { DOCK_CLEARANCE } else { s::S24 }
+    if narrow {
+        STREAMS_DOCK_CLEARANCE
+    } else {
+        s::S24
+    }
 }
 
 #[cfg(test)]

@@ -8,8 +8,8 @@
 //! not told the background is inert. Focus rings come from the controls inside.
 use crate::{
     ui::motion::{AnimateExt, Presence, transition::SHEET},
-    ui::theme::typography::TypeExt,
-    ui::theme::{elevation, palette, radius, space, typeface},
+    ui::theme::typography::{TextSize, TypeExt, Weight},
+    ui::theme::{elevation, palette, radius, size, space},
 };
 use gpui::{prelude::*, *};
 use std::rc::Rc;
@@ -95,12 +95,12 @@ impl RenderOnce for Sheet {
         let handler = self.dismiss;
         let panel = div()
             .relative()
-            .w(space::SHEET_WIDTH)
+            .w(size::SHEET_WIDTH)
             .max_w_full()
-            .bg(p.bg_overlay)
+            .bg(p.popover)
             .rounded(radius::XL)
-            .border(space::HAIRLINE)
-            .border_color(p.line_subtle)
+            .border(size::HAIRLINE)
+            .border_color(p.border)
             .shadow(elevation::xl(&p))
             .p(space::S24)
             .flex()
@@ -108,14 +108,15 @@ impl RenderOnce for Sheet {
             .gap(space::S16)
             .child(
                 div()
-                    .type_style(typeface::TITLE)
-                    .text_color(p.text_primary)
+                    .text(TextSize::Xl)
+                    .weight(Weight::Semibold)
+                    .text_color(p.foreground)
                     .child(self.title.clone()),
             )
             .child(
                 div()
-                    .type_style(typeface::BODY)
-                    .text_color(p.text_primary)
+                    .text(TextSize::Base)
+                    .text_color(p.foreground)
                     .flex()
                     .flex_col()
                     .gap(space::S12)
@@ -133,10 +134,10 @@ impl RenderOnce for Sheet {
                     .id("sheet-end")
                     .track_focus(&end)
                     .tab_stop(false)
-                    .size_0(),
+                    .size(Pixels::ZERO),
             );
         let presence = state.read(cx).presence.clone();
-        let scrim = div().absolute().inset_0().bg(p.dialog_scrim);
+        let scrim = div().absolute().inset_0().bg(p.overlay);
         // The owner removes the sheet to dismiss it, so only the enter plays.
         let (panel, scrim) = (
             presence.read(cx).animate(panel, "sheet-open", cx),

@@ -1,13 +1,10 @@
 //! Pure presentation policy for the detail overview: grouped facts, the "At a
 //! glance" rows, the hero meta line, and responsive layout decisions. Nothing
 //! here touches GPUI, so it is unit-tested directly.
+use crate::ui::theme::layout::{breakpoints, detail};
 use gpui::{Pixels, px};
 use kinema_core::catalog::TitleFacts;
 
-/// Below this window width the glance panel moves under the story.
-pub(super) const GLANCE_STACK_BELOW: f32 = 1100.;
-/// Minimum width of a facts card; cards share the row equally.
-pub(super) const FACT_CARD_MIN: Pixels = px(260.);
 /// Cast rows shown before "Show all N".
 pub(super) const CAST_ROWS_COLLAPSED: usize = 2;
 
@@ -19,20 +16,25 @@ pub(super) struct HeroLayout {
     pub glance: Pixels,
     pub stack_glance: bool,
 }
-/// Below this window width the Watch and Library toggles become icon-only.
-pub(super) const COMPACT_ACTIONS_BELOW: f32 = 900.;
 pub(super) fn compact_actions(viewport: Pixels) -> bool {
-    f32::from(viewport) < COMPACT_ACTIONS_BELOW
+    viewport < breakpoints::COMPACT
 }
 /// Poster 160–240, glance 280–380 (both ~14 % / 24 % of the window), overview
 /// measure capped at 880.
 pub(super) fn hero_layout(viewport: Pixels) -> HeroLayout {
     let w = f32::from(viewport);
     HeroLayout {
-        poster: px((w * 0.14).clamp(160., 240.).round()),
-        overview_max: px(880.),
-        glance: px((w * 0.24).clamp(280., 380.).round()),
-        stack_glance: w < GLANCE_STACK_BELOW,
+        poster: px((w * detail::HERO_POSTER_FRACTION)
+            .clamp(
+                f32::from(detail::HERO_POSTER_MIN),
+                f32::from(detail::HERO_POSTER_MAX),
+            )
+            .round()),
+        overview_max: detail::OVERVIEW_MAX_WIDTH,
+        glance: px((w * detail::GLANCE_FRACTION)
+            .clamp(f32::from(detail::GLANCE_MIN), f32::from(detail::GLANCE_MAX))
+            .round()),
+        stack_glance: viewport < breakpoints::WIDE,
     }
 }
 
@@ -597,8 +599,17 @@ mod tests {
     #[test]
     fn fact_cards_share_the_row_and_wrap_when_narrow() {
         let gap = px(16.);
-        assert_eq!(fact_card_max(px(2300.), 3, FACT_CARD_MIN, gap), px(756.));
-        assert_eq!(fact_card_max(px(700.), 3, FACT_CARD_MIN, gap), px(260.));
-        assert_eq!(fact_card_max(px(700.), 0, FACT_CARD_MIN, gap), px(700.));
+        assert_eq!(
+            fact_card_max(px(2300.), 3, detail::FACT_CARD_MIN, gap),
+            px(756.)
+        );
+        assert_eq!(
+            fact_card_max(px(700.), 3, detail::FACT_CARD_MIN, gap),
+            px(260.)
+        );
+        assert_eq!(
+            fact_card_max(px(700.), 0, detail::FACT_CARD_MIN, gap),
+            px(700.)
+        );
     }
 }

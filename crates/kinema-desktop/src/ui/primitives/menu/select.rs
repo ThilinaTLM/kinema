@@ -4,6 +4,7 @@
 //! and expanded state; arrows/Home/End/type-ahead move within the menu, Enter
 //! chooses and Esc closes and returns focus to the trigger.
 use super::*;
+use crate::ui::theme::typography::{TextSize, TypeExt, Weight};
 
 /// A typed compact select. Subscribe to `SelectEvent::Changed` for updates.
 pub enum SelectEvent<T> {
@@ -133,7 +134,7 @@ impl<T: Clone + PartialEq + 'static> Render for Select<T> {
             .aria_value(label.clone())
             .aria_expanded(self.menu.is_some())
             .track_focus(&self.focus)
-            .focus_visible(move |s| s.border(space::FOCUS_RING).border_color(p.focus_ring))
+            .focus_visible(move |s| s.border(size::FOCUS_RING).border_color(p.ring))
             .tab_stop(true)
             .relative()
             .rounded(if self.toolbar { radius::LG } else { radius::MD })
@@ -142,36 +143,37 @@ impl<T: Clone + PartialEq + 'static> Render for Select<T> {
                     .flex()
                     .items_center()
                     .gap(space::S6)
-                    .text_color(p.text_primary)
+                    .text_color(p.foreground)
                     .children(
                         self.icon
-                            .map(|icon| Icon::new(icon).color(p.text_secondary)),
+                            .map(|icon| Icon::new(icon).color(p.muted_foreground)),
                     )
                     .children(
                         self.prefix
                             .clone()
-                            .map(|prefix| div().text_color(p.text_muted).child(prefix)),
+                            .map(|prefix| div().text_color(p.subtle_foreground).child(prefix)),
                     )
                     .child(label)
-                    .child(Icon::new(IconName::ChevronDown).color(p.text_secondary));
+                    .child(Icon::new(IconName::ChevronDown).color(p.muted_foreground));
                 if self.toolbar {
                     let (fill, hover, edge) = p.glass();
-                    face.h(space::TOOLBAR_CONTROL)
+                    face.h(size::TOOLBAR_CONTROL)
                         .rounded(radius::LG)
                         .px(space::S12)
                         .bg(fill)
-                        .border(space::HAIRLINE)
+                        .border(size::HAIRLINE)
                         .border_color(edge)
-                        .type_style(typeface::SMALL_MEDIUM)
+                        .text(TextSize::Sm)
+                        .weight(Weight::Medium)
                         .hover(move |s| s.bg(hover))
                 } else {
-                    face.h(space::CONTROL_HEIGHT)
+                    face.h(size::CONTROL_SM)
                         .rounded(radius::MD)
                         .px(space::S8)
-                        .bg(p.ctl_rest)
+                        .bg(p.secondary)
                         .border_1()
-                        .border_color(p.line_control)
-                        .type_style(typeface::BODY)
+                        .border_color(p.input)
+                        .text(TextSize::Base)
                 }
             })
             .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {

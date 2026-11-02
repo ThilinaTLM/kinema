@@ -1,12 +1,13 @@
 //! Poster-only production card. Hosts supply metadata, artwork and truthful commands.
 //! Subscribe to `CardOpened` for the mouse-up / Enter open handler.
+use crate::ui::theme::opacity;
 use crate::{
     ui::blocks::state_toggle::{StateToggle, ToggleKind, ToggleStatus},
     ui::motion::{self, AnimateExt, CardHover, card_hover as hv, transition::CROSSFADE},
     ui::primitives::badge::{self, Badge},
     ui::primitives::menu::{ContextMenuExt, MenuItem},
-    ui::theme::typography::TypeExt,
-    ui::theme::{self, Palette, radius, space as s, typeface as t},
+    ui::theme::typography::{TextSize, TypeExt, Weight},
+    ui::theme::{self, Palette, radius, size, space as s},
 };
 use gpui::{prelude::*, *};
 use std::{sync::Arc, time::Instant};
@@ -127,17 +128,22 @@ impl Render for PosterCard {
             .items_center()
             .p(s::S12)
             .rounded(radius::LG)
-            .bg(p.bg_placeholder)
+            .bg(p.muted)
             .when(self.image.is_none(), |el| {
                 el.child(
                     div()
-                        .type_style(t::HEADING)
+                        .text(TextSize::Lg)
+                        .weight(Weight::Semibold)
                         .text_center()
                         .clamp_lines(3)
                         .child(self.title.clone()),
                 )
                 .when(!self.year.is_empty(), |el| {
-                    el.child(div().text_color(p.text_muted).child(self.year.clone()))
+                    el.child(
+                        div()
+                            .text_color(p.subtle_foreground)
+                            .child(self.year.clone()),
+                    )
                 })
             });
         let artwork = self.image.as_ref().map(|image| {
@@ -199,7 +205,7 @@ impl Render for PosterCard {
             .pb(s::S12)
             .pt(s::S32)
             .rounded_b(radius::LG)
-            .text_color(dark.text_primary)
+            .text_color(dark.foreground)
             .child(
                 // Scrim fades on its own so the text rows can rise independently.
                 div()
@@ -209,13 +215,14 @@ impl Render for PosterCard {
                     .opacity(hover.scrim)
                     .bg(linear_gradient(
                         180.,
-                        linear_color_stop(dark.scrim_max.opacity(0.), 0.),
-                        linear_color_stop(dark.scrim_max.opacity(0.92), 0.55),
+                        linear_color_stop(theme::transparent(dark.scrim), 0.),
+                        linear_color_stop(dark.scrim.opacity(opacity::POSTER_SCRIM_PEAK), 0.55),
                     )),
             )
             .child(row(
                 div()
-                    .type_style(t::HEADING)
+                    .text(TextSize::Lg)
+                    .weight(Weight::Semibold)
                     .clamp_lines(2)
                     .child(self.title.clone()),
                 r_title,
@@ -223,8 +230,8 @@ impl Render for PosterCard {
             .when(!meta.is_empty(), |el| {
                 el.child(row(
                     div()
-                        .type_style(t::SMALL)
-                        .text_color(dark.text_secondary)
+                        .text(TextSize::Sm)
+                        .text_color(dark.muted_foreground)
                         .child(meta),
                     r_meta,
                 ))
@@ -232,8 +239,8 @@ impl Render for PosterCard {
             .when(!self.genres.is_empty(), |el| {
                 el.child(row(
                     div()
-                        .type_style(t::SMALL)
-                        .text_color(dark.text_secondary)
+                        .text(TextSize::Sm)
+                        .text_color(dark.muted_foreground)
                         .child(self.genres.clone()),
                     r_genres,
                 ))
@@ -241,7 +248,7 @@ impl Render for PosterCard {
             .when(w >= 172. && !self.synopsis.is_empty(), |el| {
                 el.child(row(
                     div()
-                        .type_style(t::BODY)
+                        .text(TextSize::Base)
                         .clamp_lines(2)
                         .overflow_hidden()
                         .child(self.synopsis.clone()),
@@ -322,8 +329,8 @@ impl Render for PosterCard {
                         .absolute()
                         .inset_0()
                         .rounded(radius::LG)
-                        .border(s::FOCUS_RING)
-                        .border_color(p.focus_ring),
+                        .border(size::FOCUS_RING)
+                        .border_color(p.ring),
                 )
             });
         let lift = style_lift(lift, hover.lift);

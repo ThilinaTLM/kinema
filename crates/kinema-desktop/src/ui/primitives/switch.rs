@@ -12,8 +12,8 @@ use crate::{
     ui::motion::{interaction::state_spring, transition::FEEDBACK},
     ui::primitives::Icon,
     ui::primitives::IconName,
-    ui::theme::typography::TypeExt,
-    ui::theme::{palette, radius, size, space, typeface},
+    ui::theme::typography::{TextSize, TypeExt},
+    ui::theme::{palette, radius, size, space},
 };
 use gpui::{prelude::*, *};
 use std::rc::Rc;
@@ -26,8 +26,6 @@ pub struct Checkbox {
     disabled: bool,
     handler: Option<ToggleHandler>,
     role: Role,
-    // ── sessions: file-row typography ──
-    typography: crate::ui::theme::TypeStyle,
 }
 impl Checkbox {
     pub fn new(id: impl Into<ElementId>, label: impl Into<SharedString>, checked: bool) -> Self {
@@ -38,7 +36,6 @@ impl Checkbox {
             disabled: false,
             handler: None,
             role: Role::CheckBox,
-            typography: typeface::BODY,
         }
     }
     pub fn disabled(mut self, disabled: bool) -> Self {
@@ -64,16 +61,16 @@ impl RenderOnce for Checkbox {
                         .items_center()
                         .justify_center()
                         .rounded(radius::FULL)
-                        .border(space::HAIRLINE)
+                        .border(size::HAIRLINE)
                         .border_color(if self.checked && !self.disabled {
                             p.primary
                         } else {
-                            p.line_control
+                            p.input
                         })
                         .when(self.checked, |el| {
                             el.child(div().size(space::S6).rounded(radius::FULL).bg(
                                 if self.disabled {
-                                    p.text_muted
+                                    p.subtle_foreground
                                 } else {
                                     p.primary
                                 },
@@ -82,43 +79,43 @@ impl RenderOnce for Checkbox {
                         .into_any_element()
                 }
                 _ => div()
-                    .size(space::ICON)
+                    .size(size::ICON)
                     .flex_none()
                     .rounded(radius::SM)
-                    .border(space::HAIRLINE)
+                    .border(size::HAIRLINE)
                     .border_color(if self.checked && !self.disabled {
                         p.primary
                     } else {
-                        p.line_control
+                        p.input
                     })
                     .bg(if self.checked {
-                        p.accent_tint
+                        p.selection
                     } else {
-                        p.ctl_rest
+                        p.secondary
                     })
                     .when(self.checked, |el| {
                         el.child(Icon::new(IconName::Check).size(space::S12).color(
                             if self.disabled {
-                                p.text_muted
+                                p.subtle_foreground
                             } else {
-                                p.accent_text
+                                p.primary_text
                             },
                         ))
                     })
                     .into_any_element(),
             };
         let ink = if self.disabled {
-            p.text_muted
+            p.subtle_foreground
         } else {
-            p.text_primary
+            p.foreground
         };
         div()
             .id(self.id)
             .flex()
             .items_center()
             .gap(space::S8)
-            .h(space::CONTROL_HEIGHT + space::S8)
-            .border(space::FOCUS_RING)
+            .h(size::CONTROL_SM + space::S8)
+            .border(size::FOCUS_RING)
             .border_color(transparent_black())
             .p(space::S2)
             .m(-space::S4)
@@ -130,15 +127,10 @@ impl RenderOnce for Checkbox {
                 el.focusable()
                     .tab_stop(true)
                     .cursor_pointer()
-                    .focus_visible(move |s| s.border_color(p.focus_ring))
+                    .focus_visible(move |s| s.border_color(p.ring))
             })
             .child(indicator)
-            .child(
-                div()
-                    .type_style(self.typography)
-                    .text_color(ink)
-                    .child(self.label),
-            )
+            .child(div().text(TextSize::Base).text_color(ink).child(self.label))
             .when_some(self.handler.filter(|_| !self.disabled), |el, handler| {
                 el.on_click(move |_, window, cx| {
                     handler(self.role == Role::RadioButton || !self.checked, window, cx)
@@ -160,34 +152,34 @@ fn switch_indicator(checked: bool, disabled: bool, cx: &App) -> AnyElement {
         .size(space::S12)
         .rounded(radius::FULL)
         .bg(if disabled {
-            p.text_muted
+            p.subtle_foreground
         } else if checked {
-            p.on_accent
+            p.primary_foreground
         } else {
-            p.text_secondary
+            p.muted_foreground
         });
     // Retarget from the current position when the setting changes mid-slide.
     let knob = state_spring(knob, "switch-knob", checked, FEEDBACK, cx, |el, t| {
-        el.left(space::HAIRLINE + space::S12 * t)
+        el.left(size::HAIRLINE + space::S12 * t)
     });
     div()
         .relative()
-        .w(space::CONTROL_HEIGHT)
-        .h(space::ICON)
+        .w(size::CONTROL_SM)
+        .h(size::ICON)
         .flex()
         .items_center()
         .flex_none()
         .rounded(radius::FULL)
-        .border(space::HAIRLINE)
+        .border(size::HAIRLINE)
         .border_color(if checked && !disabled {
             p.primary
         } else {
-            p.line_control
+            p.input
         })
         .bg(if checked && !disabled {
             p.primary
         } else {
-            p.ctl_rest
+            p.secondary
         })
         .child(knob)
         .into_any_element()
@@ -375,13 +367,5 @@ mod interaction_tests {
                 "radio={radio}, checked={checked}, disabled={disabled}"
             );
         }
-    }
-}
-
-// ── sessions: optional mono typography for explicit file choices ──
-impl Radio {
-    pub fn typography(mut self, style: crate::ui::theme::TypeStyle) -> Self {
-        self.0.typography = style;
-        self
     }
 }

@@ -3,8 +3,8 @@
 //! so there is no Apply button; Reset is disabled when nothing is changed.
 use crate::{
     ui::primitives::button::{Button, ButtonVariant},
-    ui::theme::typography::TypeExt,
-    ui::theme::{palette, space, typeface},
+    ui::theme::typography::{TextSize, TypeExt, Weight},
+    ui::theme::{palette, size, space},
 };
 use gpui::{prelude::*, *};
 use std::rc::Rc;
@@ -46,7 +46,7 @@ impl RenderOnce for FilterPanel {
         let p = *palette(cx);
         let reset = self.reset;
         div()
-            .w(space::POPOVER_WIDTH)
+            .w(size::POPOVER_WIDTH)
             .flex()
             .flex_col()
             .gap(space::S16)
@@ -57,8 +57,9 @@ impl RenderOnce for FilterPanel {
                     .justify_between()
                     .child(
                         div()
-                            .type_style(typeface::HEADING)
-                            .text_color(p.text_primary)
+                            .text(TextSize::Lg)
+                            .weight(Weight::Semibold)
+                            .text_color(p.foreground)
                             .child(self.title),
                     )
                     .child(
@@ -76,10 +77,10 @@ impl RenderOnce for FilterPanel {
             .children(self.footer.map(|note| {
                 div()
                     .pt(space::S12)
-                    .border_t(space::HAIRLINE)
-                    .border_color(p.line_subtle)
-                    .type_style(typeface::SMALL)
-                    .text_color(p.text_muted)
+                    .border_t(size::HAIRLINE)
+                    .border_color(p.border)
+                    .text(TextSize::Sm)
+                    .text_color(p.subtle_foreground)
                     .child(note)
             }))
     }
@@ -124,14 +125,15 @@ impl RenderOnce for FilterSection {
                     .gap(space::S8)
                     .child(
                         div()
-                            .type_style(typeface::CAPTION)
-                            .text_color(p.text_secondary)
+                            .text(TextSize::Xs)
+                            .weight(Weight::Semibold)
+                            .text_color(p.muted_foreground)
                             .child(self.label),
                     )
                     .children(self.hint.map(|hint| {
                         div()
-                            .type_style(typeface::SMALL)
-                            .text_color(p.text_muted)
+                            .text(TextSize::Sm)
+                            .text_color(p.subtle_foreground)
                             .child(hint)
                     })),
             )

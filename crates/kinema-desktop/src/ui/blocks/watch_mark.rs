@@ -1,8 +1,9 @@
 //! `WatchMark`: the one watched glyph used by hero, season tiles and episodes.
 //!
 //! None is a muted ring, Partial a faint ring with an accent arc from 12
-//! o'clock, All a filled accent circle with an `on_accent` check. Watched is
+//! o'clock, All a filled accent circle with an `primary_foreground` check. Watched is
 //! never green. The glyph is purely presentational; hosts supply the name.
+use crate::ui::theme::opacity;
 use crate::{
     ui::primitives::icon::{Icon, IconName},
     ui::theme::{Palette, palette, radius},
@@ -135,8 +136,8 @@ fn ring(fraction: f32, track: Hsla, arc: Hsla, g: MarkGeometry) -> impl IntoElem
                 let mut b = PathBuilder::stroke(px(stroke));
                 let (top, bottom) = (point(c.x, c.y - r), point(c.x, c.y + r));
                 b.move_to(top);
-                b.arc_to(point(r, r), px(0.), false, true, bottom);
-                b.arc_to(point(r, r), px(0.), false, true, top);
+                b.arc_to(point(r, r), Pixels::ZERO, false, true, bottom);
+                b.arc_to(point(r, r), Pixels::ZERO, false, true, top);
                 b.close();
                 if let Ok(path) = b.build() {
                     window.paint_path(path, color);
@@ -157,7 +158,7 @@ fn ring(fraction: f32, track: Hsla, arc: Hsla, g: MarkGeometry) -> impl IntoElem
                 b.move_to(point(c.x, c.y - r));
                 b.arc_to(
                     point(r, r),
-                    px(0.),
+                    Pixels::ZERO,
                     fraction > 0.5,
                     true,
                     point(px(x), px(y)),
@@ -190,12 +191,12 @@ impl RenderOnce for WatchMark {
                 .child(
                     Icon::new(IconName::Check)
                         .size(px(g.check))
-                        .color(p.on_accent),
+                        .color(p.primary_foreground),
                 ),
-            WatchMarkState::None => frame.child(ring(0., p.text_muted, p.primary, g)),
+            WatchMarkState::None => frame.child(ring(0., p.subtle_foreground, p.primary, g)),
             WatchMarkState::Partial(f) => frame.child(ring(
                 f.clamp(0.01, 0.99),
-                p.text_muted.opacity(0.45),
+                p.subtle_foreground.opacity(opacity::INK_FAINT),
                 p.primary,
                 g,
             )),

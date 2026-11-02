@@ -52,7 +52,7 @@ impl Effect {
     pub fn distance(self) -> Pixels {
         match self {
             Effect::Rise(d) | Effect::Slide(_, d) | Effect::Lift(d) => d,
-            Effect::None | Effect::Fade => px(0.0),
+            Effect::None | Effect::Fade => Pixels::ZERO,
         }
     }
 }

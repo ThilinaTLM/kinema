@@ -1,5 +1,13 @@
 //! Separate, lease-owned Cinema player. libmpv initialization and destruction
 //! (including worker joins) never run on GPUI's foreground executor.
+use crate::ui::theme::layout::player;
+use crate::ui::theme::layout::player::{
+    DOCK_BOTTOM_INSET, DOCK_ESTIMATE, DOCK_FADE, DOCK_SIDE_INSET, HELP_COLUMN, TOP_BAR_HEIGHT,
+    TOP_FADE, VOLUME_PANEL_EXTRA, VOLUME_THUMB, VOLUME_TRACK,
+};
+use crate::ui::theme::motion::timing;
+use crate::ui::theme::opacity;
+use crate::ui::theme::transparent;
 use std::{
     collections::{HashMap, VecDeque},
     rc::Rc,
@@ -37,8 +45,8 @@ use crate::{
     ui::primitives::button::{Button, ButtonVariant},
     ui::primitives::icon::{Icon, IconName},
     ui::primitives::menu::{Menu, MenuItem},
-    ui::theme::typography::TypeExt,
-    ui::theme::{Palette, radius, space as s, typeface as t},
+    ui::theme::typography::{self, TextSize, TypeExt, Weight},
+    ui::theme::{Palette, radius, size, space as s},
 };
 
 #[cfg(feature = "gpu-surface")]
@@ -202,24 +210,6 @@ const MUTE: usize = 10;
 const VOLUME: usize = 11;
 const HELP: usize = 12;
 const CONTROL_COUNT: usize = 13;
-/// Chrome auto-hides after this much inactivity while playing (approved design).
-const CHROME_IDLE: Duration = Duration::from_millis(2500);
-/// Dock height assumed until its first layout is measured.
-/// Approved Cinema Dock content insets (design `.dock{left/right:28px;bottom:23px}`).
-const DOCK_SIDE_INSET: Pixels = px(28.);
-const DOCK_BOTTOM_INSET: Pixels = px(23.);
-/// Height of the transparent-to-scrim fade above the dock backing (decoration only).
-const DOCK_FADE: Pixels = px(72.);
-const TOP_FADE: Pixels = px(48.);
-/// Shortcut help column width (label + keycaps).
-const HELP_COLUMN: Pixels = px(300.);
-/// Volume panel chrome around the rail: padding, label, gaps, mute, border.
-const VOLUME_PANEL_EXTRA: Pixels = px(84.);
-/// Top title row height (padding + 32 px control) the volume panel clears.
-const TOP_BAR_HEIGHT: Pixels = px(48.);
-const VOLUME_TRACK: Pixels = px(12.);
-const VOLUME_THUMB: Pixels = px(18.);
-const DOCK_ESTIMATE: Pixels = px(148.);
 const SPEEDS: [f64; 7] = [0.5, 0.75, 1., 1.25, 1.5, 1.75, 2.];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -510,10 +500,10 @@ pub fn open(
         icon: player_window_icon(),
         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
             None,
-            size(px(1100.), px(680.)),
+            size(player::WINDOW_WIDTH, player::WINDOW_HEIGHT),
             cx,
         ))),
-        window_min_size: Some(size(px(720.), px(440.))),
+        window_min_size: Some(size(player::MIN_WIDTH, player::MIN_HEIGHT)),
         titlebar: Some(TitlebarOptions {
             title: Some(title.full.clone().into()),
             ..Default::default()
@@ -799,11 +789,6 @@ fn buffered_fractions(
         .collect()
 }
 
-/// Rolling window for the recent download speed.
-const RATE_WINDOW: Duration = Duration::from_secs(5);
-/// Shortest observed span that yields a speed rather than noise.
-const RATE_MIN_SPAN: Duration = Duration::from_secs(1);
-
 /// Recent download speed from monotonically observed byte counters. The first
 /// observation is only a baseline: bytes that already existed are never counted
 /// as newly downloaded. A different session or a regressing counter resets it.
@@ -831,17 +816,17 @@ impl TransferRate {
             self.samples.clear();
         }
         let unchanged = self.samples.back().is_some_and(|&(at, bytes)| {
-            bytes == downloaded && now.saturating_duration_since(at) < Duration::from_millis(250)
+            bytes == downloaded && now.saturating_duration_since(at) < timing::RATE_SAMPLE_DEDUP
         });
         if !unchanged {
             self.samples.push_back((now, downloaded));
         }
-        // Keep one sample at/before the window start so the span is ~RATE_WINDOW.
+        // Keep one sample at/before the window start so the span is ~timing::RATE_WINDOW.
         while self.samples.len() > 1
             && self
                 .samples
                 .get(1)
-                .is_some_and(|&(at, _)| now.saturating_duration_since(at) >= RATE_WINDOW)
+                .is_some_and(|&(at, _)| now.saturating_duration_since(at) >= timing::RATE_WINDOW)
         {
             self.samples.pop_front();
         }
@@ -863,13 +848,13 @@ impl TransferRate {
         let &(first_at, first) = self.samples.front()?;
         let &(last_at, last) = self.samples.back()?;
         let span = last_at.saturating_duration_since(first_at);
-        (span >= RATE_MIN_SPAN).then(|| last.saturating_sub(first) as f64 / span.as_secs_f64())
+        (span >= timing::RATE_MIN_SPAN)
+            .then(|| last.saturating_sub(first) as f64 / span.as_secs_f64())
     }
 }
 
-const TRANSFER_POLL: Duration = Duration::from_secs(1);
 fn transfer_poll_due(last: Option<Instant>, now: Instant) -> bool {
-    last.is_none_or(|at| now.saturating_duration_since(at) >= TRANSFER_POLL)
+    last.is_none_or(|at| now.saturating_duration_since(at) >= timing::TRANSFER_POLL)
 }
 
 fn format_bytes(bytes: u64) -> String {
@@ -1044,8 +1029,6 @@ fn activity_of(state: &PlaybackState, has_player: bool) -> Activity {
     }
 }
 
-const CADENCE_INTERVAL: Duration = Duration::from_secs(1);
-
 struct CadenceReport {
     interval_seconds: f64,
     playing_seconds: f64,
@@ -1155,7 +1138,7 @@ impl CadenceMeter {
     /// covering the whole stall, never a burst of catch-up reports.
     fn finish_if_due(&mut self, now: Instant) -> Option<CadenceReport> {
         let elapsed = now.saturating_duration_since(self.interval_start);
-        if elapsed < CADENCE_INTERVAL {
+        if elapsed < timing::CADENCE_INTERVAL {
             return None;
         }
         // Time since the last sample (a stall, or just the tail of the interval)
@@ -1413,15 +1396,16 @@ impl PlayerWindow {
             div()
                 .flex_none()
                 .px(s::S6)
-                .h(px(20.))
+                .h(size::CHIP)
                 .flex()
                 .items_center()
                 .rounded(radius::MD)
-                .bg(p.bg_raised)
+                .bg(p.card)
                 .border_1()
-                .border_color(p.line_control)
-                .type_style(t::SMALL_MEDIUM)
-                .text_color(p.text_primary)
+                .border_color(p.input)
+                .text(TextSize::Sm)
+                .weight(Weight::Medium)
+                .text_color(p.foreground)
                 .whitespace_nowrap()
                 .child(text)
         };
@@ -1433,8 +1417,9 @@ impl PlayerWindow {
                 .child(
                     div()
                         .pb(s::S2)
-                        .type_style(t::CAPTION)
-                        .text_color(p.text_muted)
+                        .text(TextSize::Xs)
+                        .weight(Weight::Semibold)
+                        .text_color(p.subtle_foreground)
                         .child(group.title.to_uppercase()),
                 )
                 .children(group.entries.iter().map(move |entry| {
@@ -1443,22 +1428,23 @@ impl PlayerWindow {
                         .flex()
                         .items_center()
                         .gap(s::S12)
-                        .min_h(px(24.))
+                        .min_h(player::HELP_ROW_MIN_HEIGHT)
                         .child(
                             div()
                                 .flex_1()
                                 .min_w_0()
-                                .type_style(t::SMALL)
-                                .text_color(p.text_secondary)
+                                .text(TextSize::Sm)
+                                .text_color(p.muted_foreground)
                                 .child(entry.label),
                         )
                         .child(if mouse {
                             div()
                                 .flex_none()
-                                .max_w(px(132.))
+                                .max_w(player::HELP_MOUSE_LABEL_MAX)
                                 .text_right()
-                                .type_style(t::SMALL_MEDIUM)
-                                .text_color(p.text_primary)
+                                .text(TextSize::Sm)
+                                .weight(Weight::Medium)
+                                .text_color(p.foreground)
                                 .child(entry.keys)
                         } else {
                             div()
@@ -1474,7 +1460,7 @@ impl PlayerWindow {
             .id("player-shortcut-overlay")
             .absolute()
             .inset_0()
-            .bg(p.dialog_scrim)
+            .bg(p.overlay)
             .flex()
             .items_center()
             .justify_center()
@@ -1492,9 +1478,9 @@ impl PlayerWindow {
                         HELP_COLUMN * columns as f32 + s::S32 * (columns as f32 - 1.) + s::S24 * 2.,
                     )
                     .max_h_full()
-                    .bg(p.bg_overlay)
+                    .bg(p.popover)
                     .border_1()
-                    .border_color(p.line_subtle)
+                    .border_color(p.border)
                     .rounded(radius::XL)
                     .overflow_hidden()
                     .child(
@@ -1506,17 +1492,18 @@ impl PlayerWindow {
                             .pr(s::S12)
                             .py(s::S12)
                             .border_b_1()
-                            .border_color(p.line_subtle)
+                            .border_color(p.border)
                             .child(
                                 Icon::new(IconName::Keyboard)
-                                    .size(px(18.))
-                                    .color(p.text_secondary),
+                                    .size(player::HELP_HEADER_ICON)
+                                    .color(p.muted_foreground),
                             )
                             .child(
                                 div()
                                     .flex_1()
                                     .min_w_0()
-                                    .type_style(t::HEADING)
+                                    .text(TextSize::Lg)
+                                    .weight(Weight::Semibold)
                                     .child("Keyboard & mouse shortcuts"),
                             )
                             .child({
@@ -1563,9 +1550,9 @@ impl PlayerWindow {
                                     .flex_col()
                                     .gap(s::S4)
                                     .border_t_1()
-                                    .border_color(p.line_subtle)
-                                    .type_style(t::SMALL)
-                                    .text_color(p.text_muted)
+                                    .border_color(p.border)
+                                    .text(TextSize::Sm)
+                                    .text_color(p.subtle_foreground)
                                     .child(shortcuts::FOCUS_NOTE)
                                     .child(shortcuts::MEDIA_NOTE),
                             ),
@@ -1624,7 +1611,7 @@ impl PlayerWindow {
                 }
                 let speed = self
                     .speed_requested
-                    .filter(|(_, since)| since.elapsed() < Duration::from_millis(1200))
+                    .filter(|(_, since)| since.elapsed() < timing::REQUEST_PENDING)
                     .map_or(self.state.speed, |(value, _)| value);
                 let target = if id == Sid::ResetSpeed {
                     Some(1.)
@@ -1681,7 +1668,7 @@ impl PlayerWindow {
                 };
                 let delay = self
                     .delay_requested
-                    .filter(|(_, since)| since.elapsed() < Duration::from_millis(1200))
+                    .filter(|(_, since)| since.elapsed() < timing::REQUEST_PENDING)
                     .map_or(actual, |(value, _)| value);
                 let target = ((delay + if id == Sid::DelayForward { 0.1 } else { -0.1 }) * 10.)
                     .round()
@@ -1720,9 +1707,7 @@ impl PlayerWindow {
         let startup_cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let updates = cx.spawn_in(window, async move |view, cx| {
             loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(16))
-                    .await;
+                cx.background_executor().timer(timing::FRAME_TICK).await;
                 if cx
                     .update(|window, cx| view.update(cx, |view, cx| view.sample(window, cx)))
                     .is_err()
@@ -2242,7 +2227,7 @@ impl PlayerWindow {
             (&mut self.delay_requested, self.state.subtitle_delay),
         ] {
             if requested.is_some_and(|(target, since)| {
-                since.elapsed() >= Duration::from_millis(1200)
+                since.elapsed() >= timing::REQUEST_PENDING
                     || actual.is_some_and(|value| (value - target).abs() < 0.01)
             }) {
                 *requested = None;
@@ -2282,7 +2267,7 @@ impl PlayerWindow {
             metrics.presented += u64::from(frame_received);
             metrics.paused_for_cache_samples += u64::from(self.state.paused_for_cache);
             metrics.sample_ms += now.duration_since(started).as_secs_f64() * 1000.;
-            if now.duration_since(metrics.last_report) >= Duration::from_secs(5)
+            if now.duration_since(metrics.last_report) >= timing::METRICS_REPORT
                 && let Some(player) = self.player.as_ref().and_then(|owner| owner.player.as_ref())
             {
                 metrics.report(now, &player.diagnostics(), &self.state);
@@ -2443,7 +2428,7 @@ impl PlayerWindow {
         if self.can_seek() {
             let position = self
                 .seek_requested
-                .filter(|(_, since)| since.elapsed() < Duration::from_millis(1200))
+                .filter(|(_, since)| since.elapsed() < timing::REQUEST_PENDING)
                 .map_or(self.state.position, |(target, _)| target);
             let target = bounded_seek(position + seconds, self.state.duration);
             self.seek_requested = Some((target, Instant::now()));
@@ -2820,7 +2805,7 @@ impl PlayerWindow {
         let unity = volume_fraction(100.);
         let amplified = volume > 100.5 && !self.state.muted;
         let fill = if self.state.muted {
-            p.text_muted
+            p.subtle_foreground
         } else {
             p.primary
         };
@@ -2844,14 +2829,14 @@ impl PlayerWindow {
             } else {
                 CursorStyle::Arrow
             })
-            .focus_visible(|style| style.border(s::FOCUS_RING).border_color(p.focus_ring))
+            .focus_visible(|style| style.border(size::FOCUS_RING).border_color(p.ring))
             .child(
                 div()
                     .relative()
                     .h_full()
                     .w(VOLUME_TRACK)
                     .rounded(radius::FULL)
-                    .bg(p.line_control.opacity(0.5))
+                    .bg(p.input.opacity(opacity::TRACK))
                     .child(
                         div()
                             .absolute()
@@ -2871,7 +2856,7 @@ impl PlayerWindow {
                             .h(s::S2)
                             .mt(-s::S2 / 2.)
                             .rounded(radius::FULL)
-                            .bg(p.text_primary.opacity(0.6)),
+                            .bg(p.foreground.opacity(opacity::INK_THUMB)),
                     )
                     .child(
                         div()
@@ -2881,7 +2866,7 @@ impl PlayerWindow {
                             .ml((VOLUME_TRACK - VOLUME_THUMB) / 2.)
                             .size(VOLUME_THUMB)
                             .rounded(radius::FULL)
-                            .bg(p.text_primary)
+                            .bg(p.foreground)
                             .shadow_sm(),
                     ),
             )
@@ -2921,9 +2906,9 @@ impl PlayerWindow {
             .pt(s::S12)
             .pb(s::S6)
             .rounded(radius::XL)
-            .bg(p.scrim_max)
+            .bg(p.scrim)
             .border_1()
-            .border_color(p.line_subtle)
+            .border_color(p.border)
             .on_hover(cx.listener(|view, hovered: &bool, _, cx| {
                 view.dock_hover = *hovered;
                 view.activity(cx);
@@ -2933,12 +2918,13 @@ impl PlayerWindow {
                     .min_w(s::S32)
                     .whitespace_nowrap()
                     .text_center()
-                    .type_style(t::SMALL_MEDIUM)
+                    .text(TextSize::Sm)
+                    .weight(Weight::Medium)
                     .font_features(FontFeatures(vec![("tnum".into(), 1)].into()))
                     .text_color(if amplified {
-                        p.accent_text
+                        p.primary_text
                     } else {
-                        p.text_secondary
+                        p.muted_foreground
                     })
                     .child(format!("{volume:.0}%")),
             )
@@ -2983,10 +2969,10 @@ impl PlayerWindow {
         let mut track = div()
             .relative()
             .w_full()
-            .h(px(12.))
+            .h(player::TIMELINE_TRACK)
             .rounded(radius::FULL)
             .overflow_hidden()
-            .bg(p.line_control.opacity(0.5));
+            .bg(p.input.opacity(opacity::TRACK));
         if seekable {
             for (start, end) in buffered_fractions(self.state.buffered_ranges.as_deref(), duration)
             {
@@ -2996,7 +2982,7 @@ impl PlayerWindow {
                         .h_full()
                         .left(relative(start))
                         .w(relative(end - start))
-                        .bg(p.text_secondary.opacity(0.6)),
+                        .bg(p.muted_foreground.opacity(opacity::INK_THUMB)),
                 );
             }
         }
@@ -3015,7 +3001,7 @@ impl PlayerWindow {
                     .h_full()
                     .left(relative(tick))
                     .w(s::S2)
-                    .bg(p.scrim_max),
+                    .bg(p.scrim),
             );
         }
         let active = dragging || preview.is_some();
@@ -3045,10 +3031,14 @@ impl PlayerWindow {
             } else {
                 CursorStyle::Arrow
             })
-            .focus_visible(|style| style.border(s::FOCUS_RING).border_color(p.focus_ring))
+            .focus_visible(|style| style.border(size::FOCUS_RING).border_color(p.ring))
             .child(track)
             .when(seekable, |el| {
-                let size = if active { px(18.) } else { px(14.) };
+                let size = if active {
+                    player::TIMELINE_THUMB_ACTIVE
+                } else {
+                    player::TIMELINE_THUMB
+                };
                 el.child(
                     div()
                         .absolute()
@@ -3056,7 +3046,7 @@ impl PlayerWindow {
                         .ml(-size / 2.)
                         .size(size)
                         .rounded(radius::FULL)
-                        .bg(p.text_primary)
+                        .bg(p.foreground)
                         .border_2()
                         .border_color(p.primary),
                 )
@@ -3080,13 +3070,14 @@ impl PlayerWindow {
                         .flex_col()
                         .items_center()
                         .rounded(radius::MD)
-                        .bg(p.scrim_max)
+                        .bg(p.scrim)
                         .border_1()
-                        .border_color(p.line_subtle)
+                        .border_color(p.border)
                         .child(
                             div()
-                                .type_style(t::MONO)
-                                .text_color(p.text_primary)
+                                .text(TextSize::Sm)
+                                .mono()
+                                .text_color(p.foreground)
                                 .child(format_clock(time)),
                         )
                         .when_some(chapter, |bubble, chapter| {
@@ -3095,8 +3086,9 @@ impl PlayerWindow {
                                     .max_w_full()
                                     .px(s::S6)
                                     .truncate()
-                                    .type_style(t::CAPTION)
-                                    .text_color(p.text_secondary)
+                                    .text(TextSize::Xs)
+                                    .weight(Weight::Semibold)
+                                    .text_color(p.muted_foreground)
                                     .child(chapter),
                             )
                         }),
@@ -3171,9 +3163,9 @@ impl PlayerWindow {
     /// Measure with the bundled typography, not a character-count breakpoint.
     /// Remove the optional episode name before applying normal end truncation.
     fn chrome_title(&self, window: &Window) -> String {
-        let text_width = |text: &str, style: crate::ui::theme::TypeStyle| {
-            let mut font = font(t::UI_FAMILY);
-            font.weight = style.weight;
+        let text_width = |text: &str, size: TextSize, weight: Weight| {
+            let mut font = font(typography::UI_FAMILY);
+            font.weight = weight.value();
             let run = TextRun {
                 len: text.len(),
                 font,
@@ -3184,13 +3176,13 @@ impl PlayerWindow {
             };
             window
                 .text_system()
-                .shape_line(text.to_owned().into(), style.size, &[run], None)
+                .shape_line(text.to_owned().into(), size.size(), &[run], None)
                 .width
         };
         let available = window.viewport_size().width - DOCK_SIDE_INSET * 2. - s::S12 - s::S32;
         title_for_width(
             &self.title,
-            text_width(&self.title.full, t::BODY_STRONG),
+            text_width(&self.title.full, TextSize::Base, Weight::Semibold),
             available,
         )
         .to_owned()
@@ -3259,11 +3251,11 @@ impl PlayerWindow {
         };
         let requested = self
             .delay_requested
-            .filter(|(_, since)| since.elapsed() < Duration::from_millis(1200))
+            .filter(|(_, since)| since.elapsed() < timing::REQUEST_PENDING)
             .map(|(delay, _)| format!("Subtitle delay {delay:+.1}s"))
             .or_else(|| {
                 self.speed_requested
-                    .filter(|(_, since)| since.elapsed() < Duration::from_millis(1200))
+                    .filter(|(_, since)| since.elapsed() < timing::REQUEST_PENDING)
                     .map(|(speed, _)| format!("Speed {}", speed_label(speed)))
             });
         let summary = self.buffer_summary();
@@ -3285,21 +3277,21 @@ impl PlayerWindow {
         let status = div()
             .id("player-status")
             .flex_1()
-            .w(px(0.))
+            .w(Pixels::ZERO)
             .min_w_0()
             .overflow_hidden()
             .flex()
             .items_center()
             .gap(s::S12)
             .px(s::S8)
-            .type_style(t::SMALL)
+            .text(TextSize::Sm)
             .font_features(FontFeatures(vec![("tnum".into(), 1)].into()))
-            .text_color(p.text_secondary)
+            .text_color(p.muted_foreground)
             .children(status_items.into_iter().map(|item| {
                 let color = if item.warn {
-                    p.status_warn
+                    p.warning
                 } else {
-                    p.text_secondary
+                    p.muted_foreground
                 };
                 div()
                     .flex_none()
@@ -3308,7 +3300,7 @@ impl PlayerWindow {
                     .gap(s::S4)
                     .text_color(color)
                     .when_some(item.icon, |el, icon| {
-                        el.child(Icon::new(icon).size(px(14.)).color(color))
+                        el.child(Icon::new(icon).size(size::ICON_SM).color(color))
                     })
                     .child(item.text)
             }))
@@ -3418,7 +3410,7 @@ impl PlayerWindow {
                     .pt(s::S12)
                     .pb(s::S4)
                     .occlude()
-                    .bg(p.scrim_max)
+                    .bg(p.scrim)
                     .child(
                         div()
                             .absolute()
@@ -3428,15 +3420,16 @@ impl PlayerWindow {
                             .h(TOP_FADE)
                             .bg(linear_gradient(
                                 180.,
-                                linear_color_stop(p.scrim_max, 0.),
-                                linear_color_stop(p.scrim_max.opacity(0.), 1.),
+                                linear_color_stop(p.scrim, 0.),
+                                linear_color_stop(transparent(p.scrim), 1.),
                             )),
                     )
                     .child(
                         div()
                             .flex_1()
                             .min_w_0()
-                            .type_style(t::BODY_STRONG)
+                            .text(TextSize::Base)
+                            .weight(Weight::Semibold)
                             .truncate()
                             .child(self.chrome_title(window)),
                     )
@@ -3459,7 +3452,7 @@ impl PlayerWindow {
                     .px(DOCK_SIDE_INSET)
                     // Opaque-enough backing keeps text/buttons contrast-safe; the
                     // fade above it ends at the same colour, so there is no edge.
-                    .bg(p.scrim_max)
+                    .bg(p.scrim)
                     .child(
                         div()
                             .absolute()
@@ -3469,8 +3462,8 @@ impl PlayerWindow {
                             .h(DOCK_FADE)
                             .bg(linear_gradient(
                                 180.,
-                                linear_color_stop(p.scrim_max.opacity(0.), 0.),
-                                linear_color_stop(p.scrim_max, 1.),
+                                linear_color_stop(transparent(p.scrim), 0.),
+                                linear_color_stop(p.scrim, 1.),
                             )),
                     )
                     .on_hover(cx.listener(|view, hovered: &bool, _, cx| {
@@ -3486,8 +3479,9 @@ impl PlayerWindow {
                                     .flex()
                                     .items_center()
                                     .gap(s::S12)
-                                    .type_style(t::MONO)
-                                    .text_color(p.text_secondary)
+                                    .text(TextSize::Sm)
+                                    .mono()
+                                    .text_color(p.muted_foreground)
                                     .child(div().w(s::S48 + s::S16).child(format_clock(shown)))
                                     .child(
                                         div()
@@ -3495,8 +3489,9 @@ impl PlayerWindow {
                                             .min_w_0()
                                             .truncate()
                                             .text_center()
-                                            .type_style(t::BODY_STRONG)
-                                            .text_color(p.text_primary)
+                                            .text(TextSize::Base)
+                                            .weight(Weight::Semibold)
+                                            .text_color(p.foreground)
                                             .children(chapter),
                                     )
                                     .child(div().w(s::S48 + s::S16).text_right().child(
@@ -3597,7 +3592,7 @@ impl Render for PlayerWindow {
         let has_video = has_video || self.fixture_image.is_some();
         #[cfg(feature = "gpu-surface")]
         let has_video = has_video || self.gpu_frame.is_some();
-        div().id("kinema-player").key_context("KinemaPlayer").relative().size_full().overflow_hidden().bg(p.bg_canvas).text_color(p.text_primary).font_family(t::UI_FAMILY)
+        div().id("kinema-player").key_context("KinemaPlayer").relative().size_full().overflow_hidden().bg(p.background).text_color(p.foreground).font_family(typography::UI_FAMILY)
             .on_action(cx.listener(|view, _: &TogglePlayback, window, cx| view.shortcut(Sid::TogglePlayback, window, cx)))
             .on_action(cx.listener(|view, _: &SeekBack, window, cx| view.shortcut(Sid::SeekBack, window, cx)))
             .on_action(cx.listener(|view, _: &SeekForward, window, cx| view.shortcut(Sid::SeekForward, window, cx)))
@@ -3643,11 +3638,11 @@ impl Render for PlayerWindow {
                 }))
                 .when(self.mode == PlayerChoice::Embedded && !failed, |element| element.child(self.embedded_video())))
             .when(failed || !has_video, |element| element.child(
-                div().absolute().inset_0().flex().flex_col().items_center().justify_center().gap(s::S12).when(failed, |panel| panel.bg(p.scrim_max))
-                    .child(div().type_style(t::TITLE).child(if failed { "Playback unavailable" } else if self.state.ended { "Playback finished" } else if self.state.paused_for_cache { "Buffering…" } else if self.state.loading || self.player.is_none() { "Opening media…" } else { "Audio playback" }))
-                    .child(div().max_w(s::SHEET_WIDTH).px(s::S24).type_style(t::BODY).text_color(p.text_secondary).child(if failed && self.mode == PlayerChoice::Embedded { embedded_help() } else if failed { "Playback stopped. Choose external MPV or VLC in Settings → Playback, then try again. If libmpv is missing, install its runtime first." } else if self.state.loading || self.player.is_none() { "Preparing the embedded player. You can close this window at any time." } else { "Use the controls below. Press K to play or pause." }))
+                div().absolute().inset_0().flex().flex_col().items_center().justify_center().gap(s::S12).when(failed, |panel| panel.bg(p.scrim))
+                    .child(div().text(TextSize::Xl).weight(Weight::Semibold).child(if failed { "Playback unavailable" } else if self.state.ended { "Playback finished" } else if self.state.paused_for_cache { "Buffering…" } else if self.state.loading || self.player.is_none() { "Opening media…" } else { "Audio playback" }))
+                    .child(div().max_w(size::SHEET_WIDTH).px(s::S24).text(TextSize::Base).text_color(p.muted_foreground).child(if failed && self.mode == PlayerChoice::Embedded { embedded_help() } else if failed { "Playback stopped. Choose external MPV or VLC in Settings → Playback, then try again. If libmpv is missing, install its runtime first." } else if self.state.loading || self.player.is_none() { "Preparing the embedded player. You can close this window at any time." } else { "Use the controls below. Press K to play or pause." }))
                     .when(failed && self.mode == PlayerChoice::Embedded, |panel| panel.child(
-                        div().max_w(s::SHEET_WIDTH).px(s::S24).type_style(t::BODY).text_color(p.text_secondary)
+                        div().max_w(size::SHEET_WIDTH).px(s::S24).text(TextSize::Base).text_color(p.muted_foreground)
                             .child(failure_label(failure_reason(&self.state, self.failure_reason)))
                     ))
                     // Backend errors may contain media URLs; never display/log
@@ -3668,9 +3663,9 @@ impl Render for PlayerWindow {
                 let unavailable = self.progress.as_ref().is_some_and(|p| p.phase == ProgressPhase::Unavailable);
                 let first_play = self.progress.as_ref().is_some_and(|p| p.usable_checkpoint().is_none());
                 let mismatch = self.progress.as_ref().is_some_and(|p| p.phase == ProgressPhase::Mismatch);
-                element.child(div().absolute().inset_0().occlude().bg(p.scrim_max).flex().flex_col().items_center().justify_center().gap(s::S16)
-                    .child(div().type_style(t::TITLE).child(if unavailable && first_play { "Playback could not start" } else if unavailable { "Saved position cannot be resumed" } else if mismatch { "This source has a different duration" } else { "Resume this replay?" }))
-                    .child(div().type_style(t::BODY).child(if unavailable && first_play { "Playback readiness could not be confirmed. Retry, or try playing without saving progress." } else if unavailable { "Playback readiness or resume could not be confirmed. Your saved progress is unchanged." } else if mismatch { "Resume at the saved time, or start over. Your saved progress is unchanged until playback is ready." } else { "Resume your saved position, or play from the beginning." }))
+                element.child(div().absolute().inset_0().occlude().bg(p.scrim).flex().flex_col().items_center().justify_center().gap(s::S16)
+                    .child(div().text(TextSize::Xl).weight(Weight::Semibold).child(if unavailable && first_play { "Playback could not start" } else if unavailable { "Saved position cannot be resumed" } else if mismatch { "This source has a different duration" } else { "Resume this replay?" }))
+                    .child(div().text(TextSize::Base).child(if unavailable && first_play { "Playback readiness could not be confirmed. Retry, or try playing without saving progress." } else if unavailable { "Playback readiness or resume could not be confirmed. Your saved progress is unchanged." } else if mismatch { "Resume at the saved time, or start over. Your saved progress is unchanged until playback is ready." } else { "Resume your saved position, or play from the beginning." }))
                     .when(!unavailable, |panel| panel.child(Button::new("progress-resume", if mismatch { "Resume anyway" } else { "Resume" }).on_click(cx.listener(|view, _, _, cx| view.choose_progress(true, cx)))))
                     .when(unavailable, |panel| panel
                         .child(Button::new("progress-retry-startup", "Retry").on_click(cx.listener(|view, _, _, cx| view.retry_startup(cx))))
@@ -3678,9 +3673,9 @@ impl Render for PlayerWindow {
                     .when(self.progress.as_ref().is_some_and(|progress| progress.can_start_over(&self.state)), |panel| panel.child(Button::new("progress-start-over", "Play from beginning").on_click(cx.listener(|view, _, _, cx| view.choose_progress(false, cx))))))
             })
             .when(self.progress.as_ref().is_some_and(|p| p.notice && matches!(p.phase, ProgressPhase::Ready | ProgressPhase::Reset)), |element| {
-                element.child(div().absolute().inset_0().occlude().bg(p.scrim_max).flex().flex_col().items_center().justify_center().gap(s::S16)
-                    .child(div().type_style(t::TITLE).child("Progress could not be saved"))
-                    .child(div().type_style(t::BODY).child("Your saved progress is unchanged. Retry saving, or play without saving progress."))
+                element.child(div().absolute().inset_0().occlude().bg(p.scrim).flex().flex_col().items_center().justify_center().gap(s::S16)
+                    .child(div().text(TextSize::Xl).weight(Weight::Semibold).child("Progress could not be saved"))
+                    .child(div().text(TextSize::Base).child("Your saved progress is unchanged. Retry saving, or play without saving progress."))
                     .child(Button::new("progress-retry-saving", "Retry saving").on_click(cx.listener(|view, _, _, cx| view.retry_progress_ready(cx))))
                     .child(Button::new("progress-untracked", "Play without saving").on_click(cx.listener(|view, _, _, cx| view.play_without_saving(cx)))))
             })
@@ -3690,16 +3685,16 @@ impl Render for PlayerWindow {
                 el.child(
                     div()
                         .absolute()
-                        .top(px(72.))
+                        .top(player::DIAGNOSTICS_TOP)
                         .left(s::S16)
-                        .max_w(px(360.))
+                        .max_w(player::DIAGNOSTICS_MAX_WIDTH)
                         .px(s::S8)
                         .py(s::S4)
                         .truncate()
                         .rounded(radius::MD)
-                        .bg(p.scrim_max.opacity(0.7))
-                        .type_style(t::MONO)
-                        .text_color(p.text_secondary)
+                        .bg(p.scrim.opacity(opacity::PLAYER_SCRIM))
+                        .text(TextSize::Sm).mono()
+                        .text_color(p.muted_foreground)
                         .child(text),
                 )
             })
@@ -3779,7 +3774,7 @@ fn controls_visible(
     interacting: bool,
     idle: Duration,
 ) -> bool {
-    paused || loading || error || interacting || idle < CHROME_IDLE
+    paused || loading || error || interacting || idle < timing::CHROME_IDLE
 }
 
 #[cfg(feature = "ui-probe")]
@@ -4613,7 +4608,7 @@ mod tests {
         assert!(rate.bytes_per_second().is_some());
         rate.observe("a", Some((50, 5_000_000)), t0 + Duration::from_secs(3));
         assert_eq!(rate.bytes_per_second(), None);
-        rate.observe("a", Some((60, 5_000_000)), t0 + Duration::from_secs(5));
+        rate.observe("a", Some((60, 5_000_000)), t0 + timing::METRICS_REPORT);
         assert!(rate.bytes_per_second().is_some());
         rate.observe("b", Some((60, 5_000_000)), t0 + Duration::from_secs(6));
         assert_eq!(rate.bytes_per_second(), None);
@@ -4696,7 +4691,7 @@ mod tests {
     fn cadence_long_stall_yields_one_honest_report() {
         let t0 = Instant::now();
         let mut meter = CadenceMeter::new(t0);
-        meter.sample(t0 + Duration::from_millis(16), Activity::Playing, true);
+        meter.sample(t0 + timing::FRAME_TICK, Activity::Playing, true);
         meter.sample(t0 + Duration::from_millis(3016), Activity::Playing, true);
         let Some(report) = meter.finish_if_due(t0 + Duration::from_millis(3020)) else {
             unreachable!("interval due")

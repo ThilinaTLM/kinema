@@ -1,29 +1,21 @@
 //! `MediaCard`: the raised, clipped container for media tiles.
 //!
-//! Raised fill, `LG` radius, `line_subtle` edge. On hover the card lifts 3 px,
+//! Raised fill, `LG` radius, `border` edge. On hover the card lifts 3 px,
 //! gains the `card_hover` shadow and a brighter edge, driven by the same
 //! [`CardHover`] tween as the poster card (reduced motion snaps). The card
 //! fills its host, which owns identity, focus, clicks and context menus, so
 //! the lift never moves the hit area.
 use crate::{
     ui::motion::{self, CardHover, card_hover as hv},
-    ui::theme::{self, palette, radius, space},
+    ui::theme::{self, opacity, palette, radius, size},
 };
 use gpui::{prelude::*, *};
 use std::time::Instant;
 
-/// Edge brightness at full lift, relative to the resting edge alpha.
-pub const HOVER_EDGE_GAIN: f32 = 1.75;
-/// Alpha of the accent edge on a highlighted (e.g. next-up) card.
-pub const ACCENT_EDGE_ALPHA: f32 = 0.55;
-
 /// Resting edge brightened by `lift` in `0..=1`.
 pub fn lifted_edge(edge: Hsla, lift: f32) -> Hsla {
-    let gain = 1. + (HOVER_EDGE_GAIN - 1.) * lift.clamp(0., 1.);
-    Hsla {
-        a: (edge.a * gain).min(1.),
-        ..edge
-    }
+    let gain = 1. + (opacity::EDGE_HOVER_GAIN - 1.) * lift.clamp(0., 1.);
+    edge.alpha((edge.a * gain).min(1.))
 }
 
 /// Soft shadow scaled by hover progress.
@@ -92,9 +84,9 @@ impl RenderOnce for MediaCard {
             window.request_animation_frame();
         }
         let edge = if self.accent_edge {
-            p.primary.opacity(ACCENT_EDGE_ALPHA)
+            p.primary.opacity(opacity::SELECTED_EDGE_STRONG)
         } else {
-            lifted_edge(p.line_subtle, lift)
+            lifted_edge(p.border, lift)
         };
         div()
             .id(self.id)
@@ -105,8 +97,8 @@ impl RenderOnce for MediaCard {
             .flex_col()
             .overflow_hidden()
             .rounded(radius::LG)
-            .bg(p.bg_raised)
-            .border(space::HAIRLINE)
+            .bg(p.card)
+            .border(size::HAIRLINE)
             .border_color(edge)
             .shadow(lift_shadow(theme::elevation::md(&p), lift))
             .on_hover(move |hovered, window, cx| {
@@ -125,10 +117,10 @@ mod tests {
 
     #[test]
     fn edge_brightens_with_lift_and_stays_bounded() {
-        let edge = Palette::dark().line_subtle;
+        let edge = Palette::dark().border;
         assert_eq!(lifted_edge(edge, 0.), edge);
         assert!(lifted_edge(edge, 1.).a > edge.a);
-        assert!((lifted_edge(edge, 1.).a - edge.a * HOVER_EDGE_GAIN).abs() < 1e-6);
+        assert!((lifted_edge(edge, 1.).a - edge.a * opacity::EDGE_HOVER_GAIN).abs() < 1e-6);
         assert_eq!(lifted_edge(edge, 9.).a, lifted_edge(edge, 1.).a);
         assert_eq!(lifted_edge(Hsla { a: 0.9, ..edge }, 1.).a, 1.);
     }

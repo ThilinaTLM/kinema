@@ -34,8 +34,8 @@ use crate::{
     ui::primitives::switch::{Checkbox, Radio, Switch},
     ui::primitives::text_input::TextInput,
     ui::primitives::tooltip::tooltip,
-    ui::theme::typography::TypeExt,
-    ui::theme::{self, Mode, Palette, space as s, typeface as t},
+    ui::theme::typography::{TextSize, TypeExt, Weight},
+    ui::theme::{self, Mode, Palette, layout, size, space as s},
 };
 
 actions!(design_lab, [NextFocus, PreviousFocus]);
@@ -422,7 +422,10 @@ fn col() -> Div {
     div().flex().flex_col().gap(s::S8)
 }
 fn heading(label: &'static str) -> Div {
-    div().type_style(t::HEADING).child(label)
+    div()
+        .text(TextSize::Lg)
+        .weight(Weight::Semibold)
+        .child(label)
 }
 fn action(label: &'static str, checked: bool) -> MenuItem {
     MenuItem::Action {
@@ -475,8 +478,8 @@ fn art(index: usize, width: u32, height: u32) -> Arc<RenderImage> {
 }
 
 fn grid(width: f32) -> (usize, f32) {
-    let available = (width - 2. * f32::from(s::GRID_INSET)).max(1.);
-    let gap = f32::from(s::GRID_GAP);
+    let available = (width - 2. * f32::from(size::PAGE_INSET)).max(1.);
+    let gap = f32::from(layout::GRID_GAP);
     let columns = ((available + gap) / (172. + gap)).floor().max(2.) as usize;
     (
         columns,
@@ -488,11 +491,11 @@ fn action_column(window: &Window) -> Pixels {
     if window.viewport_size().width < px(1100.) {
         px(340.)
     } else {
-        s::ACTION_COLUMN
+        size::ACTION_COLUMN
     }
 }
 fn selected_row(el: Stateful<Div>, palette: Palette) -> Stateful<Div> {
-    el.bg(palette.accent_tint).child(
+    el.bg(palette.selection).child(
         div()
             .absolute()
             .left_0()
@@ -828,7 +831,7 @@ impl Lab {
             this.kind = *value;
             cx.notify();
         }));
-        div().relative().flex_none().h(s::TOOLBAR_HEIGHT).child(
+        div().relative().flex_none().h(size::TOOLBAR_HEIGHT).child(
             Toolbar::new()
                 .leading(scope)
                 .leading(kind)
@@ -858,7 +861,7 @@ impl Lab {
     }
     fn browse(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let (columns, width) = grid(f32::from(window.viewport_size().width));
-        let mut rows = col().gap(s::GRID_GAP).p(s::GRID_INSET);
+        let mut rows = col().gap(layout::GRID_GAP).p(size::PAGE_INSET);
         for chunk in self.cards.chunks(columns) {
             for card in chunk {
                 card.update(cx, |card, _| card.width = width);
@@ -866,7 +869,7 @@ impl Lab {
             rows = rows.child(
                 row()
                     .items_start()
-                    .gap(s::GRID_GAP)
+                    .gap(layout::GRID_GAP)
                     .children(chunk.iter().cloned()),
             );
         }
@@ -892,10 +895,10 @@ impl Lab {
                 row()
                     .id(("file-choice", i))
                     .w_full()
-                    .h(s::ROW_TWO_LINE)
+                    .h(size::ROW_TALL)
                     .justify_between()
                     .border_b_1()
-                    .border_color(p.line_hairline)
+                    .border_color(p.border)
                     .child(
                         Radio::new(("file-radio", i), name, self.selected_file == Some(i))
                             .on_select(move |_, cx| {
@@ -907,8 +910,9 @@ impl Lab {
                     )
                     .child(
                         div()
-                            .type_style(t::MONO)
-                            .text_color(p.text_secondary)
+                            .text(TextSize::Sm)
+                            .mono()
+                            .text_color(p.muted_foreground)
                             .child(size),
                     ),
             );
@@ -922,7 +926,8 @@ impl Lab {
                             .gap(s::S4)
                             .child(
                                 div()
-                                    .type_style(t::MONO)
+                                    .text(TextSize::Sm)
+                                    .mono()
                                     .child("Quiet.Orbit.2024.1080p.WEB-DL"),
                             )
                             .child(
@@ -931,8 +936,8 @@ impl Lab {
                                     .child(Badge::quality("HDR"))
                                     .child(
                                         div()
-                                            .type_style(t::SMALL)
-                                            .text_color(p.text_secondary)
+                                            .text(TextSize::Sm)
+                                            .text_color(p.muted_foreground)
                                             .child("via Real-Debrid · fixture"),
                                     ),
                             ),
@@ -940,9 +945,14 @@ impl Lab {
                     .child(
                         row()
                             .gap(s::S8)
-                            .text_color(p.status_ok)
-                            .child(div().type_style(t::BODY_STRONG).child("① Prepared"))
-                            .child(Icon::new(IconName::Check).color(p.status_ok)),
+                            .text_color(p.success)
+                            .child(
+                                div()
+                                    .text(TextSize::Base)
+                                    .weight(Weight::Semibold)
+                                    .child("① Prepared"),
+                            )
+                            .child(Icon::new(IconName::Check).color(p.success)),
                     )
                     .child(
                         col()
@@ -952,8 +962,8 @@ impl Lab {
                     )
                     .child(
                         div()
-                            .type_style(t::SMALL)
-                            .text_color(p.text_muted)
+                            .text(TextSize::Sm)
+                            .text_color(p.subtle_foreground)
                             .child("Fixture only · no player will be started"),
                     ),
             )
@@ -1119,7 +1129,7 @@ impl Lab {
                         div()
                             .id("context-target")
                             .p(s::S8)
-                            .bg(p.ctl_rest)
+                            .bg(p.secondary)
                             .child("Right-click / Shift+F10")
                             .context_menu("specimen-context", |_, _| card_menu()),
                     )
@@ -1146,8 +1156,8 @@ impl Lab {
                     .gap(s::S2)
                     .child(
                         div()
-                            .type_style(t::SMALL)
-                            .text_color(p.text_secondary)
+                            .text(TextSize::Sm)
+                            .text_color(p.muted_foreground)
                             .child(label),
                     )
                     .child(self.inputs[i].clone()),
@@ -1170,39 +1180,66 @@ impl Lab {
         editors =
             editors.child(Alert::new(AlertTone::Warning, "Saved results · refresh failed").strip());
         let mut typography = col().child(heading("Type scale"));
-        for (label, style) in [
-            ("DISPLAY · Quiet Orbit", t::DISPLAY),
-            ("TITLE · Play", t::TITLE),
-            ("HEADING · North Harbor", t::HEADING),
-            ("BODY · A distant shore", t::BODY),
-            ("BODY STRONG · Open", t::BODY_STRONG),
-            ("SMALL · 2024 · 118 min", t::SMALL),
-            ("CAPTION · 2160P", t::CAPTION),
-            ("MONO · release.1080p.mkv", t::MONO),
-        ] {
-            typography = typography.child(div().type_style(style).child(label));
-        }
+        typography = typography
+            .child(
+                div()
+                    .text(TextSize::Xxl)
+                    .weight(Weight::Bold)
+                    .child("DISPLAY · Quiet Orbit"),
+            )
+            .child(
+                div()
+                    .text(TextSize::Xl)
+                    .weight(Weight::Semibold)
+                    .child("TITLE · Play"),
+            )
+            .child(
+                div()
+                    .text(TextSize::Lg)
+                    .weight(Weight::Semibold)
+                    .child("HEADING · North Harbor"),
+            )
+            .child(div().text(TextSize::Base).child("BODY · A distant shore"))
+            .child(
+                div()
+                    .text(TextSize::Base)
+                    .weight(Weight::Semibold)
+                    .child("BODY STRONG · Open"),
+            )
+            .child(div().text(TextSize::Sm).child("SMALL · 2024 · 118 min"))
+            .child(
+                div()
+                    .text(TextSize::Xs)
+                    .weight(Weight::Semibold)
+                    .child("CAPTION · 2160P"),
+            )
+            .child(
+                div()
+                    .text(TextSize::Sm)
+                    .mono()
+                    .child("MONO · release.1080p.mkv"),
+            );
         typography = typography.child(heading("Cinema · semantic palette"));
         for (name, color) in [
-            ("bg.canvas", p.bg_canvas),
-            ("bg.surface", p.bg_surface),
-            ("bg.raised", p.bg_raised),
-            ("bg.placeholder", p.bg_placeholder),
-            ("ctl.rest", p.ctl_rest),
-            ("ctl.hover", p.ctl_hover),
-            ("ctl.pressed", p.ctl_pressed),
-            ("line.hairline", p.line_hairline),
-            ("line.control", p.line_control),
-            ("text.primary", p.text_primary),
-            ("text.secondary", p.text_secondary),
-            ("text.muted", p.text_muted),
+            ("bg.canvas", p.background),
+            ("bg.surface", p.surface),
+            ("bg.raised", p.card),
+            ("bg.placeholder", p.muted),
+            ("ctl.rest", p.secondary),
+            ("ctl.hover", p.accent),
+            ("ctl.pressed", p.pressed(p.secondary)),
+            ("line.hairline", p.border),
+            ("line.control", p.input),
+            ("text.primary", p.foreground),
+            ("text.secondary", p.muted_foreground),
+            ("text.muted", p.subtle_foreground),
             ("accent", p.primary),
-            ("accent.text", p.accent_text),
-            ("focus.ring", p.focus_ring),
+            ("accent.text", p.primary_text),
+            ("focus.ring", p.ring),
             ("rating", p.rating),
-            ("status.ok", p.status_ok),
-            ("status.warn", p.status_warn),
-            ("status.error", p.status_error),
+            ("status.ok", p.success),
+            ("status.warn", p.warning),
+            ("status.error", p.destructive),
         ] {
             typography = typography.child(
                 row()
@@ -1213,9 +1250,9 @@ impl Lab {
                             .h(s::S12)
                             .bg(color)
                             .border_1()
-                            .border_color(p.line_control),
+                            .border_color(p.input),
                     )
-                    .child(div().type_style(t::MONO).child(name)),
+                    .child(div().text(TextSize::Sm).mono().child(name)),
             );
         }
         col()
@@ -1226,7 +1263,8 @@ impl Lab {
                     .justify_between()
                     .child(
                         div()
-                            .type_style(t::TITLE)
+                            .text(TextSize::Xl)
+                            .weight(Weight::Semibold)
                             .child("Kinema / native design lab"),
                     )
                     .child("v3 · fixture only · no services"),
@@ -1268,7 +1306,7 @@ impl Lab {
                     )
                     .child(
                         col()
-                            .w(s::POPOVER_WIDTH)
+                            .w(size::POPOVER_WIDTH)
                             .child(heading("Transfers popover"))
                             .child(
                                 Popover::new("interactive-popover")
@@ -1276,7 +1314,7 @@ impl Lab {
                                     .content(
                                         col()
                                             .w(px(352.))
-                                            .bg(p.bg_raised)
+                                            .bg(p.card)
                                             .child(heading("Transfers"))
                                             .child("North Harbor · S01E02")
                                             .child("Downloading 1.4 / 4.2 GiB · serving")
@@ -1300,17 +1338,18 @@ impl Lab {
             .tab_stop(true)
             .flex()
             .items_center()
-            .h(s::CONTROL_HEIGHT)
+            .h(size::CONTROL_SM)
             .px(s::S12)
             .gap(s::S6)
-            .type_style(t::BODY_STRONG)
-            .border(s::FOCUS_RING)
-            .border_color(dark.bg_canvas.opacity(0.))
-            .text_color(dark.text_secondary)
+            .text(TextSize::Base)
+            .weight(Weight::Semibold)
+            .border(size::FOCUS_RING)
+            .border_color(dark.background.opacity(0.))
+            .text_color(dark.muted_foreground)
             .cursor_pointer()
-            .hover(move |el| el.bg(dark.ctl_hover))
-            .focus_visible(move |el| el.border_color(dark.focus_ring))
-            .child(Icon::new(IconName::ChevronDown).color(dark.text_secondary))
+            .hover(move |el| el.bg(dark.accent))
+            .focus_visible(move |el| el.border_color(dark.ring))
+            .child(Icon::new(IconName::ChevronDown).color(dark.muted_foreground))
             .child("Details & provenance")
             .on_click(cx.listener(|this, _, _, cx| {
                 this.provenance_open = !this.provenance_open;
@@ -1389,8 +1428,8 @@ impl Lab {
             // These are functional scrims across the artwork, not a text-bearing box.
             .child(div().absolute().inset_0().bg(linear_gradient(
                 90.,
-                linear_color_stop(dark.scrim_max, 0.),
-                linear_color_stop(dark.scrim_max.opacity(0.), 0.65),
+                linear_color_stop(dark.scrim, 0.),
+                linear_color_stop(dark.scrim.opacity(0.), 0.65),
             )))
             .child(
                 div()
@@ -1401,8 +1440,8 @@ impl Lab {
                     .h(relative(0.40))
                     .bg(linear_gradient(
                         180.,
-                        linear_color_stop(p.bg_canvas.opacity(0.), 0.),
-                        linear_color_stop(p.bg_canvas, 1.),
+                        linear_color_stop(p.background.opacity(0.), 0.),
+                        linear_color_stop(p.background, 1.),
                     )),
             )
             .child(
@@ -1426,12 +1465,12 @@ impl Lab {
                             .min_w_0()
                             .max_w(px(640.))
                             .gap(s::S8)
-                            .text_color(dark.text_primary)
-                            .child(div().type_style(t::DISPLAY).child(title))
+                            .text_color(dark.foreground)
+                            .child(div().text(TextSize::Xxl).weight(Weight::Bold).child(title))
                             .child(
                                 div()
-                                    .type_style(t::SMALL)
-                                    .text_color(dark.text_secondary)
+                                    .text(TextSize::Sm)
+                                    .text_color(dark.muted_foreground)
                                     .child(if series {
                                         "2024 · 3 seasons · Drama · Mystery"
                                     } else {
@@ -1441,14 +1480,14 @@ impl Lab {
                             .child(
                                 row().child(Badge::rating(Some(8.1)).over_art(true)).child(
                                     div()
-                                        .type_style(t::SMALL)
-                                        .text_color(dark.text_muted)
+                                        .text(TextSize::Sm)
+                                        .text_color(dark.subtle_foreground)
                                         .child("IMDb"),
                                 ),
                             )
                             .child(
                                 div()
-                                    .type_style(t::BODY_LONG)
+                                    .text(TextSize::Md)
                                     .w_full()
                                     .max_w(px(640.))
                                     .line_clamp(4)
@@ -1490,19 +1529,19 @@ impl Lab {
                             .gap(s::S4)
                             .child(
                                 div()
-                                    .type_style(t::SMALL)
-                                    .text_color(p.text_muted)
+                                    .text(TextSize::Sm)
+                                    .text_color(p.subtle_foreground)
                                     .child(label),
                             )
                             .child(
                                 div()
-                                    .type_style(t::SMALL)
-                                    .text_color(p.text_secondary)
+                                    .text(TextSize::Sm)
+                                    .text_color(p.muted_foreground)
                                     .child(value),
                             )
                     }),
                 ),
-        ).when(self.provenance_open, |el| el.child(div().px(s::S32).type_style(t::SMALL).text_color(p.text_muted).child("Metadata: offline fixture · IMDb rating fixture 8.1 · no provider contacted")))
+        ).when(self.provenance_open, |el| el.child(div().px(s::S32).text(TextSize::Sm).text_color(p.subtle_foreground).child("Metadata: offline fixture · IMDb rating fixture 8.1 · no provider contacted")))
     }
 
     fn streams(&self, window: &Window, series: bool, cx: &mut Context<Self>) -> Div {
@@ -1512,9 +1551,9 @@ impl Lab {
             .w(action_column(window))
             .h_full()
             .flex_none()
-            .bg(p.bg_surface)
+            .bg(p.surface)
             .border_l_1()
-            .border_color(p.line_hairline);
+            .border_color(p.border);
         if series {
             streams = streams.child(
                 row()
@@ -1531,11 +1570,16 @@ impl Lab {
                             cx.notify();
                         })),
                     )
-                    .child(div().type_style(t::BODY_STRONG).child(format!(
-                        "S01E{:02} · {}",
-                        self.selected_episode + 1,
-                        EPISODES[self.selected_episode].0
-                    ))),
+                    .child(
+                        div()
+                            .text(TextSize::Base)
+                            .weight(Weight::Semibold)
+                            .child(format!(
+                                "S01E{:02} · {}",
+                                self.selected_episode + 1,
+                                EPISODES[self.selected_episode].0
+                            )),
+                    ),
             );
         }
         streams = streams
@@ -1569,16 +1613,17 @@ impl Lab {
                 col()
                     .id(("stream", i))
                     .relative()
-                    .h(s::ROW_TWO_LINE)
+                    .h(size::ROW_TALL)
                     .gap(s::S4)
                     .px(s::S12)
                     .py(s::S8)
                     .border_b_1()
-                    .border_color(p.line_hairline)
+                    .border_color(p.border)
                     .when(i == 1, |el| selected_row(el, p))
                     .child(
                         div()
-                            .type_style(t::MONO)
+                            .text(TextSize::Sm)
+                            .mono()
                             .text_ellipsis()
                             .child(release.clone())
                             .id(("release", i))
@@ -1588,15 +1633,15 @@ impl Lab {
                         row()
                             .child(Badge::quality(quality))
                             .when(i == 0, |el| el.child(Badge::quality("HDR")))
-                            .child(div().type_style(t::SMALL).child(if i == 0 {
+                            .child(div().text(TextSize::Sm).child(if i == 0 {
                                 "18.2 GiB"
                             } else {
                                 "4.2 GiB"
                             }))
                             .child(
                                 div()
-                                    .type_style(t::SMALL)
-                                    .text_color(p.text_secondary)
+                                    .text(TextSize::Sm)
+                                    .text_color(p.muted_foreground)
                                     .child("412 seeds"),
                             ),
                     )
@@ -1617,9 +1662,9 @@ impl Lab {
             .w(action_column(window))
             .h_full()
             .flex_none()
-            .bg(p.bg_surface)
+            .bg(p.surface)
             .border_l_1()
-            .border_color(p.line_hairline)
+            .border_color(p.border)
             .child(
                 row()
                     .p(s::S16)
@@ -1627,8 +1672,8 @@ impl Lab {
                     .child(self.season.clone())
                     .child(
                         div()
-                            .type_style(t::SMALL)
-                            .text_color(p.text_muted)
+                            .text(TextSize::Sm)
+                            .text_color(p.subtle_foreground)
                             .child("8 episodes"),
                     ),
             );
@@ -1637,18 +1682,19 @@ impl Lab {
                 row()
                     .id(("episode", i))
                     .relative()
-                    .h(s::ROW_TWO_LINE)
+                    .h(size::ROW_TALL)
                     .px(s::S16)
                     .gap(s::S12)
                     .border_b_1()
-                    .border_color(p.line_hairline)
+                    .border_color(p.border)
                     .cursor_pointer()
                     .when(i == self.selected_episode, |el| selected_row(el, p))
-                    .hover(move |el| el.bg(p.ctl_hover))
+                    .hover(move |el| el.bg(p.accent))
                     .child(
                         div()
-                            .type_style(t::MONO)
-                            .text_color(p.text_muted)
+                            .text(TextSize::Sm)
+                            .mono()
+                            .text_color(p.subtle_foreground)
                             .child(format!("{:02}", i + 1)),
                     )
                     .child(
@@ -1659,13 +1705,18 @@ impl Lab {
                             .child(
                                 row()
                                     .justify_between()
-                                    .child(div().type_style(t::BODY_STRONG).child(title))
+                                    .child(
+                                        div()
+                                            .text(TextSize::Base)
+                                            .weight(Weight::Semibold)
+                                            .child(title),
+                                    )
                                     .child(
                                         row()
                                             .child(
                                                 div()
-                                                    .type_style(t::SMALL)
-                                                    .text_color(p.text_secondary)
+                                                    .text(TextSize::Sm)
+                                                    .text_color(p.muted_foreground)
                                                     .child(runtime),
                                             )
                                             .child({
@@ -1690,8 +1741,8 @@ impl Lab {
                             )
                             .child(
                                 div()
-                                    .type_style(t::SMALL)
-                                    .text_color(p.text_muted)
+                                    .text(TextSize::Sm)
+                                    .text_color(p.subtle_foreground)
                                     .child(format!("Aired {date}")),
                             ),
                     )
@@ -1723,10 +1774,10 @@ impl Lab {
             .gap_0()
             .child(
                 row()
-                    .h(s::TOOLBAR_HEIGHT)
+                    .h(size::TOOLBAR_HEIGHT)
                     .flex_none()
                     .px(s::S20)
-                    .bg(p.bg_surface)
+                    .bg(p.surface)
                     .child(
                         Button::icon_button("back", IconName::ArrowLeft, "Back").on_click(
                             cx.listener(|this, _, _, cx| {
@@ -1761,12 +1812,12 @@ impl Lab {
     fn states(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let p = *theme::palette(cx);
         let width = (f32::from(window.viewport_size().width)
-            - 2. * f32::from(s::GRID_INSET)
-            - f32::from(s::GRID_GAP))
+            - 2. * f32::from(size::PAGE_INSET)
+            - f32::from(layout::GRID_GAP))
             / 2.;
-        let height = (f32::from(window.viewport_size().height - s::TOOLBAR_HEIGHT)
-            - 2. * f32::from(s::GRID_INSET)
-            - 2. * f32::from(s::GRID_GAP))
+        let height = (f32::from(window.viewport_size().height - size::TOOLBAR_HEIGHT)
+            - 2. * f32::from(size::PAGE_INSET)
+            - 2. * f32::from(layout::GRID_GAP))
             / 3.;
         let fixtures = [
             ("Loading · first page", None, "", "", ""),
@@ -1800,9 +1851,9 @@ impl Lab {
             ),
             ("Stale · loaded titles stay visible", None, "", "", ""),
         ];
-        let mut specimens = col().p(s::GRID_INSET).gap(s::GRID_GAP);
+        let mut specimens = col().p(size::PAGE_INSET).gap(layout::GRID_GAP);
         for (row_index, pair) in fixtures.chunks(2).enumerate() {
-            let mut cells = row().items_start().gap(s::GRID_GAP);
+            let mut cells = row().items_start().gap(layout::GRID_GAP);
             for (j, &(label, icon, title, body, action_label)) in pair.iter().enumerate() {
                 let index = row_index * 2 + j;
                 let mut cell = col()
@@ -1810,20 +1861,20 @@ impl Lab {
                     .h(px(height))
                     .gap(s::S12)
                     .p(s::S16)
-                    .bg(p.bg_surface)
+                    .bg(p.surface)
                     .border_1()
-                    .border_color(p.line_hairline)
+                    .border_color(p.border)
                     .child(
                         div()
-                            .type_style(t::SMALL)
-                            .text_color(p.text_muted)
+                            .text(TextSize::Sm)
+                            .text_color(p.subtle_foreground)
                             .child(label),
                     );
                 if let Some(icon) = icon {
                     let ink = match icon {
-                        IconName::Warning => p.status_warn,
-                        IconName::Error => p.status_error,
-                        _ => p.text_secondary,
+                        IconName::Warning => p.warning,
+                        IconName::Error => p.destructive,
+                        _ => p.muted_foreground,
                     };
                     cell = cell.child(
                         col()
@@ -1833,11 +1884,17 @@ impl Lab {
                             .justify_center()
                             .gap(s::S8)
                             .child(Icon::new(icon).color(ink))
-                            .child(div().type_style(t::HEADING).text_center().child(title))
                             .child(
                                 div()
-                                    .type_style(t::SMALL)
-                                    .text_color(p.text_secondary)
+                                    .text(TextSize::Lg)
+                                    .weight(Weight::Semibold)
+                                    .text_center()
+                                    .child(title),
+                            )
+                            .child(
+                                div()
+                                    .text(TextSize::Sm)
+                                    .text_color(p.muted_foreground)
                                     .text_center()
                                     .child(body),
                             )
@@ -1854,9 +1911,9 @@ impl Lab {
                                 div()
                                     .w(px(84.))
                                     .h(px(126.))
-                                    .bg(p.bg_placeholder)
+                                    .bg(p.muted)
                                     .border_1()
-                                    .border_color(p.line_hairline)
+                                    .border_color(p.border)
                             })),
                     );
                 } else {
@@ -1902,8 +1959,8 @@ impl Lab {
         let p = *theme::palette(cx);
         let label = |text: &'static str| {
             div()
-                .type_style(t::SMALL)
-                .text_color(p.text_muted)
+                .text(TextSize::Sm)
+                .text_color(p.subtle_foreground)
                 .child(text)
         };
         let tones = [
@@ -2084,7 +2141,7 @@ impl Lab {
                         Section::new("Section")
                             .count(10)
                             .trailing(Button::new("pat-section-action", "Sort").variant(ButtonVariant::Ghost))
-                            .child(div().type_style(t::BODY).text_color(p.text_secondary).child(
+                            .child(div().text(TextSize::Base).text_color(p.muted_foreground).child(
                                 "Body content sits below a heading row with count and trailing action.",
                             )),
                     ),
@@ -2160,14 +2217,14 @@ impl Lab {
                 .min_w_0()
                 .p(s::S12)
                 .gap(s::S8)
-                .bg(p.bg_surface)
+                .bg(p.surface)
                 .border_1()
-                .border_color(p.line_subtle)
+                .border_color(p.border)
                 .rounded(theme::radius::LG)
                 .child(
                     div()
-                        .type_style(t::SMALL)
-                        .text_color(p.text_muted)
+                        .text(TextSize::Sm)
+                        .text_color(p.subtle_foreground)
                         .child(name),
                 )
                 .child(body)
@@ -2186,17 +2243,18 @@ impl Lab {
                 .into_any_element()
         };
         col()
-            .p(s::GRID_INSET)
-            .gap(s::GRID_GAP)
+            .p(size::PAGE_INSET)
+            .gap(layout::GRID_GAP)
             .child(
                 div()
-                    .type_style(t::HEADING)
+                    .text(TextSize::Lg)
+                    .weight(Weight::Semibold)
                     .child("Pattern states · ResourceView / StateView"),
             )
             .child(
                 row()
                     .items_start()
-                    .gap(s::GRID_GAP)
+                    .gap(layout::GRID_GAP)
                     .child(cell("Loading · skeleton", view("pat-rv-loading", &loading)))
                     .child(cell("Error · Retry", view("pat-rv-error", &error)))
                     .child(cell("Empty · successful", view("pat-rv-empty", &empty))),
@@ -2204,7 +2262,7 @@ impl Lab {
             .child(
                 row()
                     .items_start()
-                    .gap(s::GRID_GAP)
+                    .gap(layout::GRID_GAP)
                     .child(cell(
                         "Refreshing · stale stays",
                         view("pat-rv-refresh", &refreshing),
@@ -2252,9 +2310,9 @@ impl Render for Lab {
             .on_action(|_: &PreviousFocus, window, cx| window.focus_prev(cx))
             .size_full()
             .relative()
-            .bg(p.bg_canvas)
-            .text_color(p.text_primary)
-            .type_style(t::BODY)
+            .bg(p.background)
+            .text_color(p.foreground)
+            .text(TextSize::Base)
             .child(content)
             .when(self.sheet, |el| el.child(self.play_sheet(cx)))
     }
@@ -2577,9 +2635,9 @@ impl Render for ProductionScene {
         div()
             .size_full()
             .relative()
-            .bg(p.bg_canvas)
-            .text_color(p.text_primary)
-            .type_style(t::BODY)
+            .bg(p.background)
+            .text_color(p.foreground)
+            .text(TextSize::Base)
             // Keyboard traversal for native focus captures of production scenes.
             .key_context("KinemaLab")
             .track_focus(&self.focus)
@@ -2589,13 +2647,13 @@ impl Render for ProductionScene {
             .when(self.transfers, |el| {
                 el.child(
                     div()
-                        .h(s::TOOLBAR_HEIGHT)
+                        .h(size::TOOLBAR_HEIGHT)
                         .w_full()
                         .flex()
                         .justify_end()
                         .items_center()
                         .px(s::S20)
-                        .bg(p.bg_surface)
+                        .bg(p.surface)
                         .child(
                             Popover::new("fixture-transfers")
                                 .trigger(

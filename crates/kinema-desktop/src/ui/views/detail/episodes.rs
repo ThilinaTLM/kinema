@@ -1,5 +1,10 @@
 //! Detail episodes presentation.
 use super::*;
+use crate::ui::theme::layout::detail::{
+    OVERVIEW_MAX_WIDTH, SEASON_HEADER_POSTER_W, SEASON_POSTER_W, SEASON_TILE_GAP, SEASON_TILE_MAX,
+    SEASON_TILE_MIN,
+};
+use crate::ui::theme::typography::{TextSize, TypeExt, Weight};
 use crate::{
     ui::blocks::ViewState,
     ui::blocks::media_card::MediaCard,
@@ -10,23 +15,9 @@ use crate::{
     ui::blocks::watched_toggle::WatchedToggle,
     ui::motion::interaction::focus_ring,
     ui::primitives::alert::{Alert, AlertTone},
-    ui::theme::TypeStyle,
 };
 use kinema_core::watch_progress::{self, Tally, WatchedState};
 
-/// Season tile grid geometry (episodes revision 2026-10): 12 px gaps.
-const SEASON_TILE_MIN: Pixels = px(184.);
-const SEASON_TILE_MAX: Pixels = px(300.);
-const SEASON_TILE_GAP: Pixels = px(12.);
-const SEASON_POSTER_W: Pixels = px(40.);
-const SEASON_HEADER_POSTER_W: Pixels = px(72.);
-/// "Season N" in the season header: 20/26 semibold.
-const SEASON_TITLE: TypeStyle = TypeStyle {
-    size: px(20.),
-    line_height: px(26.),
-    weight: FontWeight(600.),
-    mono: false,
-};
 /// Longer overviews get a More/Less toggle; three lines hold roughly this much.
 const OVERVIEW_TOGGLE_CHARS: usize = 220;
 const POSTER_RATIO: f32 = 2. / 3.;
@@ -506,8 +497,8 @@ impl Detail {
                     .when(hidden > 0 && !self.season_expanded, |el| {
                         el.child(
                             div()
-                                .type_style(t::SMALL)
-                                .text_color(p.text_muted)
+                                .text(TextSize::Sm)
+                                .text_color(p.subtle_foreground)
                                 .child(format!("Showing {} of {total}", total - hidden)),
                         )
                     }),
@@ -567,11 +558,11 @@ impl Detail {
                 .h(s::S2)
                 .w_full()
                 .rounded(s::S2)
-                .bg(p.line_subtle)
+                .bg(p.border)
                 .overflow_hidden()
                 .child(div().h_full().w(relative(t.fraction())).bg(p.primary))
         });
-        let hover = p.ctl_hover;
+        let hover = p.accent;
         div()
             .id(("season-tile", n as usize))
             .debug_selector(|| format!("season-tile-{n}"))
@@ -595,13 +586,13 @@ impl Detail {
             .pr(s::S12)
             .rounded(radius::LG)
             .border_1()
-            .border_color(if selected { p.primary } else { p.line_subtle })
+            .border_color(if selected { p.primary } else { p.border })
             .bg(if selected {
-                p.accent_tint
+                p.selection
             } else if special {
-                p.bg_canvas.opacity(0.)
+                theme::transparent(p.background)
             } else {
-                p.bg_raised
+                p.card
             })
             .cursor_pointer()
             .hover(move |el| if selected { el } else { el.bg(hover) })
@@ -646,8 +637,9 @@ impl Detail {
                             .child(
                                 div()
                                     .min_w_0()
-                                    .type_style(t::BODY_STRONG)
-                                    .text_color(p.text_primary)
+                                    .text(TextSize::Base)
+                                    .weight(Weight::Semibold)
+                                    .text_color(p.foreground)
                                     .truncate()
                                     .child(title),
                             )
@@ -658,13 +650,13 @@ impl Detail {
                             .flex()
                             .items_baseline()
                             .gap(s::S4)
-                            .type_style(t::SMALL)
-                            .child(div().text_color(p.text_muted).truncate().child(sub))
+                            .text(TextSize::Sm)
+                            .child(div().text_color(p.subtle_foreground).truncate().child(sub))
                             .when(tile.next_up, |el| {
                                 el.child(
                                     div()
                                         .flex_none()
-                                        .text_color(p.accent_text)
+                                        .text_color(p.primary_text)
                                         .child("\u{b7} Next up"),
                                 )
                             }),
@@ -738,9 +730,9 @@ impl Detail {
         let long = overview.as_deref().is_some_and(overview_needs_toggle);
         let overview_el = overview.map(|text| {
             div()
-                .type_style(t::BODY)
-                .text_color(p.text_secondary)
-                .max_w(px(880.))
+                .text(TextSize::Base)
+                .text_color(p.muted_foreground)
+                .max_w(OVERVIEW_MAX_WIDTH)
                 .when(!open, |el| el.clamp_lines(3))
                 .child(text)
         });
@@ -759,14 +751,15 @@ impl Detail {
                     .gap(s::S2)
                     .child(
                         div()
-                            .type_style(SEASON_TITLE)
-                            .text_color(p.text_primary)
+                            .text(TextSize::Xl)
+                            .weight(Weight::Semibold)
+                            .text_color(p.foreground)
                             .child(personal::season_label(season)),
                     )
                     .child(
                         div()
-                            .type_style(t::SMALL)
-                            .text_color(p.text_muted)
+                            .text(TextSize::Sm)
+                            .text_color(p.subtle_foreground)
                             .pb(s::S6)
                             .child(meta.join(" \u{b7} ")),
                     )
@@ -786,8 +779,8 @@ impl Detail {
                                 .cursor_pointer()
                                 .self_start()
                                 .pt(s::S4)
-                                .type_style(t::SMALL)
-                                .text_color(p.accent_text)
+                                .text(TextSize::Sm)
+                                .text_color(p.primary_text)
                                 .focus_visible(move |el| el.shadow(vec![focus_ring(&p)]))
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.season_overview_open = (!open).then_some(season);
@@ -812,8 +805,8 @@ impl Detail {
     pub(super) fn episodes_section(&mut self, width: Pixels, cx: &mut Context<Self>) -> AnyElement {
         let fit = fit_grid(
             width,
-            geometry::EPISODE_CARD_MIN_WIDTH,
-            geometry::EPISODE_CARD_MAX_WIDTH,
+            geometry::EPISODE_CARD_MIN,
+            geometry::EPISODE_CARD_MAX,
             geometry::EPISODE_GRID_GAP,
         );
         let episodes = self.episodes(cx);
@@ -885,8 +878,8 @@ impl Detail {
                     div()
                         .w_full()
                         .mt(s::S8)
-                        .h(s::HAIRLINE)
-                        .bg(theme::palette(cx).line_hairline),
+                        .h(size::HAIRLINE)
+                        .bg(theme::palette(cx).border),
                 )
                 .child(
                     div()
@@ -973,11 +966,11 @@ impl Detail {
         let key_rest = episode_meta(&ep);
         let overview = episode_overview(&ep);
         let name_ink = if watched_now {
-            p.text_secondary
+            p.muted_foreground
         } else {
-            p.text_primary
+            p.foreground
         };
-        let mut still = Thumb::new(state, STILL_RATIO, px(0.))
+        let mut still = Thumb::new(state, STILL_RATIO, Pixels::ZERO)
             .muted(watched_now)
             .overlay(
                 div()
@@ -1008,12 +1001,12 @@ impl Detail {
                     .flex()
                     .items_baseline()
                     .gap(s::S6)
-                    .type_style(t::SMALL)
-                    .text_color(p.text_muted)
+                    .text(TextSize::Sm)
+                    .text_color(p.subtle_foreground)
                     .child(
                         div()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(p.text_secondary)
+                            .weight(Weight::Semibold)
+                            .text_color(p.muted_foreground)
                             .child(format!("E{:02}", ep.number)),
                     )
                     .children(key_rest.map(|rest| div().truncate().child(format!("\u{b7} {rest}"))))
@@ -1022,7 +1015,7 @@ impl Detail {
                             .id(("episode-resume", id))
                             .flex_none()
                             .ml_auto()
-                            .text_color(p.accent_text)
+                            .text_color(p.primary_text)
                             .tooltip(tooltip(point.spoken()))
                             .child(format!(
                                 "{} {}",
@@ -1033,7 +1026,8 @@ impl Detail {
             )
             .child(
                 div()
-                    .type_style(t::HEADING)
+                    .text(TextSize::Lg)
+                    .weight(Weight::Semibold)
                     .text_color(name_ink)
                     .truncate()
                     .child(name.clone()),
@@ -1042,13 +1036,14 @@ impl Detail {
                 // Reserve two lines so cards in a row keep one height.
                 div()
                     .min_h(s::S32)
-                    .type_style(t::SMALL)
-                    .text_color(p.text_secondary)
+                    .text(TextSize::Sm)
+                    .text_color(p.muted_foreground)
                     .clamp_lines(2)
                     .children(overview),
             );
         let progress_items = self.progress_menu(Some((ep.season, ep.number)), cx);
-        let ring = BoxShadow::new(px(0.), px(0.), p.focus_ring).spread_radius(s::FOCUS_RING);
+        let ring =
+            BoxShadow::new(Pixels::ZERO, Pixels::ZERO, p.ring).spread_radius(size::FOCUS_RING);
         let card = div()
             .id(("episode", id))
             .debug_selector(|| format!("episode-{id}"))
@@ -1294,8 +1289,8 @@ mod tests {
         let fit = |w| {
             fit_grid(
                 px(w),
-                geometry::EPISODE_CARD_MIN_WIDTH,
-                geometry::EPISODE_CARD_MAX_WIDTH,
+                geometry::EPISODE_CARD_MIN,
+                geometry::EPISODE_CARD_MAX,
                 geometry::EPISODE_GRID_GAP,
             )
         };
@@ -1308,11 +1303,8 @@ mod tests {
                 "{width}"
             );
             if width >= 520. {
-                assert!(f.tile >= geometry::EPISODE_CARD_MIN_WIDTH, "{width}");
-                assert!(
-                    f.tile <= geometry::EPISODE_CARD_MAX_WIDTH + px(1.),
-                    "{width}"
-                );
+                assert!(f.tile >= geometry::EPISODE_CARD_MIN, "{width}");
+                assert!(f.tile <= geometry::EPISODE_CARD_MAX + px(1.), "{width}");
             }
         }
     }

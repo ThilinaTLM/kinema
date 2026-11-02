@@ -18,9 +18,6 @@ use kinema_core::{
 };
 use std::rc::Rc;
 
-/// Below this window width header chips collapse to their icon.
-pub(crate) const COMPACT_BELOW: Pixels = px(1100.);
-
 type Apply<T> = Rc<dyn Fn(T, &mut Window, &mut App)>;
 
 /// Server-side Discover sorts, in display order.

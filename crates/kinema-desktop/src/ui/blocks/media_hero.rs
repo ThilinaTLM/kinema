@@ -6,6 +6,12 @@
 //! stays behind the controls only in dark mode, so over-art styling follows
 //! [`uses_over_art`]: the hero applies it to its own badges;
 //! callers pass the same value to `Button`/`Badge` slots.
+use crate::ui::theme::layout::detail::{
+    HERO_ASIDE_WIDTH, HERO_FADE_HEIGHT, HERO_MIN_HEIGHT, HERO_OVERVIEW_SKELETON_WIDTH,
+    HERO_POSTER_WIDTH, HERO_SIDE_SCRIM_REACH, HERO_TEXT_MAX_WIDTH,
+};
+use crate::ui::theme::opacity;
+use crate::ui::theme::transparent;
 use std::{sync::Arc, time::Instant};
 
 use gpui::{prelude::*, *};
@@ -14,32 +20,17 @@ use crate::{
     artwork::ArtworkState,
     ui::motion::{self, AnimateExt, transition::CROSSFADE},
     ui::primitives::{Badge, SkeletonText},
-    ui::theme::typography::TypeExt,
-    ui::theme::{Mode, elevation, palette, radius, space, theme, typeface},
+    ui::theme::typography::{TextSize, TypeExt, Weight},
+    ui::theme::{Mode, elevation, palette, radius, size, space, theme},
 };
 
-/// Minimum hero height; content grows it when taller.
-const MIN_HEIGHT: Pixels = px(340.0);
-/// Footprint of the overview placeholder shown while the text loads.
-const OVERVIEW_SKELETON_WIDTH: Pixels = px(480.0);
-/// Poster frame width; screens that draw their own poster share this geometry.
-pub const POSTER_WIDTH: Pixels = px(168.0);
 /// Poster height / width (2:3).
 pub const POSTER_ASPECT: f32 = 1.5;
-const TEXT_MAX_WIDTH: Pixels = px(640.0);
 /// Lines of the overview placeholder shown while the text loads.
 const OVERVIEW_SKELETON_LINES: usize = 3;
 /// Safety clamp for pathologically long overviews; normal ones (3-5 lines)
 /// show in full.
 const OVERVIEW_MAX_LINES: usize = 8;
-/// Share of the hero height over which the art melts into the canvas.
-const FADE_HEIGHT: f32 = 0.7;
-/// Default strength of the even veil over the backdrop (times `backdrop_scrim`).
-const DEFAULT_VEIL: f32 = 0.5;
-/// Default opacity of the leading-edge scrim that keeps the title legible.
-const DEFAULT_SIDE_SCRIM: f32 = 0.55;
-/// Where the leading-edge scrim has fully faded out.
-const SIDE_SCRIM_REACH: f32 = 0.7;
 
 /// Whether controls over a backdrop should use dark over-art styling: only
 /// when dark art really sits behind them (dark mode with a backdrop).
@@ -103,22 +94,22 @@ impl MediaHero {
             overview: None,
             tagline: None,
             aside: None,
-            aside_width: px(320.0),
+            aside_width: HERO_ASIDE_WIDTH,
             stack_aside: false,
             title_action: None,
             primary: None,
             secondary: Vec::new(),
-            min_height: MIN_HEIGHT,
+            min_height: HERO_MIN_HEIGHT,
             fill: false,
             fade_into: None,
-            veil: DEFAULT_VEIL,
-            side_scrim: DEFAULT_SIDE_SCRIM,
+            veil: opacity::HERO_VEIL,
+            side_scrim: opacity::HERO_SIDE_SCRIM,
             overview_loading: false,
-            gutter: space::GRID_INSET,
-            top_inset: px(0.0),
+            gutter: size::PAGE_INSET,
+            top_inset: Pixels::ZERO,
             max_width: None,
-            poster_width: POSTER_WIDTH,
-            text_max_width: TEXT_MAX_WIDTH,
+            poster_width: HERO_POSTER_WIDTH,
+            text_max_width: HERO_TEXT_MAX_WIDTH,
         }
     }
     /// Small uppercase context line above the title (e.g. "Choose a stream").
@@ -184,7 +175,7 @@ impl MediaHero {
         self.fade_into = Some(canvas);
         self
     }
-    /// Veil strength over the backdrop (0 = none, 1 = full `backdrop_scrim`)
+    /// Veil strength over the backdrop (0 = none, 1 = full `overlay`)
     /// and opacity of the leading-edge scrim behind the text.
     pub fn scrims(mut self, veil: f32, side: f32) -> Self {
         self.veil = veil.clamp(0.0, 1.0);
@@ -295,7 +286,7 @@ impl RenderOnce for MediaHero {
         let has_backdrop = backdrop.is_some();
         let mode = theme(cx).mode;
         let over_art = uses_over_art(has_backdrop, mode);
-        let canvas = self.fade_into.unwrap_or(p.bg_canvas);
+        let canvas = self.fade_into.unwrap_or(p.background);
         let ink = p;
         let ramp = |fraction: f32| {
             div()
@@ -306,7 +297,7 @@ impl RenderOnce for MediaHero {
                 .h(relative(fraction))
                 .bg(linear_gradient(
                     180.,
-                    linear_color_stop(canvas.opacity(0.0), 0.),
+                    linear_color_stop(transparent(canvas), 0.),
                     linear_color_stop(canvas, 1.),
                 ))
         };
@@ -318,8 +309,8 @@ impl RenderOnce for MediaHero {
                 .h(self.poster_width * POSTER_ASPECT)
                 .rounded(radius::LG)
                 .overflow_hidden()
-                .bg(p.bg_placeholder)
-                .border(space::HAIRLINE)
+                .bg(p.muted)
+                .border(size::HAIRLINE)
                 .border_color(p.poster_edge)
                 .shadow(elevation::lg(&p))
                 .child(div().size_full().child(poster))
@@ -331,8 +322,8 @@ impl RenderOnce for MediaHero {
                 .w_full()
                 .min_w_0()
                 .max_w(self.text_max_width)
-                .type_style(typeface::BODY_LONG)
-                .text_color(ink.text_secondary)
+                .text(TextSize::Md)
+                .text_color(ink.muted_foreground)
                 .clamp_lines(OVERVIEW_MAX_LINES)
                 .child(text)
         });
@@ -340,7 +331,7 @@ impl RenderOnce for MediaHero {
         let overview = overview.or_else(|| {
             loading.then(|| {
                 div()
-                    .w(OVERVIEW_SKELETON_WIDTH)
+                    .w(HERO_OVERVIEW_SKELETON_WIDTH)
                     .max_w_full()
                     .child(SkeletonText::new(OVERVIEW_SKELETON_LINES))
             })
@@ -361,21 +352,16 @@ impl RenderOnce for MediaHero {
             // Even veil keeps the art readable but present; the side scrim
             // protects the title.
             .when(has_backdrop, |el| {
-                el.child(
-                    div()
-                        .absolute()
-                        .inset_0()
-                        .bg(p.backdrop_scrim.opacity(self.veil)),
-                )
-                .child(div().absolute().inset_0().bg(linear_gradient(
-                    90.,
-                    linear_color_stop(canvas.opacity(self.side_scrim), 0.),
-                    linear_color_stop(canvas.opacity(0.0), SIDE_SCRIM_REACH),
-                )))
-                .child(ramp(FADE_HEIGHT))
+                el.child(div().absolute().inset_0().bg(p.overlay.opacity(self.veil)))
+                    .child(div().absolute().inset_0().bg(linear_gradient(
+                        90.,
+                        linear_color_stop(canvas.opacity(self.side_scrim), 0.),
+                        linear_color_stop(transparent(canvas), HERO_SIDE_SCRIM_REACH),
+                    )))
+                    .child(ramp(HERO_FADE_HEIGHT))
             })
             .when(has_backdrop && mode == Mode::Light, |el| {
-                el.child(ramp(FADE_HEIGHT))
+                el.child(ramp(HERO_FADE_HEIGHT))
             })
             .child(
                 div().relative().w_full().flex().justify_center().child(
@@ -386,7 +372,7 @@ impl RenderOnce for MediaHero {
                         .flex()
                         .gap(space::S24)
                         .px(self.gutter)
-                        .pt(space::PAGE_INSET + self.top_inset)
+                        .pt(size::PAGE_INSET + self.top_inset)
                         .pb(space::S24)
                         .when(self.stack_aside, |el| el.flex_col())
                         .when(!self.stack_aside, |el| el.items_end())
@@ -408,8 +394,9 @@ impl RenderOnce for MediaHero {
                                         .children(self.eyebrow.map(|eyebrow| {
                                             div()
                                                 .mb(-space::S4)
-                                                .type_style(typeface::CAPTION)
-                                                .text_color(ink.text_muted)
+                                                .text(TextSize::Xs)
+                                                .weight(Weight::Semibold)
+                                                .text_color(ink.subtle_foreground)
                                                 .child(eyebrow.to_uppercase())
                                         }))
                                         .child(
@@ -420,8 +407,9 @@ impl RenderOnce for MediaHero {
                                                 .child(
                                                     div()
                                                         .min_w_0()
-                                                        .type_style(typeface::DISPLAY)
-                                                        .text_color(ink.text_primary)
+                                                        .text(TextSize::Xxl)
+                                                        .weight(Weight::Bold)
+                                                        .text_color(ink.foreground)
                                                         .clamp_lines(2)
                                                         .child(self.title),
                                                 )
@@ -437,8 +425,9 @@ impl RenderOnce for MediaHero {
                                                     .flex_wrap()
                                                     .items_center()
                                                     .gap(space::S8)
-                                                    .text_color(ink.text_secondary)
-                                                    .type_style(typeface::SMALL_MEDIUM)
+                                                    .text_color(ink.muted_foreground)
+                                                    .text(TextSize::Sm)
+                                                    .weight(Weight::Medium)
                                                     .children(self.meta.into_iter().map(|item| {
                                                         match item {
                                                             MetaItem::Element(el) => el,
@@ -454,9 +443,9 @@ impl RenderOnce for MediaHero {
                                                 .w_full()
                                                 .min_w_0()
                                                 .max_w(self.text_max_width)
-                                                .type_style(typeface::BODY)
+                                                .text(TextSize::Base)
                                                 .italic()
-                                                .text_color(ink.text_secondary)
+                                                .text_color(ink.muted_foreground)
                                                 .child(text)
                                         }))
                                         .children(overview)

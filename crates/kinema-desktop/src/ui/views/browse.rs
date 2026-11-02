@@ -15,8 +15,8 @@ use crate::{
     ui::primitives::button::Button,
     ui::primitives::icon::IconName,
     ui::primitives::menu::MenuItem,
-    ui::theme::typography::TypeExt,
-    ui::theme::{self, Mode, space as s, theme, typeface as t},
+    ui::theme::typography::{TextSize, TypeExt},
+    ui::theme::{self, Mode, opacity, size, theme},
 };
 use gpui::{prelude::*, *};
 use kinema_core::{MediaKind, discover::DiscoverFilters};
@@ -52,8 +52,8 @@ pub(crate) fn rating_order(a: Option<f32>, b: Option<f32>) -> Ordering {
     }
 }
 pub(crate) fn columns(width: f32, preferred: f32) -> (usize, f32) {
-    let available = (width - 2. * f32::from(s::GRID_INSET)).max(0.);
-    let gap = f32::from(s::GRID_GAP);
+    let available = (width - 2. * f32::from(size::PAGE_INSET)).max(0.);
+    let gap = f32::from(theme::layout::GRID_GAP);
     let count = ((available + gap) / (preferred + gap)).floor().max(2.) as usize;
     (
         count,
@@ -63,8 +63,8 @@ pub(crate) fn columns(width: f32, preferred: f32) -> (usize, f32) {
 /// Peak alpha of the (amber, violet) corner glows. Not artwork-derived.
 fn brand_wash_alphas(mode: Mode) -> (f32, f32) {
     match mode {
-        Mode::Dark => (0.16, 0.10),
-        Mode::Light => (0.08, 0.05),
+        Mode::Dark => opacity::BRAND_WASH_DARK,
+        Mode::Light => opacity::BRAND_WASH_LIGHT,
     }
 }
 fn navigate(
@@ -199,7 +199,7 @@ pub(crate) struct Browse {
 impl Browse {
     /// How far the grid has scrolled under the floating header.
     pub(crate) fn scrolled_under_header(&self) -> Pixels {
-        (-self.scroll.0.borrow().base_handle.offset().y).max(px(0.))
+        (-self.scroll.0.borrow().base_handle.offset().y).max(Pixels::ZERO)
     }
     pub fn new(coordinator: Entity<AppCoordinator>, cx: &mut Context<Self>) -> Self {
         let observation = cx.observe(&coordinator, |_, _, cx| cx.notify());
@@ -228,21 +228,20 @@ impl Browse {
     fn brand_wash(&self, cx: &App) -> impl IntoElement {
         let p = *theme::palette(cx);
         let (amber, violet) = brand_wash_alphas(theme(cx).mode);
-        let violet_hue = hsla(274. / 360., 0.40, 0.46, 1.);
         let glow = |angle: f32, color: Hsla, alpha: f32, reach: f32| {
             div().absolute().inset_0().bg(linear_gradient(
                 angle,
                 linear_color_stop(color.opacity(alpha), 0.),
-                linear_color_stop(color.opacity(0.), reach),
+                linear_color_stop(theme::transparent(color), reach),
             ))
         };
         div()
             .absolute()
             .inset_0()
             .overflow_hidden()
-            .bg(p.bg_canvas)
+            .bg(p.background)
             .child(glow(135., p.primary, amber, 0.62))
-            .child(glow(315., violet_hue, violet, 0.62))
+            .child(glow(315., p.brand_wash, violet, 0.62))
     }
     #[cfg(all(test, feature = "ui-probe-test"))]
     pub(crate) fn card_keys(&self) -> Vec<String> {
@@ -728,7 +727,7 @@ impl Render for Browse {
             self.scroll
                 .scroll_to_item_strict(anchor / cols, ScrollStrategy::Top);
         }
-        let row_height = width * 1.5 + f32::from(s::GRID_GAP);
+        let row_height = width * 1.5 + f32::from(theme::layout::GRID_GAP);
         let state = self.coordinator.read(cx);
         let scope = self.scope;
         let library = scope == Scope::Library;
@@ -755,7 +754,11 @@ impl Render for Browse {
         let is_list = !(count == 0 && !busy);
         let stale = !self.cells.is_empty() && error.is_some();
         // A stale strip sits directly under the header and pushes the grid down.
-        let top_inset = if stale { s::GRID_INSET } else { s::PAGE_TOP };
+        let top_inset = if stale {
+            size::PAGE_INSET
+        } else {
+            size::PAGE_TOP
+        };
         let content = if count == 0 && !busy {
             let coordinator = self.coordinator.clone();
             let weak_retry = cx.entity().downgrade();
@@ -916,10 +919,14 @@ impl Render for Browse {
                         .map(|row| {
                             let mut cards = Vec::new();
                             if row >= layout.title_rows {
-                                return div().h(px(row_height)).flex().gap(s::GRID_GAP).children(
-                                    (0..layout.skeleton_count().min(cols))
-                                        .map(|_| SkeletonCard::new(width).into_any_element()),
-                                );
+                                return div()
+                                    .h(px(row_height))
+                                    .flex()
+                                    .gap(theme::layout::GRID_GAP)
+                                    .children(
+                                        (0..layout.skeleton_count().min(cols))
+                                            .map(|_| SkeletonCard::new(width).into_any_element()),
+                                    );
                             }
                             for index in row * cols..((row + 1) * cols).min(count) {
                                 let cell = &this.cells[index];
@@ -967,7 +974,7 @@ impl Render for Browse {
                             div()
                                 .h(px(row_height))
                                 .flex()
-                                .gap(s::GRID_GAP)
+                                .gap(theme::layout::GRID_GAP)
                                 .children(cards)
                         })
                         .collect::<Vec<_>>()
@@ -977,8 +984,8 @@ impl Render for Browse {
             // Rows scroll under the transparent header; the inset keeps the
             // first row clear of it at scroll top.
             .pt(top_inset)
-            .pb(s::GRID_INSET)
-            .px(s::GRID_INSET)
+            .pb(size::PAGE_INSET)
+            .px(size::PAGE_INSET)
             .size_full()
             .into_any_element()
         };
@@ -989,9 +996,9 @@ impl Render for Browse {
         } else {
             div()
                 .size_full()
-                .px(s::GRID_INSET)
-                .pb(s::GRID_INSET)
-                .pt(s::PAGE_TOP)
+                .px(size::PAGE_INSET)
+                .pb(size::PAGE_INSET)
+                .pt(size::PAGE_TOP)
                 .child(content)
                 .into_any_element()
         };
@@ -1004,9 +1011,9 @@ impl Render for Browse {
             .relative()
             .flex()
             .flex_col()
-            .bg(p.bg_canvas)
-            .text_color(p.text_primary)
-            .type_style(t::BODY)
+            .bg(p.background)
+            .text_color(p.foreground)
+            .text(TextSize::Base)
             .child(self.brand_wash(cx))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 let current = this
@@ -1057,7 +1064,7 @@ impl Render for Browse {
                 let coordinator = self.coordinator.clone();
                 let weak_retry = cx.entity().downgrade();
                 el.child(
-                    div().pt(s::TOOLBAR_HEIGHT).child(
+                    div().pt(size::TOOLBAR_HEIGHT).child(
                         Alert::new(
                             AlertTone::Warning,
                             "Showing previous results · request failed",

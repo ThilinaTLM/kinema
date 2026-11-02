@@ -4,8 +4,8 @@ use crate::{
         Presence,
         transition::{POPUP_IN, POPUP_OUT},
     },
-    ui::theme::typography::TypeExt,
-    ui::theme::{elevation, palette, radius, space, typeface},
+    ui::theme::typography::{TextSize, TypeExt},
+    ui::theme::{elevation, palette, radius, space},
 };
 use gpui::{prelude::*, *};
 
@@ -18,15 +18,15 @@ impl Render for Tooltip {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = palette(cx);
         let tip = div()
-            .bg(p.bg_overlay)
+            .bg(p.popover)
             .rounded(radius::MD)
             .border_1()
-            .border_color(p.line_subtle)
+            .border_color(p.border)
             .shadow(elevation::sm(p))
             .px(space::S8)
             .py(space::S4)
-            .type_style(typeface::SMALL)
-            .text_color(p.text_primary)
+            .text(TextSize::Sm)
+            .text_color(p.foreground)
             .child(self.text.clone());
         self.presence.read(cx).animate(tip, "tooltip", cx)
     }

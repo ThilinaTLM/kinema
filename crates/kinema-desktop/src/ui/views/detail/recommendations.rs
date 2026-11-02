@@ -1,6 +1,7 @@
 //! Provider-scoped recommendations as a wrapping grid, two rows at a time;
 //! never consult TMDB for Cinemeta.
 use super::*;
+use crate::ui::theme::typography::{TextSize, TypeExt};
 use crate::{
     tmdb::{TmdbPage, TmdbTitle},
     ui::blocks::POSTER_ASPECT,
@@ -106,8 +107,8 @@ impl Detail {
         };
         let fit = fit_grid(
             width,
-            geometry::SIMILAR_MIN_WIDTH,
-            geometry::SIMILAR_MAX_WIDTH,
+            geometry::SIMILAR_MIN,
+            geometry::SIMILAR_MAX,
             geometry::SIMILAR_GAP,
         );
         let cols = fit.cols;
@@ -192,14 +193,14 @@ impl Detail {
             .relative()
             .overflow_hidden()
             .rounded(radius::LG)
-            .bg(p.bg_placeholder)
-            .border(s::HAIRLINE)
+            .bg(p.muted)
+            .border(size::HAIRLINE)
             .border_color(p.poster_edge)
             .shadow(elevation::sm(&p))
             .focusable()
             .tab_stop(true)
             .cursor_pointer()
-            .hover(move |el| el.shadow(elevation::md(&p)).border_color(p.line_control))
+            .hover(move |el| el.shadow(elevation::md(&p)).border_color(p.input))
             .focus_visible(move |el| el.shadow(vec![focus_ring(&p)]))
             .tooltip(tooltip(title.name.clone()));
         if let Some(image) = self.image(
@@ -213,8 +214,8 @@ impl Detail {
             tile = tile.child(
                 div()
                     .p(s::S8)
-                    .type_style(t::SMALL)
-                    .text_color(p.text_secondary)
+                    .text(TextSize::Sm)
+                    .text_color(p.muted_foreground)
                     .child(title.name.clone()),
             );
         }
@@ -259,8 +260,8 @@ impl Detail {
         if let Some(error) = error {
             grid = grid.child(
                 div()
-                    .type_style(t::SMALL)
-                    .text_color(p.text_muted)
+                    .text(TextSize::Sm)
+                    .text_color(p.subtle_foreground)
                     .child(format!("Couldn’t load more: {error}")),
             );
         }

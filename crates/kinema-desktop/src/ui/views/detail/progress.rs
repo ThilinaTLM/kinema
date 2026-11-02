@@ -331,7 +331,7 @@ impl Detail {
                 .right_0()
                 .bottom_0()
                 .h(s::S2)
-                .bg(p.line_subtle)
+                .bg(p.border)
                 .child(div().h_full().w(relative(fraction)).bg(p.primary)),
         )
     }

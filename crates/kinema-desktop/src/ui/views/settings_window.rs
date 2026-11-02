@@ -12,8 +12,8 @@ use crate::{
     ui::primitives::segmented::{self, Segmented},
     ui::primitives::switch::Switch,
     ui::primitives::text_input::{TextInput, TextInputEvent},
-    ui::theme::typography::TypeExt,
-    ui::theme::{self, space as s, typeface as t},
+    ui::theme::typography::{self, TextSize, TypeExt, Weight},
+    ui::theme::{self, size, space as s},
 };
 use gpui::{prelude::*, *};
 use kinema_core::provider::{ProviderId, ProviderPriority};
@@ -194,14 +194,20 @@ pub fn open(coordinator: Entity<AppCoordinator>, section: Section, cx: &mut App)
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
             None,
-            size(px(860.), px(600.)),
+            size(
+                theme::layout::settings::WINDOW_WIDTH,
+                theme::layout::settings::WINDOW_HEIGHT,
+            ),
             cx,
         ))),
         titlebar: Some(TitlebarOptions {
             title: Some("Kinema Settings".into()),
             ..Default::default()
         }),
-        window_min_size: Some(size(px(720.), px(480.))),
+        window_min_size: Some(size(
+            theme::layout::settings::MIN_WIDTH,
+            theme::layout::settings::MIN_HEIGHT,
+        )),
         ..Default::default()
     };
     match cx.open_window(options, |window, cx| {
@@ -723,12 +729,12 @@ impl SettingsWindow {
             .copied()
             .unwrap_or(AccountStatus::Loading);
         let ink = match status {
-            AccountStatus::Verified => p.status_ok,
-            AccountStatus::Saved => p.status_warn,
+            AccountStatus::Verified => p.success,
+            AccountStatus::Saved => p.warning,
             AccountStatus::Rejected
             | AccountStatus::ServiceFailure
-            | AccountStatus::Unavailable => p.status_error,
-            AccountStatus::Loading | AccountStatus::Missing => p.text_muted,
+            | AccountStatus::Unavailable => p.destructive,
+            AccountStatus::Loading | AccountStatus::Missing => p.subtle_foreground,
         };
         let pending = self.latest_account.contains_key(&account);
         let weak = cx.entity().downgrade();
@@ -756,7 +762,7 @@ impl SettingsWindow {
                             .flex()
                             .items_center()
                             .gap(s::S8)
-                            .type_style(t::SMALL)
+                            .text(TextSize::Sm)
                             .text_color(ink)
                             .child(div().size(s::S8).flex_none().bg(ink))
                             .child(status.label()),
@@ -823,11 +829,11 @@ impl SettingsWindow {
             .flex()
             .flex_col()
             .gap(s::S4)
-            .w(s::CONTROL_HEIGHT * 14.)
+            .w(size::CONTROL_SM * 14.)
             .child(
                 div()
-                    .type_style(t::SMALL)
-                    .text_color(p.text_secondary)
+                    .text(TextSize::Sm)
+                    .text_color(p.muted_foreground)
                     .child("Metadata providers, highest priority first"),
             );
         for (index, (id, role)) in roles.into_iter().enumerate() {
@@ -837,9 +843,9 @@ impl SettingsWindow {
                     Some(AccountStatus::Missing | AccountStatus::Unavailable)
                 );
             let ink = if role == ProviderRole::Inactive {
-                p.text_muted
+                p.subtle_foreground
             } else {
-                p.text_primary
+                p.foreground
             };
             let (up, down) = (weak.clone(), weak.clone());
             list = list.child(
@@ -849,16 +855,16 @@ impl SettingsWindow {
                     .gap(s::S8)
                     .px(s::S12)
                     .py(s::S4)
-                    .min_h(s::CONTROL_HEIGHT * 1.5)
-                    .bg(p.bg_raised)
-                    .border(s::HAIRLINE)
-                    .border_color(p.line_hairline)
+                    .min_h(size::CONTROL_SM * 1.5)
+                    .bg(p.card)
+                    .border(size::HAIRLINE)
+                    .border_color(p.border)
                     .child(
                         div()
                             .w(s::S48 * 2.)
                             .flex_none()
-                            .type_style(t::SMALL)
-                            .text_color(p.text_secondary)
+                            .text(TextSize::Sm)
+                            .text_color(p.muted_foreground)
                             .child(role.label()),
                     )
                     .child(
@@ -871,8 +877,8 @@ impl SettingsWindow {
                             .when(tmdb_hint, |el| {
                                 el.child(
                                     div()
-                                        .type_style(t::SMALL)
-                                        .text_color(p.status_warn)
+                                        .text(TextSize::Sm)
+                                        .text_color(p.warning)
                                         .child("Inactive — needs token"),
                                 )
                             }),
@@ -910,14 +916,15 @@ impl SettingsWindow {
     fn content(&self, cx: &Context<Self>) -> AnyElement {
         let p = *theme::palette(cx);
         let weak = cx.entity().downgrade();
-        let mut body = div()
-            .flex()
-            .flex_col()
-            .gap(s::S24)
-            .child(div().type_style(t::TITLE).child(self.section.label()));
+        let mut body = div().flex().flex_col().gap(s::S24).child(
+            div()
+                .text(TextSize::Xl)
+                .weight(Weight::Semibold)
+                .child(self.section.label()),
+        );
         match self.section {
             Section::General => {
-                body = body.child(text("Startup collection: Movies · provider order", p.text_primary)).child(text("Search stays within the selected kind (Movies or Series). Provider collections are not configurable in this scaffold.", p.text_secondary));
+                body = body.child(text("Startup collection: Movies · provider order", p.foreground)).child(text("Search stays within the selected kind (Movies or Series). Provider collections are not configurable in this scaffold.", p.muted_foreground));
             }
             Section::Accounts => {
                 body = body
@@ -927,14 +934,15 @@ impl SettingsWindow {
                 let mut accounts = div()
                     .flex()
                     .flex_col()
-                    .border_t(s::HAIRLINE)
-                    .border_color(p.line_hairline)
+                    .border_t(size::HAIRLINE)
+                    .border_color(p.border)
                     .pt(s::S16)
                     .child(
                         div()
                             .mb(s::S16)
-                            .type_style(t::SMALL_MEDIUM)
-                            .text_color(p.text_secondary)
+                            .text(TextSize::Sm)
+                            .weight(Weight::Medium)
+                            .text_color(p.muted_foreground)
                             .child("Credentials"),
                     );
                 for account in Account::ALL {
@@ -949,11 +957,11 @@ impl SettingsWindow {
                             .flex_col()
                             .gap(s::S8)
                             .p(s::S12)
-                            .bg(p.bg_raised)
-                            .border(s::HAIRLINE)
-                            .border_color(p.line_hairline)
+                            .bg(p.card)
+                            .border(size::HAIRLINE)
+                            .border_color(p.border)
                             .child(format!("Replace {}", account.label()))
-                            .child(div().w(s::CONTROL_HEIGHT * 10.).child(self.secret.clone()))
+                            .child(div().w(size::CONTROL_SM * 10.).child(self.secret.clone()))
                             .child(
                                 div()
                                     .flex()
@@ -997,14 +1005,14 @@ impl SettingsWindow {
                     ))
                     .child(text(
                         "Player changes apply to new sessions; replay keeps its original player.",
-                        p.text_muted,
+                        p.subtle_foreground,
                     ));
                 if matches!(self.settings.player, PlayerChoice::Custom(_)) {
-                    body = body.child(text("Stored custom external player retained. Select a player above to replace it.", p.text_secondary));
+                    body = body.child(text("Stored custom external player retained. Select a player above to replace it.", p.muted_foreground));
                 }
                 body = body.child(text(
                     player_preview(&self.settings.player),
-                    p.text_secondary,
+                    p.muted_foreground,
                 ));
             }
             Section::KeyboardMouse => {
@@ -1012,7 +1020,7 @@ impl SettingsWindow {
             }
             Section::Storage => {
                 let usage = self.coordinator.read(cx).usage.as_ref();
-                body = body.child(text(usage.map(|u| format!("Downloaded {} · reserved {} · limit {}", bytes_label(u.downloaded_bytes), bytes_label(u.reserved_bytes), bytes_label(u.limit_bytes))).unwrap_or_else(|| "Cache usage unavailable (not an empty cache).".into()), p.text_secondary))
+                body = body.child(text(usage.map(|u| format!("Downloaded {} · reserved {} · limit {}", bytes_label(u.downloaded_bytes), bytes_label(u.reserved_bytes), bytes_label(u.limit_bytes))).unwrap_or_else(|| "Cache usage unavailable (not an empty cache).".into()), p.muted_foreground))
                     .child(row("Limit (GiB)", self.limit.clone()))
                     .child(Button::new("cleanup-unused", "Clean unused").disabled(self.pending.values().any(|p| matches!(p, Pending::Cleanup))).on_click(move |_, _, cx| { let _ = weak.update(cx, |this, cx| {
                         if this.fixture { this.errors.insert("Cleanup", "Fixture: freed 1.0 GiB; protected files kept.".into()); }
@@ -1020,8 +1028,8 @@ impl SettingsWindow {
                         else { this.errors.insert("Cleanup", "Application service unavailable or busy. Retry.".into()); }
                         cx.notify();
                     }); }))
-                    .child(text("Only inactive managed media is removed. Original local files and protected sessions are kept.", p.text_muted))
-                    .child(text("Location: application-managed OS cache directory. Exact path is not exposed by the current service API.", p.text_muted));
+                    .child(text("Only inactive managed media is removed. Original local files and protected sessions are kept.", p.subtle_foreground))
+                    .child(text("Location: application-managed OS cache directory. Exact path is not exposed by the current service API.", p.subtle_foreground));
             }
             Section::Appearance => {
                 let poster = weak.clone();
@@ -1029,30 +1037,30 @@ impl SettingsWindow {
                 body = body.child(row("Theme", Segmented::new("settings-theme", [(ThemeChoice::Dark, "Dark".into()), (ThemeChoice::Light, "Light".into()), (ThemeChoice::System, "System".into())], self.settings.theme).on_change(move |value, _, cx| { let _ = weak.update(cx, |this, cx| this.change("Theme", SettingChange::Theme(*value), cx)); })))
                     .child(row("Poster size", Segmented::new("settings-poster", [(PosterSize::Small, "S".into()), (PosterSize::Medium, "M".into()), (PosterSize::Large, "L".into())], self.settings.poster_size).on_change(move |value, _, cx| { let _ = poster.update(cx, |this, cx| this.change("Poster size", SettingChange::Poster(*value), cx)); })))
                     .child(row("Motion", Switch::new("settings-motion", "Reduce animations", self.settings.reduce_motion == MotionChoice::Always).on_change(move |value, _, cx| { let _ = motion.update(cx, |this, cx| this.change("Reduce motion", SettingChange::Motion(if value { MotionChoice::Always } else { MotionChoice::System }), cx)); })))
-                    .child(text("Kinema can't read your system motion setting yet, so animations play unless this is on.", p.text_muted));
+                    .child(text("Kinema can't read your system motion setting yet, so animations play unless this is on.", p.subtle_foreground));
             }
             Section::About => {
-                body = body.child(div().type_style(t::HEADING).child(concat!("Kinema ", env!("CARGO_PKG_VERSION"))))
-                    .child(text("Pre-1.0 scaffold — not the complete MVP. Provider, playback and OS support are not implied by this interface.", p.text_secondary))
-                    .child(text("Inter — SIL Open Font License 1.1\nJetBrains Mono — SIL Open Font License 1.1\nLucide — ISC License\nGPUI — Apache License 2.0", p.text_secondary))
+                body = body.child(div().text(TextSize::Lg).weight(Weight::Semibold).child(concat!("Kinema ", env!("CARGO_PKG_VERSION"))))
+                    .child(text("Pre-1.0 scaffold — not the complete MVP. Provider, playback and OS support are not implied by this interface.", p.muted_foreground))
+                    .child(text("Inter — SIL Open Font License 1.1\nJetBrains Mono — SIL Open Font License 1.1\nLucide — ISC License\nGPUI — Apache License 2.0", p.muted_foreground))
                     .child(img("kinema/tmdb-logo.svg").w(s::S48 * 3.).h(s::S32).object_fit(ObjectFit::Contain))
-                    .child(text("This product uses the TMDB API but is not endorsed or certified by TMDB.", p.text_secondary));
+                    .child(text("This product uses the TMDB API but is not endorsed or certified by TMDB.", p.muted_foreground));
             }
         }
         for (field, message) in &self.errors {
             body = body.child(
                 div()
-                    .type_style(t::SMALL)
+                    .text(TextSize::Sm)
                     .text_color(if *field == "Cleanup" {
-                        p.text_secondary
+                        p.muted_foreground
                     } else {
-                        p.status_error
+                        p.destructive
                     })
                     .child(format!("{field}: {message}")),
             );
         }
         if self.save_pending {
-            body = body.child(text("Applying settings…", p.text_muted));
+            body = body.child(text("Applying settings…", p.subtle_foreground));
         }
         body.into_any_element()
     }
@@ -1137,14 +1145,14 @@ fn text(value: impl Into<SharedString>, color: Hsla) -> AnyElement {
 fn keyboard_mouse_reference(p: &theme::Palette) -> AnyElement {
     let mut root = div().flex().flex_col().gap(s::S24).child(text(
         "Reference for the embedded Kinema player only. These are not global shortcuts and do not apply to external mpv or VLC. Rebinding is not available yet.",
-        p.text_secondary,
+        p.muted_foreground,
     ));
     for group in crate::player_shortcuts::reference_groups() {
         let mut list = div()
             .flex()
             .flex_col()
-            .border_t(s::HAIRLINE)
-            .border_color(p.line_hairline);
+            .border_t(size::HAIRLINE)
+            .border_color(p.border);
         for entry in group.entries {
             list = list.child(
                 div()
@@ -1155,13 +1163,14 @@ fn keyboard_mouse_reference(p: &theme::Palette) -> AnyElement {
                     .gap_x(s::S16)
                     .gap_y(s::S4)
                     .py(s::S8)
-                    .border_b(s::HAIRLINE)
-                    .border_color(p.line_hairline)
+                    .border_b(size::HAIRLINE)
+                    .border_color(p.border)
                     .child(div().flex_1().min_w(s::S48 * 3.).child(entry.label))
                     .child(
                         div()
-                            .type_style(t::SMALL_MEDIUM)
-                            .text_color(p.text_secondary)
+                            .text(TextSize::Sm)
+                            .weight(Weight::Medium)
+                            .text_color(p.muted_foreground)
                             .child(entry.keys),
                     ),
             );
@@ -1171,7 +1180,12 @@ fn keyboard_mouse_reference(p: &theme::Palette) -> AnyElement {
                 .flex()
                 .flex_col()
                 .gap(s::S8)
-                .child(div().type_style(t::HEADING).child(group.title))
+                .child(
+                    div()
+                        .text(TextSize::Lg)
+                        .weight(Weight::Semibold)
+                        .child(group.title),
+                )
                 .child(list),
         );
     }
@@ -1180,8 +1194,8 @@ fn keyboard_mouse_reference(p: &theme::Palette) -> AnyElement {
             .flex()
             .flex_col()
             .gap(s::S4)
-            .type_style(t::SMALL)
-            .text_color(p.text_muted)
+            .text(TextSize::Sm)
+            .text_color(p.subtle_foreground)
             .child(crate::player_shortcuts::FOCUS_NOTE)
             .child(crate::player_shortcuts::MEDIA_NOTE),
     )
@@ -1193,7 +1207,7 @@ fn row(label: &'static str, control: impl IntoElement) -> AnyElement {
         .items_center()
         .gap(s::S16)
         .child(div().w(s::S48 * 2. + s::S16).flex_none().child(label))
-        .child(div().w(s::CONTROL_HEIGHT * 10.).flex_none().child(control))
+        .child(div().w(size::CONTROL_SM * 10.).flex_none().child(control))
         .into_any_element()
 }
 impl Render for SettingsWindow {
@@ -1208,10 +1222,10 @@ impl Render for SettingsWindow {
             .on_action(|_: &PreviousFocus, window, cx| window.focus_prev(cx))
             .size_full()
             .flex()
-            .bg(p.bg_canvas)
-            .text_color(p.text_primary)
-            .font_family(t::UI_FAMILY)
-            .type_style(t::BODY)
+            .bg(p.background)
+            .text_color(p.foreground)
+            .font_family(typography::UI_FAMILY)
+            .text(TextSize::Base)
             .child(
                 div()
                     .id("settings-sidebar")
@@ -1223,9 +1237,9 @@ impl Render for SettingsWindow {
                     .h_full()
                     .flex_none()
                     .py(s::S16)
-                    .bg(p.bg_surface)
-                    .border_r(s::HAIRLINE)
-                    .border_color(p.line_hairline)
+                    .bg(p.surface)
+                    .border_r(size::HAIRLINE)
+                    .border_color(p.border)
                     .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
                         if let Some(section) = this.section.navigate(&event.keystroke.key) {
                             this.section = section;
@@ -1238,7 +1252,7 @@ impl Render for SettingsWindow {
                             .id(("settings-section", section as usize))
                             .role(Role::Tab)
                             .aria_selected(section == selected)
-                            .h(s::ROW)
+                            .h(size::ROW)
                             .px(s::S16)
                             .flex()
                             .items_center()
@@ -1249,12 +1263,12 @@ impl Render for SettingsWindow {
                                 transparent_black()
                             })
                             .when(section == selected, |el| {
-                                el.bg(p.accent_tint).text_color(p.accent_text)
+                                el.bg(p.selection).text_color(p.primary_text)
                             })
                             .when(section == selected && sidebar_focus, |el| {
-                                el.border(s::FOCUS_RING).border_color(p.focus_ring)
+                                el.border(size::FOCUS_RING).border_color(p.ring)
                             })
-                            .hover(|el| el.bg(p.ctl_hover))
+                            .hover(|el| el.bg(p.accent))
                             .child(section.label())
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.section = section;

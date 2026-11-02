@@ -88,42 +88,6 @@ impl Weight {
     }
 }
 
-/// TEMPORARY (removed in step 5): one step of the old type scale.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct TypeStyle {
-    pub size: Pixels,
-    pub line_height: Pixels,
-    pub weight: FontWeight,
-    pub mono: bool,
-}
-
-const fn ts(size: TextSize, weight: Weight, mono: bool) -> TypeStyle {
-    TypeStyle {
-        size: size.size(),
-        line_height: size.line_height(),
-        weight: weight.value(),
-        mono,
-    }
-}
-
-/// TEMPORARY (removed in step 5): old named styles, expressed on the new scale.
-pub mod typeface {
-    use super::{TextSize as S, TypeStyle, Weight as W, ts};
-
-    pub use super::{MONO_FAMILY, UI_FAMILY};
-
-    pub const DISPLAY: TypeStyle = ts(S::Xxl, W::Bold, false);
-    pub const TITLE: TypeStyle = ts(S::Xl, W::Semibold, false);
-    pub const HEADING: TypeStyle = ts(S::Lg, W::Semibold, false);
-    pub const BODY: TypeStyle = ts(S::Base, W::Regular, false);
-    pub const BODY_LONG: TypeStyle = ts(S::Md, W::Regular, false);
-    pub const BODY_STRONG: TypeStyle = ts(S::Base, W::Semibold, false);
-    pub const SMALL: TypeStyle = ts(S::Sm, W::Regular, false);
-    pub const SMALL_MEDIUM: TypeStyle = ts(S::Sm, W::Medium, false);
-    pub const CAPTION: TypeStyle = ts(S::Xs, W::Semibold, false);
-    pub const MONO: TypeStyle = ts(S::Sm, W::Regular, true);
-}
-
 pub trait TypeExt: Styled + Sized {
     /// Size and line height from the scale, with the UI family and Regular weight.
     fn text(self, size: TextSize) -> Self {
@@ -142,14 +106,6 @@ pub trait TypeExt: Styled + Sized {
     /// Tabular figures (`tnum`) so changing numbers do not jitter.
     fn tabular(self) -> Self {
         self.font_features(FontFeatures(Arc::new(vec![("tnum".to_string(), 1)])))
-    }
-    /// TEMPORARY (removed in step 5): apply an old [`TypeStyle`].
-    fn type_style(self, style: TypeStyle) -> Self {
-        let family = if style.mono { MONO_FAMILY } else { UI_FAMILY };
-        self.font_family(family)
-            .text_size(style.size)
-            .line_height(style.line_height)
-            .font_weight(style.weight)
     }
     /// Wrap to at most `lines` lines and end the last with an ellipsis. Plain
     /// `line_clamp` without an ellipsis leaves the remainder of the text on
@@ -190,15 +146,6 @@ mod tests {
             assert_eq!(size.line_height(), px(line));
         }
         assert_eq!(Weight::Semibold.value(), FontWeight(600.0));
-    }
-
-    #[test]
-    fn old_styles_equal_the_new_scale() {
-        assert_eq!(typeface::BODY.size, TextSize::Base.size());
-        assert_eq!(typeface::DISPLAY.weight, Weight::Bold.value());
-        const {
-            assert!(typeface::MONO.mono);
-        }
     }
 
     #[test]
