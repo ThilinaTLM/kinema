@@ -1,5 +1,8 @@
 //! Offline v3 native design lab. No application services or legacy presentation.
-use crate::{app_state::Resource, ui, ui::views::settings_window};
+use crate::{app_state::Resource, ui, ui::views::settings};
+mod motion_scene;
+mod tokens_scene;
+
 use std::{rc::Rc, sync::Arc};
 
 use gpui::{prelude::*, *};
@@ -40,7 +43,7 @@ use crate::{
 
 actions!(design_lab, [NextFocus, PreviousFocus]);
 
-const SCENES: [&str; 52] = [
+const SCENES: [&str; 54] = [
     "patterns",
     "patterns-states",
     "detail-live-tmdb-movie",
@@ -95,6 +98,8 @@ const SCENES: [&str; 52] = [
     "series-streams",
     "library",
     "states",
+    "tokens",
+    "motion",
 ];
 
 /// Entry point deliberately branches before any Kit initialization.
@@ -542,6 +547,7 @@ struct Lab {
     episode_watched: [bool; 8],
     checked: bool,
     scroll: ScrollHandle,
+    motion: Option<Entity<motion_scene::MotionScene>>,
     context: Option<Entity<Menu>>,
     _startup: Option<Task<()>>,
     focus: FocusHandle,
@@ -724,6 +730,8 @@ impl Lab {
         } else {
             None
         };
+        let motion =
+            (scene == "motion").then(|| cx.new(|cx| motion_scene::MotionScene::new(window, cx)));
         let focus = cx.focus_handle();
         focus.focus(window, cx);
         Self {
@@ -752,6 +760,7 @@ impl Lab {
             episode_watched: [true, true, false, false, true, false, false, false],
             checked: true,
             scroll: ScrollHandle::new(),
+            motion,
             context,
         }
     }
@@ -1219,42 +1228,6 @@ impl Lab {
                     .mono()
                     .child("MONO · release.1080p.mkv"),
             );
-        typography = typography.child(heading("Cinema · semantic palette"));
-        for (name, color) in [
-            ("bg.canvas", p.background),
-            ("bg.surface", p.surface),
-            ("bg.raised", p.card),
-            ("bg.placeholder", p.muted),
-            ("ctl.rest", p.secondary),
-            ("ctl.hover", p.accent),
-            ("ctl.pressed", p.pressed(p.secondary)),
-            ("line.hairline", p.border),
-            ("line.control", p.input),
-            ("text.primary", p.foreground),
-            ("text.secondary", p.muted_foreground),
-            ("text.muted", p.subtle_foreground),
-            ("accent", p.primary),
-            ("accent.text", p.primary_text),
-            ("focus.ring", p.ring),
-            ("rating", p.rating),
-            ("status.ok", p.success),
-            ("status.warn", p.warning),
-            ("status.error", p.destructive),
-        ] {
-            typography = typography.child(
-                row()
-                    .gap(s::S8)
-                    .child(
-                        div()
-                            .w(s::S32)
-                            .h(s::S12)
-                            .bg(color)
-                            .border_1()
-                            .border_color(p.input),
-                    )
-                    .child(div().text(TextSize::Sm).mono().child(name)),
-            );
-        }
         col()
             .p(s::S20)
             .gap(s::S16)
@@ -2288,6 +2261,15 @@ impl Render for Lab {
             "menus" => self.menus(cx).into_any_element(),
             "detail" | "series" | "series-streams" => self.detail(window, cx).into_any_element(),
             "states" => self.states(window, cx).into_any_element(),
+            "tokens" => ScrollArea::new("tokens-scroll", self.scroll.clone())
+                .child(tokens_scene::render(p, theme::theme(cx).mode))
+                .into_any_element(),
+            "motion" => match &self.motion {
+                Some(motion) => ScrollArea::new("motion-scroll", self.scroll.clone())
+                    .child(motion.clone())
+                    .into_any_element(),
+                None => div().into_any_element(),
+            },
             "patterns" => ScrollArea::new("patterns-scroll", self.scroll.clone())
                 .child(self.patterns(window, cx))
                 .into_any_element(),
@@ -2340,7 +2322,7 @@ fn open_settings_fixture(
         controllers::coordinator::AppCoordinator,
         settings::{MotionChoice, Settings, ThemeChoice},
     };
-    use settings_window::{Section, SettingsWindow};
+    use settings::{Section, SettingsWindow};
     let section = match scene {
         "settings-accounts" | "settings-accounts-no-token" => Section::Accounts,
         "settings-playback" => Section::Playback,
