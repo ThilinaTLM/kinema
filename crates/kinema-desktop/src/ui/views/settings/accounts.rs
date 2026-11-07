@@ -1,24 +1,61 @@
 //! Accounts section: credentials, provider order and TMDB status.
 use super::*;
+use crate::app::OpenSubtitlesPart;
+use crate::providers::opensubtitles::OpenSubtitlesError;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Account {
     Tmdb,
     RealDebrid,
     AllDebrid,
+    OpenSubtitlesKey,
+    OpenSubtitlesLogin,
 }
 impl Account {
-    pub(super) const ALL: [Self; 3] = [Self::Tmdb, Self::RealDebrid, Self::AllDebrid];
+    pub(super) const ALL: [Self; 5] = [
+        Self::Tmdb,
+        Self::RealDebrid,
+        Self::AllDebrid,
+        Self::OpenSubtitlesKey,
+        Self::OpenSubtitlesLogin,
+    ];
+    pub(super) const OPENSUBTITLES: [Self; 2] = [Self::OpenSubtitlesKey, Self::OpenSubtitlesLogin];
     pub(super) fn label(self) -> &'static str {
         match self {
             Self::Tmdb => "TMDB token",
             Self::RealDebrid => "Real-Debrid",
             Self::AllDebrid => "AllDebrid",
+            Self::OpenSubtitlesKey => "OpenSubtitles API key",
+            Self::OpenSubtitlesLogin => "OpenSubtitles login",
+        }
+    }
+    pub(super) fn opensubtitles(self) -> Option<OpenSubtitlesPart> {
+        match self {
+            Self::OpenSubtitlesKey => Some(OpenSubtitlesPart::ApiKey),
+            Self::OpenSubtitlesLogin => Some(OpenSubtitlesPart::Login),
+            _ => None,
+        }
+    }
+    /// Entry-card text: field label, placeholder and the store button.
+    pub(super) fn entry_text(self) -> (&'static str, &'static str, &'static str) {
+        match self {
+            Self::OpenSubtitlesKey => ("OpenSubtitles API key", "API key", "Store key"),
+            Self::OpenSubtitlesLogin => ("OpenSubtitles password", "Password", "Store login"),
+            Self::Tmdb => (
+                "TMDB token",
+                "New token — stored only in OS secure storage",
+                "Store token",
+            ),
+            Self::RealDebrid | Self::AllDebrid => (
+                "Debrid API token",
+                "New token — stored only in OS secure storage",
+                "Store token",
+            ),
         }
     }
     pub(super) fn provider(self) -> Option<DebridKind> {
         match self {
-            Self::Tmdb => None,
+            Self::Tmdb | Self::OpenSubtitlesKey | Self::OpenSubtitlesLogin => None,
             Self::RealDebrid => Some(DebridKind::RealDebrid),
             Self::AllDebrid => Some(DebridKind::AllDebrid),
         }
@@ -35,9 +72,7 @@ pub(super) enum Pending {
     Save(&'static str),
     Credential(Account, CredentialOperation),
     Cleanup,
-    /// OpenSubtitles load (false) or credential edit (true).
-    OpenSubtitles(bool),
-    OpenSubtitlesCheck,
+    OpenSubtitlesLoad,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum AccountStatus {
@@ -74,6 +109,8 @@ impl AccountStatus {
         // Compare exact public adapter messages; unknown errors remain failures.
         if message == crate::providers::DebridError::CredentialRejected.to_string()
             || message == crate::tmdb::TmdbError::RejectedCredential.to_string()
+            || message == OpenSubtitlesError::ApiKeyRejected.to_string()
+            || message == OpenSubtitlesError::LoginRejected.to_string()
         {
             Self::Rejected
         } else if message == crate::credentials::CredentialError::Missing.to_string() {
@@ -94,6 +131,7 @@ impl SettingsWindow {
         account: Account,
         operation: CredentialOperation,
         value: Option<SecretString>,
+        username: Option<SecretString>,
         cx: &mut Context<Self>,
     ) {
         tracing::debug!(
@@ -117,20 +155,29 @@ impl SettingsWindow {
             cx.notify();
             return;
         }
-        let action = match (account.provider(), operation, value) {
-            (Some(provider), CredentialOperation::Save, Some(value)) => {
-                AppAction::SetCredential { provider, value }
+        let action = if let Some(part) = account.opensubtitles() {
+            let Some(action) = opensubtitles::action(part, operation, value, username) else {
+                return;
+            };
+            action
+        } else {
+            match (account.provider(), operation, value) {
+                (Some(provider), CredentialOperation::Save, Some(value)) => {
+                    AppAction::SetCredential { provider, value }
+                }
+                (None, CredentialOperation::Save, Some(value)) => {
+                    AppAction::SetTmdbCredential { value }
+                }
+                (_, CredentialOperation::Save, None) => return,
+                (Some(provider), CredentialOperation::Remove, _) => {
+                    AppAction::DeleteCredential(provider)
+                }
+                (None, CredentialOperation::Remove, _) => AppAction::DeleteTmdbCredential,
+                (Some(provider), CredentialOperation::Test, _) => {
+                    AppAction::TestCredential(provider)
+                }
+                (None, CredentialOperation::Test, _) => AppAction::TestTmdbCredential,
             }
-            (None, CredentialOperation::Save, Some(value)) => {
-                AppAction::SetTmdbCredential { value }
-            }
-            (_, CredentialOperation::Save, None) => return,
-            (Some(provider), CredentialOperation::Remove, _) => {
-                AppAction::DeleteCredential(provider)
-            }
-            (None, CredentialOperation::Remove, _) => AppAction::DeleteTmdbCredential,
-            (Some(provider), CredentialOperation::Test, _) => AppAction::TestCredential(provider),
-            (None, CredentialOperation::Test, _) => AppAction::TestTmdbCredential,
         };
         self.errors.remove(account.label());
         if let Some(g) = self
@@ -153,12 +200,29 @@ impl SettingsWindow {
             return;
         };
         let value = self.secret.update(cx, take_secret);
-        if value.expose().trim().is_empty() {
-            self.show_error(account.label(), "Token cannot be empty.".into());
+        let username = self.secret_user.update(cx, take_secret);
+        let login = account == Account::OpenSubtitlesLogin;
+        if value.expose().trim().is_empty() || (login && username.expose().trim().is_empty()) {
+            self.show_error(
+                account.label(),
+                if login {
+                    "Enter a username and a password."
+                } else {
+                    "Token cannot be empty."
+                }
+                .into(),
+            );
             cx.notify();
             return;
         }
-        self.credential(account, CredentialOperation::Save, Some(value), cx);
+        let username = login.then(|| SecretString::new(username.expose().trim().to_owned()));
+        self.credential(
+            account,
+            CredentialOperation::Save,
+            Some(value),
+            username,
+            cx,
+        );
     }
     pub(super) fn outcome(&mut self, event: &crate::app::AppEvent, cx: &mut Context<Self>) {
         let Some(pending) = self.pending.remove(&event.generation) else {
@@ -194,6 +258,12 @@ impl SettingsWindow {
                     return;
                 }
                 self.latest_account.remove(&account);
+                if account.opensubtitles().is_some() {
+                    let status = self.opensubtitles_result(account, operation, event, failure);
+                    self.status.insert(account, status);
+                    cx.notify();
+                    return;
+                }
                 let state = self.coordinator.read(cx);
                 let snapshot = if let Some(provider) = account.provider() {
                     state
@@ -218,10 +288,7 @@ impl SettingsWindow {
                 };
                 self.status.insert(account, status);
             }
-            Pending::OpenSubtitlesCheck => {
-                return self.opensubtitles_check_outcome(event, cx);
-            }
-            Pending::OpenSubtitles(edit) => return self.opensubtitles_outcome(event, edit, cx),
+            Pending::OpenSubtitlesLoad => return self.opensubtitles_load_outcome(event, cx),
             Pending::Cleanup => {
                 if let Some(message) = failure {
                     self.show_error("Cleanup", message);
@@ -271,7 +338,7 @@ impl SettingsWindow {
                     .gap(s::S8)
                     .child(
                         div()
-                            .w(s::S48 * 2. + s::S16)
+                            .w(s::S48 * 3. + s::S16)
                             .flex_none()
                             .child(account.label()),
                     )
@@ -300,10 +367,20 @@ impl SettingsWindow {
                         .on_click(move |_, window, cx| {
                             let _ = weak.update(cx, |this, cx| {
                                 this.editing = Some(account);
+                                let (label, placeholder, _) = account.entry_text();
+                                this.secret_user.update(cx, clear_secret);
                                 this.secret.update(cx, |input, cx| {
                                     clear_secret(input, cx);
-                                    input.focus(window, cx);
+                                    input.set_label(label, cx);
+                                    input.set_placeholder(placeholder, cx);
+                                    if account != Account::OpenSubtitlesLogin {
+                                        input.focus(window, cx);
+                                    }
                                 });
+                                if account == Account::OpenSubtitlesLogin {
+                                    this.secret_user
+                                        .update(cx, |input, cx| input.focus(window, cx));
+                                }
                                 cx.notify();
                             });
                         }),
@@ -313,7 +390,13 @@ impl SettingsWindow {
                             .disabled(pending || status == AccountStatus::Missing)
                             .on_click(move |_, _, cx| {
                                 let _ = remove.update(cx, |this, cx| {
-                                    this.credential(account, CredentialOperation::Remove, None, cx)
+                                    this.credential(
+                                        account,
+                                        CredentialOperation::Remove,
+                                        None,
+                                        None,
+                                        cx,
+                                    )
                                 });
                             }),
                     )
@@ -328,7 +411,13 @@ impl SettingsWindow {
                             )
                             .on_click(move |_, _, cx| {
                                 let _ = test.update(cx, |this, cx| {
-                                    this.credential(account, CredentialOperation::Test, None, cx)
+                                    this.credential(
+                                        account,
+                                        CredentialOperation::Test,
+                                        None,
+                                        None,
+                                        cx,
+                                    )
                                 });
                             }),
                     ),
@@ -522,7 +611,13 @@ impl SettingsWindow {
         for account in Account::ALL {
             accounts = accounts.child(self.account_row(account, cx));
         }
-        body = body.child(accounts).child(self.opensubtitles_block(p, cx));
+        body = body.child(accounts).child(text(
+            "Online subtitle search needs your own OpenSubtitles API key: create one at opensubtitles.com → API Consumers. A login is optional.",
+            p.subtle_foreground,
+        ));
+        if let Some(note) = &self.os_note {
+            body = body.child(text(note.clone(), p.success));
+        }
         if let Some(account) = self.editing {
             let cancel = weak.clone();
             body = body.child(
@@ -534,22 +629,41 @@ impl SettingsWindow {
                     .bg(p.card)
                     .border(size::HAIRLINE)
                     .border_color(p.border)
-                    .child(format!("Replace {}", account.label()))
+                    // Same verb as the row button that opened this card.
+                    .child(format!(
+                        "{} {}",
+                        if self.status.get(&account) == Some(&AccountStatus::Missing) {
+                            "Add"
+                        } else {
+                            "Replace"
+                        },
+                        account.label()
+                    ))
+                    .when(account == Account::OpenSubtitlesLogin, |el| {
+                        el.child(
+                            div()
+                                .w(size::CONTROL_SM * 10.)
+                                .child(self.secret_user.clone()),
+                        )
+                    })
                     .child(div().w(size::CONTROL_SM * 10.).child(self.secret.clone()))
                     .child(
                         div()
                             .flex()
                             .gap(s::S8)
-                            .child(Button::new("submit-secret", "Store token").on_click(
-                                move |_, _, cx| {
-                                    let _ = weak.update(cx, |this, cx| this.submit_secret(cx));
-                                },
-                            ))
+                            .child(
+                                Button::new("submit-secret", account.entry_text().2).on_click(
+                                    move |_, _, cx| {
+                                        let _ = weak.update(cx, |this, cx| this.submit_secret(cx));
+                                    },
+                                ),
+                            )
                             .child(Button::new("cancel-secret", "Cancel").on_click(
                                 move |_, _, cx| {
                                     let _ = cancel.update(cx, |this, cx| {
                                         this.editing = None;
                                         this.secret.update(cx, clear_secret);
+                                        this.secret_user.update(cx, clear_secret);
                                         cx.notify();
                                     });
                                 },

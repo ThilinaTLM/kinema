@@ -153,3 +153,39 @@ fn language_add_menu_offers_only_unchosen_languages() -> Result<(), Box<dyn std:
     assert!(options.iter().any(|(code, _)| *code == Some("fr")));
     Ok(())
 }
+
+#[test]
+fn opensubtitles_rows_map_to_the_right_actions() {
+    use crate::app::{OpenSubtitlesEdit as Edit, OpenSubtitlesPart as Part};
+    let secret = |s: &str| Some(SecretString::new(s.into()));
+    assert!(matches!(
+        opensubtitles::action(Part::ApiKey, CredentialOperation::Save, secret("k"), None),
+        Some(AppAction::EditOpenSubtitles(Edit::ApiKey(_)))
+    ));
+    assert!(matches!(
+        opensubtitles::action(
+            Part::Login,
+            CredentialOperation::Save,
+            secret("p"),
+            secret("u")
+        ),
+        Some(AppAction::EditOpenSubtitles(Edit::Login { .. }))
+    ));
+    // A login save without a username, or any save without a value, is not sent.
+    assert!(
+        opensubtitles::action(Part::Login, CredentialOperation::Save, secret("p"), None).is_none()
+    );
+    assert!(opensubtitles::action(Part::ApiKey, CredentialOperation::Save, None, None).is_none());
+    assert!(matches!(
+        opensubtitles::action(Part::Login, CredentialOperation::Remove, None, None),
+        Some(AppAction::EditOpenSubtitles(Edit::RemoveLogin))
+    ));
+    assert!(matches!(
+        opensubtitles::action(Part::ApiKey, CredentialOperation::Test, None, None),
+        Some(AppAction::CheckOpenSubtitles(Part::ApiKey))
+    ));
+    assert!(matches!(
+        opensubtitles::action(Part::Login, CredentialOperation::Test, None, None),
+        Some(AppAction::CheckOpenSubtitles(Part::Login))
+    ));
+}

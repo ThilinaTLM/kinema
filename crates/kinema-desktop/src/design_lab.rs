@@ -2357,11 +2357,12 @@ impl Render for Lab {
 }
 
 // ── P4 Settings: append-only production fixture scene registrations ──────────
-const SETTINGS_SCENES: [&str; 10] = [
+const SETTINGS_SCENES: [&str; 11] = [
     "settings-general",
     "settings-accounts-no-token",
     "settings-accounts",
     "settings-accounts-no-subtitle-key",
+    "settings-accounts-login-entry",
     "settings-playback",
     "settings-playback-subtitles",
     "settings-keyboard-mouse",
@@ -2384,7 +2385,8 @@ fn open_settings_fixture(
     let section = match scene {
         "settings-accounts"
         | "settings-accounts-no-token"
-        | "settings-accounts-no-subtitle-key" => Section::Accounts,
+        | "settings-accounts-no-subtitle-key"
+        | "settings-accounts-login-entry" => Section::Accounts,
         "settings-playback" | "settings-playback-subtitles" => Section::Playback,
         "settings-keyboard-mouse" => Section::KeyboardMouse,
         "settings-storage" => Section::Storage,
@@ -2449,6 +2451,9 @@ fn open_settings_fixture(
             }
             if no_subtitle_key {
                 view.fixture_opensubtitles_missing();
+            }
+            if scene == "settings-accounts-login-entry" {
+                view.fixture_login_entry(cx);
             }
             view
         })

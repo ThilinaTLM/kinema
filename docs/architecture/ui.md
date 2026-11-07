@@ -122,10 +122,20 @@ accessible names.
   Keyboard & Mouse, Storage, Appearance and About. Theme, poster size and motion
   apply live. **Playback** holds the ordered subtitle language list (add menu
   offering only unchosen languages, move up/down, remove; the last one cannot be
-  removed). **Accounts** has an OpenSubtitles block (API key, optional username
-  and password, Save/Remove per part, Check); fields clear as soon as they are
-  submitted. Design-lab scenes: `settings-playback-subtitles`,
-  `settings-accounts-no-subtitle-key`.
+  removed). **Accounts** lists OpenSubtitles API key and OpenSubtitles login as ordinary
+  credential rows (Add/Replace, Remove, Test) in the Credentials list; the login
+  entry card has a username and a password field, and fields clear as soon as
+  they are submitted. Test on the key row runs one fixed search; on the login row
+  it signs in and reports the remaining allowance. Design-lab scenes:
+  `settings-playback-subtitles`, `settings-accounts-no-subtitle-key`,
+  `settings-accounts-login-entry`.
+- The player's **subtitle search sheet** (subtitle menu → **Search online**) is a
+  `Sheet` over the video: language filter, optional title field, ranked results
+  with badges, the remaining allowance, and one distinct state per outcome
+  (searching, empty, failed, offline, rate limited, limit reached, key or
+  sign-in problems with **Open Settings**). Rules live in
+  [playback](playback.md#online-search). Lab scenes: `player-search`,
+  `player-search-loading`, `-empty`, `-quota`, `-no-key`, `-key`, `-text`.
 - The **quit sheet** appears only when sessions or launches are active. Cancel is
   focused first, and Esc cancels.
 

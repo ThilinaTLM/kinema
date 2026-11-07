@@ -111,6 +111,10 @@ pub mod player {
     pub const TOP_FADE: Pixels = px(48.);
     pub const TOP_BAR_HEIGHT: Pixels = px(48.);
     pub const HELP_COLUMN: Pixels = px(300.);
+    /// Tallest results list in the subtitle search sheet.
+    pub const SEARCH_LIST_MAX: Pixels = px(280.);
+    /// Viewport height the sheet's title, controls and footer need besides the list.
+    pub const SEARCH_SHEET_RESERVE: Pixels = px(330.);
     pub const VOLUME_PANEL_EXTRA: Pixels = px(84.);
     pub const VOLUME_TRACK: Pixels = px(12.);
     pub const VOLUME_THUMB: Pixels = px(18.);

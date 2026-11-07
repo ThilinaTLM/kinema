@@ -625,6 +625,9 @@ fn hash_window_needs_both_durable_windows_and_never_acquires()
         service.hash_window(&local.id),
         Some((3 * WINDOW, big.canonicalize()?))
     );
+    // The weak handle answers the same, and only while the service lives.
+    let handle = service.hash_windows();
+    assert_eq!(handle.get(&local.id), service.hash_window(&local.id));
     let tiny = service.register_local(&small)?;
     assert_eq!(service.hash_window(&tiny.id), None);
     assert_eq!(service.hash_window("unknown"), None);
@@ -662,5 +665,6 @@ fn hash_window_needs_both_durable_windows_and_never_acquires()
     assert_eq!(asset.state.lock().map_err(|_| "asset lock")?.priority, None);
     service.release(&lease.id)?;
     assert_eq!(service.hash_window(&lease.id), None);
+    assert_eq!(handle.get(&lease.id), None, "the handle sees releases too");
     Ok(())
 }

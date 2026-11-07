@@ -43,6 +43,9 @@ mod overlays;
 #[cfg(feature = "ui-probe")]
 mod probe;
 mod registry;
+mod search;
+pub(crate) use search::set_hash_window_source;
+mod search_model;
 mod startup;
 mod subtitles;
 #[cfg(test)]
@@ -144,7 +147,6 @@ pub struct PlayerWindow {
     progress_owner: Option<Entity<AppCoordinator>>,
     /// Catalog identity of this session for online subtitle search; memory only.
     /// `None` for local files, never inferred from file names.
-    #[allow(dead_code, reason = "read by the subtitle search sheet")]
     subtitle_target: Option<PlaybackTarget>,
     lease: Option<(String, u64)>,
     #[cfg(any(feature = "gpu-surface", feature = "ui-probe"))]
@@ -201,6 +203,10 @@ pub struct PlayerWindow {
     subtitle_admission: Task<()>,
     subtitle_pending: Option<SubtitlePending>,
     subtitle_notice: Option<(SubtitleNotice, Instant)>,
+    /// Online subtitle state that outlives the sheet (session, allowance, tracks).
+    online: search::OnlineSubtitles,
+    /// The search sheet over the video, while open.
+    search: Option<search::SearchSheet>,
     startup_cancel: Arc<std::sync::atomic::AtomicBool>,
     _initialize: Task<()>,
     _updates: Task<()>,

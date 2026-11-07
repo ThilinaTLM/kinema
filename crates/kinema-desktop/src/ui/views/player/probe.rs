@@ -233,6 +233,20 @@ pub enum SubtitleScene {
     Drop,
     /// `player-tracks`: subtitle menu open over messy real-world metadata.
     Menu,
+    /// `player-search`: online search sheet with results.
+    SearchResults,
+    /// `player-search-loading`: search in flight.
+    SearchLoading,
+    /// `player-search-empty`: successful search without results.
+    SearchEmpty,
+    /// `player-search-quota`: download limit reached, with the reset time.
+    SearchQuota,
+    /// `player-search-no-key`: subtitle menu with **Search online** disabled.
+    SearchNoKey,
+    /// `player-search-key`: the key was rejected; the sheet points to Settings.
+    SearchKeyRejected,
+    /// `player-search-text`: local file, waiting for a typed title.
+    SearchText,
 }
 
 #[cfg(feature = "ui-probe")]
@@ -341,12 +355,25 @@ fn run_probe_inner(
                 }}
                 if let Some(scene) = subtitles {
                     view.fixture_subtitles = true;
-                    view.subtitle_notice = Some((SubtitleNotice::Added { skipped: 1 }, Instant::now()));
+                    if matches!(scene, SubtitleScene::Drop | SubtitleScene::Menu) {
+                        view.subtitle_notice = Some((SubtitleNotice::Added { skipped: 1 }, Instant::now()));
+                    }
                     match scene {
                         SubtitleScene::Drop => view.drop_hover = Some(true),
-                        SubtitleScene::Menu => cx.defer_in(window, |view, window, cx| {
-                            view.toggle_menu(MenuKind::Subtitles, true, window, cx)
-                        }),
+                        SubtitleScene::Menu => {
+                            // One external track as if downloaded: "OpenSubtitles · ASS".
+                            view.online.record_tracks(view.state.media_generation, vec![6]);
+                            cx.defer_in(window, |view, window, cx| {
+                                view.toggle_menu(MenuKind::Subtitles, true, window, cx)
+                            })
+                        }
+                        SubtitleScene::SearchNoKey => {
+                            view.online = search::OnlineSubtitles::fixture(search::KeyKnowledge::Missing, None);
+                            cx.defer_in(window, |view, window, cx| {
+                                view.toggle_menu(MenuKind::Subtitles, true, window, cx)
+                            })
+                        }
+                        scene => cx.defer_in(window, move |view, window, cx| search_fixture(view, scene, window, cx)),
                     }
                 }
                 view.fixture_image = image::RgbaImage::from_raw(960, 540, pixels)
@@ -494,4 +521,110 @@ fn run_probe_inner(
     result.get()
         && PROBE_GPU_ERRORS.load(Ordering::Relaxed) == 0
         && PROBE_PANICS.load(Ordering::Relaxed) == 0
+}
+
+/// Offline search sheet states for the lab; no service is contacted.
+#[cfg(feature = "ui-probe")]
+fn search_fixture(
+    view: &mut PlayerWindow,
+    scene: SubtitleScene,
+    window: &mut Window,
+    cx: &mut Context<PlayerWindow>,
+) {
+    use search_model::{Allowance, Phase, Problem, SearchModel};
+    let result = |id: u64, language: &str, release: &str, downloads: u64| {
+        kinema_core::subtitle_search::SubtitleResult {
+            file_id: id,
+            language: language.into(),
+            release: release.into(),
+            file_name: None,
+            download_count: downloads,
+            hearing_impaired: false,
+            foreign_parts_only: false,
+            ai_translated: false,
+            machine_translated: false,
+            from_trusted: false,
+            moviehash_match: false,
+            format: Some("srt".into()),
+        }
+    };
+    let results = vec![
+        kinema_core::subtitle_search::SubtitleResult {
+            moviehash_match: true,
+            ..result(
+                1,
+                "en",
+                "The.Outsider.S01E04.1080p.WEB-DL.DDP5.1.H.264-NTb",
+                18_204,
+            )
+        },
+        kinema_core::subtitle_search::SubtitleResult {
+            hearing_impaired: true,
+            ..result(
+                2,
+                "en",
+                "The Outsider - 01x04 - Que Viene el Coco.WEB.NTb",
+                9_310,
+            )
+        },
+        kinema_core::subtitle_search::SubtitleResult {
+            foreign_parts_only: true,
+            ..result(
+                3,
+                "en",
+                "The.Outsider.S01E04.720p.HDTV.x264-SVA.Forced",
+                412,
+            )
+        },
+        result(4, "fr", "The.Outsider.S01E04.FRENCH.1080p.WEB.H264", 2_450),
+        kinema_core::subtitle_search::SubtitleResult {
+            ai_translated: true,
+            ..result(5, "de", "The.Outsider.S01E04.German", 140)
+        },
+        result(6, "es", "The.Outsider.S01E04.SPANISH.WEB", 1),
+    ];
+    let languages = vec!["en".to_owned(), "fr".to_owned(), "de".to_owned()];
+    let mut model = SearchModel::new(languages, scene != SubtitleScene::SearchText);
+    let mut allowance = Some(Allowance {
+        remaining: 12,
+        reset_time_utc: None,
+    });
+    match scene {
+        SubtitleScene::SearchResults => {
+            model.finish_search(0, Ok(results));
+        }
+        SubtitleScene::SearchLoading => {}
+        SubtitleScene::SearchEmpty => {
+            model.finish_search(0, Ok(Vec::new()));
+        }
+        SubtitleScene::SearchQuota => {
+            model.finish_search(0, Ok(results));
+            let problem = Problem::QuotaExhausted {
+                reset_time_utc: Some("2026-11-08T00:00:00.000Z".into()),
+            };
+            if let Some(add) = model.begin_add(1) {
+                model.fail_add(add, problem);
+            }
+            allowance = Some(Allowance {
+                remaining: 0,
+                reset_time_utc: Some("2026-11-08T00:00:00.000Z".into()),
+            });
+        }
+        SubtitleScene::SearchKeyRejected => {
+            model.finish_search(0, Err(Problem::ApiKeyRejected));
+            allowance = None;
+        }
+        SubtitleScene::SearchText => {
+            debug_assert_eq!(model.phase, Phase::Idle);
+            allowance = None;
+        }
+        _ => {}
+    }
+    view.show_search_fixture(
+        model,
+        scene == SubtitleScene::SearchText,
+        allowance,
+        window,
+        cx,
+    );
 }

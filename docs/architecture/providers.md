@@ -148,8 +148,8 @@ movie hash and `PlaybackTarget` conversion live in `kinema_core::subtitle_search
   only when both parts exist; a half-stored login is ignored, and a failed
   login save removes what it wrote. Edits bump `opensubtitles_generation()`.
   The login token is never stored. Presence is read on demand when Settings
-  opens, not at startup. **Check** signs in and reports the allowance, or runs
-  one fixed search to prove an API key without a login; it spends no download.
+  opens, not at startup. **Test** on the key row runs one fixed search; on the login row it
+  signs in and reads the allowance. Neither spends a download.
 - Credential presence in Settings means "stored", not "accepted by the service".
   **Test** uses the saved token, not unsaved text.
 

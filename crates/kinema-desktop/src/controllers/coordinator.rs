@@ -1152,8 +1152,15 @@ impl AppCoordinator {
             session,
             file_name,
             mode,
+            hash_windows,
         } = &event.outcome
         {
+            if let Some(windows) = hash_windows.clone() {
+                crate::ui::views::player::set_hash_window_source(
+                    std::sync::Arc::new(move |id: &str| windows.get(id)),
+                    cx,
+                );
+            }
             if resolved.as_ref().is_some_and(|r| !r.current) {
                 // Unlike an external process, obsolete embedded work need not be shown.
                 self.queue_embedded_release(session.id.clone(), cx);
@@ -2053,6 +2060,8 @@ impl AppCoordinator {
 pub enum SettingsDestination {
     General,
     Account(kinema_core::sources::DebridKind),
+    /// Accounts, focused on the OpenSubtitles API key row.
+    Subtitles,
     Storage,
 }
 impl AppCoordinator {
@@ -2170,6 +2179,7 @@ mod session_tests {
                 session: PlaybackSession { id: "one".into(), url: "http://127.0.0.1:1234/private-capability".into() },
                 file_name: "fixture.mkv".into(),
                 mode: crate::player::PlayerChoice::Embedded,
+                hash_windows: None,
             } }, cx);
             assert!(c.closed_embedded_sessions.is_empty());
             assert!(c.embedded_replays.is_empty());
@@ -2205,6 +2215,7 @@ mod session_tests {
                         },
                         file_name: "fixture.mkv".into(),
                         mode: crate::player::PlayerChoice::Embedded,
+                        hash_windows: None,
                     },
                 },
                 cx,

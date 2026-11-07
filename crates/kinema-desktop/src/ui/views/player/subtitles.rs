@@ -83,11 +83,14 @@ pub(super) fn supported_formats() -> String {
 /// An add request waiting for the player to report a new external track.
 #[derive(Clone, Debug)]
 pub(super) struct SubtitlePending {
-    media_generation: u64,
-    external: usize,
-    error: Option<String>,
-    skipped: usize,
-    since: Instant,
+    pub(super) media_generation: u64,
+    pub(super) external: usize,
+    pub(super) error: Option<String>,
+    pub(super) skipped: usize,
+    pub(super) since: Instant,
+    /// Set for a downloaded subtitle: the external track ids that existed
+    /// before the add, so the new track can be attributed to the service.
+    pub(super) online: Option<Vec<i64>>,
 }
 
 /// Admitted absolute UTF-8 paths, in order, plus what was skipped.
@@ -148,11 +151,24 @@ pub(super) fn has_subtitle_name(paths: &[PathBuf]) -> bool {
 }
 
 fn external_subtitles(state: &PlaybackState) -> usize {
+    external_ids(state).len()
+}
+
+fn external_ids(state: &PlaybackState) -> Vec<i64> {
     state
         .tracks
         .iter()
         .filter(|t| t.kind == TrackKind::Subtitle && t.external)
-        .count()
+        .map(|t| t.id)
+        .collect()
+}
+
+/// External subtitle tracks that were not there before `known`.
+pub(super) fn new_external_ids(state: &PlaybackState, known: &[i64]) -> Vec<i64> {
+    external_ids(state)
+        .into_iter()
+        .filter(|id| !known.contains(id))
+        .collect()
 }
 
 /// Outcome of a pending add after a fresh state snapshot, or None while waiting.
@@ -249,18 +265,43 @@ impl PlayerWindow {
             .iter()
             .map(|path| kinema_mpv::SubtitleFile::local(path))
             .collect();
+        if !self.submit_subtitles(&files, admission.skipped, false, cx) {
+            self.show_subtitle_notice(SubtitleNotice::Failed, cx);
+        }
+    }
+
+    /// Asks the player to load `files` and waits for a new external track.
+    /// `online` marks files downloaded from the service. False when the
+    /// request was not accepted.
+    pub(super) fn submit_subtitles(
+        &mut self,
+        files: &[kinema_mpv::SubtitleFile<'_>],
+        skipped: usize,
+        online: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let pending = SubtitlePending {
             media_generation: self.state.media_generation,
             external: external_subtitles(&self.state),
             error: self.state.error.clone(),
-            skipped: admission.skipped,
+            skipped,
             since: Instant::now(),
+            online: online.then(|| external_ids(&self.state)),
         };
-        if self.request_command(|player| player.add_subtitles(&files), cx) {
-            self.subtitle_notice = None;
-            self.subtitle_pending = Some(pending);
-        } else {
-            self.show_subtitle_notice(SubtitleNotice::Failed, cx);
+        if !self.request_command(|player| player.add_subtitles(files), cx) {
+            return false;
+        }
+        self.subtitle_notice = None;
+        self.replace_subtitle_pending(Some(pending));
+        true
+    }
+
+    /// Swaps the pending add; an online add it replaces can no longer land.
+    fn replace_subtitle_pending(&mut self, pending: Option<SubtitlePending>) {
+        let keeps_online = pending.as_ref().is_some_and(|p| p.online.is_some());
+        let replaced = std::mem::replace(&mut self.subtitle_pending, pending);
+        if !keeps_online && replaced.is_some_and(|p| p.online.is_some()) {
+            self.search_add_abandoned();
         }
     }
 
@@ -279,7 +320,7 @@ impl PlayerWindow {
                 "External subtitle not added"
             );
         }
-        self.subtitle_pending = None;
+        self.replace_subtitle_pending(None);
         self.subtitle_notice = Some((notice, Instant::now()));
         self.activity(cx);
     }
@@ -290,7 +331,18 @@ impl PlayerWindow {
         if let Some(pending) = &self.subtitle_pending
             && let Some(outcome) = pending_outcome(pending, &self.state, now)
         {
-            self.subtitle_pending = None;
+            let pending = self.subtitle_pending.take();
+            let online = pending.and_then(|p| p.online);
+            match (&online, outcome) {
+                (Some(known), Some(SubtitleNotice::Added { .. })) => {
+                    let ids = new_external_ids(&self.state, known);
+                    self.online.record_tracks(self.state.media_generation, ids);
+                    self.search_add_resolved(true);
+                }
+                (Some(_), Some(_)) => self.search_add_resolved(false),
+                (Some(_), None) => self.search_add_abandoned(),
+                (None, _) => {}
+            }
             if let Some(notice) = outcome {
                 if notice == SubtitleNotice::Failed {
                     tracing::info!(
@@ -376,8 +428,8 @@ impl PlayerWindow {
 mod tests {
     use super::{
         MAX_SUBTITLE_FILES, PathBuf, PlaybackState, SubtitleNotice, SubtitlePending,
-        SubtitleRejection, TrackKind, admit_paths, has_subtitle_name, pending_outcome,
-        supported_formats, timing,
+        SubtitleRejection, TrackKind, admit_paths, has_subtitle_name, new_external_ids,
+        pending_outcome, supported_formats, timing,
     };
     use kinema_mpv::Track;
     use std::time::Instant;
@@ -494,6 +546,7 @@ mod tests {
             error: None,
             skipped: 1,
             since: start,
+            online: None,
         };
         assert_eq!(pending_outcome(&pending, &base, start), None);
         let mut embedded = base.clone();
@@ -537,5 +590,33 @@ mod tests {
             pending_outcome(&pending, &base, start + timing::SUBTITLE_LOAD_TIMEOUT),
             Some(Some(SubtitleNotice::Failed))
         );
+    }
+
+    #[test]
+    fn new_external_tracks_are_the_ones_missing_from_the_known_set() {
+        let track = |id, external, kind| Track {
+            id,
+            kind,
+            title: None,
+            lang: None,
+            selected: false,
+            external,
+            forced: false,
+            hearing_impaired: false,
+            codec: None,
+            channels: None,
+        };
+        let state = PlaybackState {
+            tracks: vec![
+                track(1, false, TrackKind::Subtitle),
+                track(2, true, TrackKind::Subtitle),
+                track(3, true, TrackKind::Audio),
+                track(4, true, TrackKind::Subtitle),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(new_external_ids(&state, &[]), [2, 4]);
+        assert_eq!(new_external_ids(&state, &[2]), [4]);
+        assert!(new_external_ids(&state, &[2, 4]).is_empty());
     }
 }

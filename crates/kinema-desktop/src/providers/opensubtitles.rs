@@ -211,7 +211,7 @@ impl OpenSubtitlesClient {
 
     /// Loopback fixtures only; never compiled into production builds.
     #[cfg(test)]
-    fn for_test(api_base: Url, vip_base: Url) -> Result<Self> {
+    pub(crate) fn for_test(api_base: Url, vip_base: Url) -> Result<Self> {
         let mut client = Self::new(SecretString::new("test-key".into()), "Kinema vtest")?;
         client.api_base = api_base;
         client.vip_base = vip_base;
