@@ -213,6 +213,14 @@ impl RenderOnce for Carousel {
         }
         let duration = motion::duration(COLUMN, cx);
         let anim = window.use_keyed_state((self.id.clone(), "page"), cx, |_, _| None::<PageAnim>);
+        let smooth = window
+            .use_keyed_state((self.id.clone(), "wheel"), cx, |_, _| {
+                motion::SmoothWheel::new()
+            })
+            .read(cx)
+            .clone();
+        let wheel = smooth.listener(&handle, motion::Axis::X, window, cx);
+        let probe = smooth.probe(&handle);
         animate_page(&anim, &handle, duration, window, cx);
         let (more_before, more_after) =
             overflow_edges(handle.offset().x, handle.max_offset().x, measured);
@@ -301,12 +309,14 @@ impl RenderOnce for Carousel {
                             .py(space::S8)
                             .overflow_x_scroll()
                             .track_scroll(&handle)
+                            .on_scroll_wheel(wheel)
                             .children(
                                 self.items
                                     .into_iter()
                                     .map(|item| div().flex_none().child(item)),
                             ),
                     )
+                    .child(probe)
                     .when(more_before, |el| el.child(fade(edge, true)))
                     .when(more_after, |el| el.child(fade(edge, false))),
             )

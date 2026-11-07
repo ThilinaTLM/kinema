@@ -522,6 +522,55 @@ fn header_owns_clicks_but_lets_the_wheel_scroll_the_grid(cx: &mut TestAppContext
 }
 
 #[gpui::test]
+fn a_wheel_notch_glides_the_browse_grid(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        theme::init(cx);
+        theme::set_reduce_motion(false, cx);
+        bind_keys(cx);
+    });
+    let titles = (1..=60)
+        .map(|id| BrowseTitle::Tmdb(movie(id, &format!("Movie {id}"))))
+        .collect();
+    let coordinator = cx.new(|cx| {
+        let mut c = AppCoordinator::fixture(titles, None, cx);
+        c.load(MediaKind::Movie, String::new(), false, cx);
+        c
+    });
+    let main =
+        cx.add_window(|window, cx| MainWindow::with_coordinator(coordinator.clone(), window, cx));
+    let mut visual = VisualTestContext::from_window(main.into(), cx);
+    visual.simulate_resize(size(px(1280.), px(800.)));
+    draw(main, cx);
+    let browse = main.read_with(cx, |v, _| v.browse.clone()).unwrap();
+    let scrolled = |cx: &mut TestAppContext| browse.read_with(cx, |b, _| b.scrolled_under_header());
+    visual.simulate_event(ScrollWheelEvent {
+        position: point(px(400.), px(400.)),
+        delta: ScrollDelta::Lines(point(0., -3.)),
+        ..Default::default()
+    });
+    assert_eq!(scrolled(cx), Pixels::ZERO, "no jump on the event");
+    let start = std::time::Instant::now();
+    let mut last = Pixels::ZERO;
+    loop {
+        std::thread::sleep(Duration::from_millis(8));
+        let frames = cx
+            .update_window(main.into(), |_, window, cx| window.simulate_next_frame(cx))
+            .unwrap();
+        let now = scrolled(cx);
+        assert!(now >= last, "the glide only moves forward");
+        last = now;
+        if frames == 0 {
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "glide never settled"
+        );
+    }
+    assert!(last > Pixels::ZERO, "the grid scrolled");
+}
+
+#[gpui::test]
 fn library_requests_the_next_local_page_only_when_more_exist(cx: &mut TestAppContext) {
     let (coordinator, main) = fixture_window(cx);
     main.update(cx, |view, window, cx| {

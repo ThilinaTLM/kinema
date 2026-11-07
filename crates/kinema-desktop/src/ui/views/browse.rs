@@ -11,6 +11,7 @@ use crate::{
     ui::blocks::ViewState,
     ui::blocks::poster_card::{CardOpened, MembershipRequested, MembershipRetry, PosterCard},
     ui::blocks::skeleton_card::SkeletonCard,
+    ui::motion::{Axis, SmoothWheel},
     ui::primitives::alert::{Alert, AlertTone},
     ui::primitives::button::Button,
     ui::primitives::icon::IconName,
@@ -180,6 +181,7 @@ pub(crate) struct Browse {
     cells: Vec<Cell>,
     pub sort: Sort,
     scroll: UniformListScrollHandle,
+    wheel: SmoothWheel,
     focus: FocusHandle,
     selected: Option<String>,
     cols: usize,
@@ -208,6 +210,7 @@ impl Browse {
             cells: Vec::new(),
             sort: Sort::default(),
             scroll: UniformListScrollHandle::new(),
+            wheel: SmoothWheel::new(),
             focus: cx.focus_handle(),
             selected: None,
             cols: 2,
@@ -853,6 +856,9 @@ impl Render for Browse {
             let rows = layout.rows();
             // Library pages stop at the end of the local result set.
             let failed = error.is_some() || (library && !has_more);
+            let wheel =
+                self.wheel
+                    .listener(&self.scroll.0.borrow().base_handle, Axis::Y, window, cx);
             uniform_list(
                 "v3-poster-grid",
                 rows,
@@ -981,6 +987,7 @@ impl Render for Browse {
                 }),
             )
             .track_scroll(&self.scroll)
+            .on_scroll_wheel(wheel)
             // Rows scroll under the transparent header; the inset keeps the
             // first row clear of it at scroll top.
             .pt(top_inset)
@@ -1015,6 +1022,7 @@ impl Render for Browse {
             .text_color(p.foreground)
             .text(TextSize::Base)
             .child(self.brand_wash(cx))
+            .child(self.wheel.probe(&self.scroll.0.borrow().base_handle))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 let current = this
                     .cells

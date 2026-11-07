@@ -15,11 +15,13 @@ pub mod interaction;
 pub mod presence;
 pub mod transition;
 pub mod tween;
+pub mod wheel;
 
 pub use card_hover::{CardHover, CardHoverValues};
 pub use presence::{Closed, Phase, Presence};
 pub use transition::{AnimateExt, Axis, Effect, Resolved, Transition};
 pub use tween::Tween;
+pub use wheel::SmoothWheel;
 
 use crate::ui::theme::theme;
 
