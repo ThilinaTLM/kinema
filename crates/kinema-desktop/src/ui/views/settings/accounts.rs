@@ -35,6 +35,9 @@ pub(super) enum Pending {
     Save(&'static str),
     Credential(Account, CredentialOperation),
     Cleanup,
+    /// OpenSubtitles load (false) or credential edit (true).
+    OpenSubtitles(bool),
+    OpenSubtitlesCheck,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum AccountStatus {
@@ -215,6 +218,10 @@ impl SettingsWindow {
                 };
                 self.status.insert(account, status);
             }
+            Pending::OpenSubtitlesCheck => {
+                return self.opensubtitles_check_outcome(event, cx);
+            }
+            Pending::OpenSubtitles(edit) => return self.opensubtitles_outcome(event, edit, cx),
             Pending::Cleanup => {
                 if let Some(message) = failure {
                     self.show_error("Cleanup", message);
@@ -515,7 +522,7 @@ impl SettingsWindow {
         for account in Account::ALL {
             accounts = accounts.child(self.account_row(account, cx));
         }
-        body = body.child(accounts);
+        body = body.child(accounts).child(self.opensubtitles_block(p, cx));
         if let Some(account) = self.editing {
             let cancel = weak.clone();
             body = body.child(

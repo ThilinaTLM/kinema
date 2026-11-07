@@ -142,7 +142,17 @@ The chrome is a **Cinema Dock** built from design-system tokens on
 ### External subtitles
 
 The embedded player can add subtitle files the user already has. Online search
-is a [proposal](../proposals/external-subtitles.md).
+is a [proposal](../proposals/external-subtitles.md); its plumbing is built:
+the player window holds the session's `Option<PlaybackTarget>`
+(`subtitle_target`, in memory only; `PlayLocal` files have `None` and identity
+is never inferred from file names), `Player::add_subtitles` takes
+`SubtitleFile { path, title, lang }` so a download can carry its release name
+and language (local files pass neither), and downloads are cached by
+`subtitle_cache` (see [data](data.md#subtitle-cache)).
+`MediaService::hash_window(session)` is the read-only source for a movie hash:
+a local file's path, or a managed asset's payload path only when its first and
+last 64 KiB are in the durable range set. It never starts or prioritizes
+acquisition.
 
 - **Two entry points:** **Add file** in the subtitle menu (native dialog,
   several files allowed) and dropping files anywhere on the player window. The

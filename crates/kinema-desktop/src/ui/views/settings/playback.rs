@@ -2,7 +2,13 @@
 use super::*;
 
 impl SettingsWindow {
-    pub(super) fn playback(&self, mut body: Div, p: theme::Palette, weak: WeakEntity<Self>) -> Div {
+    pub(super) fn playback(
+        &self,
+        mut body: Div,
+        p: theme::Palette,
+        weak: WeakEntity<Self>,
+        cx: &Context<Self>,
+    ) -> Div {
         body = body
             .child(row(
                 "Player",
@@ -33,7 +39,7 @@ impl SettingsWindow {
             player_preview(&self.settings.player),
             p.muted_foreground,
         ));
-        body
+        body.child(self.subtitle_languages_block(p, cx))
     }
 }
 

@@ -1,6 +1,7 @@
 //! Credentialed provider adapters. No upstream error payloads escape this module.
 mod all_debrid;
 pub(crate) mod http;
+pub mod opensubtitles;
 mod real_debrid;
 #[cfg(test)]
 pub(crate) mod test_logging;

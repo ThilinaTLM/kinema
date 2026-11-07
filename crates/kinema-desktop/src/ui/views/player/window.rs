@@ -195,6 +195,7 @@ impl PlayerWindow {
             title,
             progress: None,
             progress_owner: None,
+            subtitle_target: None,
             lease: None,
             #[cfg(any(feature = "gpu-surface", feature = "ui-probe"))]
             frames_presented: 0,

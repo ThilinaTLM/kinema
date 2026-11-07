@@ -1,7 +1,10 @@
 //! Bounded application composition. No filesystem, vault, network or process work
 //! happens in submit/poll; dropping the handle signals shutdown without joining.
 use crate::{
-    credentials::{CredentialError, CredentialStore, MetadataCredentialStore, SecretString},
+    credentials::{
+        CredentialError, CredentialStore, MetadataCredentialStore, OpenSubtitlesCredentialStore,
+        OpenSubtitlesStatus, SecretString,
+    },
     media::{MediaError, MediaService, PlaybackSession, UsageSnapshot},
     paths::AppPaths,
     player,
@@ -49,6 +52,12 @@ pub enum AppAction {
     },
     DeleteTmdbCredential,
     TestTmdbCredential,
+    /// Reads which OpenSubtitles credentials exist (on demand, never at startup).
+    LoadOpenSubtitles,
+    /// Signs in (when a login is saved) and reads the allowance; otherwise makes one
+    /// search to prove the API key works. Spends no download allowance.
+    CheckOpenSubtitles,
+    EditOpenSubtitles(OpenSubtitlesEdit),
     Prepare {
         target: PlaybackTarget,
         candidate: SourceCandidate,
@@ -69,6 +78,23 @@ pub enum AppAction {
         session_id: String,
     },
 }
+/// Download allowance reported for a signed-in OpenSubtitles account.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OpenSubtitlesAllowance {
+    pub remaining: Option<u32>,
+    pub allowed: Option<u32>,
+}
+/// One OpenSubtitles credential mutation; values are secrets and never formatted.
+#[derive(Debug)]
+pub enum OpenSubtitlesEdit {
+    ApiKey(SecretString),
+    Login {
+        username: SecretString,
+        password: SecretString,
+    },
+    RemoveApiKey,
+    RemoveLogin,
+}
 impl AppAction {
     pub(crate) fn operation(&self) -> &'static str {
         match self {
@@ -80,6 +106,9 @@ impl AppAction {
             Self::SetTmdbCredential { .. } => "set_tmdb_credential",
             Self::DeleteTmdbCredential => "delete_tmdb_credential",
             Self::TestTmdbCredential => "test_tmdb_credential",
+            Self::LoadOpenSubtitles => "load_opensubtitles",
+            Self::CheckOpenSubtitles => "check_opensubtitles",
+            Self::EditOpenSubtitles(_) => "edit_opensubtitles",
             Self::Prepare { .. } => "prepare",
             Self::PlayFile { .. } => "play_file",
             Self::PlayLocal { .. } => "play_local",
@@ -187,6 +216,14 @@ pub enum AppOutcome {
         status: CredentialState,
     },
     TmdbCredentialChecked,
+    /// Current OpenSubtitles credential presence after a load or edit.
+    OpenSubtitles {
+        status: OpenSubtitlesStatus,
+    },
+    /// The key works. `allowance` is present only when a saved login signed in.
+    OpenSubtitlesChecked {
+        allowance: Option<OpenSubtitlesAllowance>,
+    },
     MediaFailed {
         session_id: String,
         message: String,
@@ -514,6 +551,7 @@ fn family(action: &AppAction) -> Option<u8> {
         AppAction::TestCredential(DebridKind::RealDebrid) => Some(3),
         AppAction::TestCredential(DebridKind::AllDebrid) => Some(4),
         AppAction::TestTmdbCredential => Some(5),
+        AppAction::CheckOpenSubtitles => Some(6),
         _ => None,
     }
 }
@@ -792,6 +830,11 @@ impl Application {
             | AppAction::TestTmdbCredential => {
                 span.record("provider", "tmdb");
             }
+            AppAction::LoadOpenSubtitles
+            | AppAction::CheckOpenSubtitles
+            | AppAction::EditOpenSubtitles(_) => {
+                span.record("provider", "opensubtitles");
+            }
             _ => {}
         }
         let _span = span.entered();
@@ -863,6 +906,22 @@ impl Application {
                         &cancel,
                     )?;
                     Ok(AppOutcome::TmdbCredentialChecked)
+                }
+                AppAction::LoadOpenSubtitles => {
+                    let status = OpenSubtitlesCredentialStore::new()
+                        .status()
+                        .map_err(|e| e.to_string())?;
+                    Ok(AppOutcome::OpenSubtitles { status })
+                }
+                AppAction::CheckOpenSubtitles => {
+                    let allowance = check_opensubtitles(&cancel)?;
+                    Ok(AppOutcome::OpenSubtitlesChecked { allowance })
+                }
+                AppAction::EditOpenSubtitles(edit) => {
+                    let store = OpenSubtitlesCredentialStore::new();
+                    edit_opensubtitles(&store, edit)?;
+                    let status = store.status().map_err(|e| e.to_string())?;
+                    Ok(AppOutcome::OpenSubtitles { status })
                 }
                 AppAction::TestCredential(provider) => {
                     validate(provider)?;
@@ -1152,6 +1211,61 @@ fn update_metadata_credential(
             CredentialState::Present
         },
     })
+}
+
+/// Removing something already absent is success: the goal state holds.
+fn edit_opensubtitles(
+    store: &OpenSubtitlesCredentialStore,
+    edit: OpenSubtitlesEdit,
+) -> Result<(), String> {
+    let result = match edit {
+        OpenSubtitlesEdit::ApiKey(value) => store.set_api_key(value),
+        OpenSubtitlesEdit::Login { username, password } => store.set_login(username, password),
+        OpenSubtitlesEdit::RemoveApiKey => match store.delete_api_key() {
+            Err(CredentialError::Missing) => Ok(()),
+            other => other,
+        },
+        OpenSubtitlesEdit::RemoveLogin => match store.delete_login() {
+            Err(CredentialError::Missing) => Ok(()),
+            other => other,
+        },
+    };
+    result.map_err(|e| e.to_string())
+}
+
+fn check_opensubtitles(cancel: &AtomicBool) -> Result<Option<OpenSubtitlesAllowance>, String> {
+    use crate::providers::opensubtitles::{OpenSubtitlesClient, default_user_agent};
+    use kinema_core::subtitle_search::SubtitleQuery;
+    check(cancel)?;
+    let credentials = OpenSubtitlesCredentialStore::new()
+        .credentials()
+        .map_err(|e| e.to_string())?;
+    check(cancel)?;
+    let client = OpenSubtitlesClient::new(credentials.api_key, default_user_agent())
+        .map_err(|e| e.to_string())?;
+    if let Some((username, password)) = &credentials.login {
+        let session = client
+            .login(username.expose(), password, cancel)
+            .map_err(|e| e.to_string())?;
+        let info = client
+            .user_info(&session, cancel)
+            .map_err(|e| e.to_string())?;
+        return Ok(Some(OpenSubtitlesAllowance {
+            remaining: info.remaining_downloads.or(session.remaining_downloads),
+            allowed: info.allowed_downloads.or(session.allowed_downloads),
+        }));
+    }
+    // No login: one fixed, harmless search proves the key without spending allowance.
+    let query = SubtitleQuery {
+        target: None,
+        text: Some("matrix".into()),
+        languages: vec!["en".into()],
+        moviehash: None,
+    };
+    client
+        .search(&query, None, cancel)
+        .map_err(|e| e.to_string())?;
+    Ok(None)
 }
 
 fn test_credential<E: std::fmt::Display>(
@@ -2683,6 +2797,30 @@ mod tests {
                 .unwrap_or_else(|e| e.into_inner())
                 .is_empty()
         );
+        Ok(())
+    }
+    #[test]
+    fn opensubtitles_edits_are_idempotent_removals_and_report_failures() -> Result<(), String> {
+        let store = crate::credentials::test_opensubtitles_store();
+        // Removing what is absent already satisfies the request.
+        edit_opensubtitles(&store, OpenSubtitlesEdit::RemoveApiKey)?;
+        edit_opensubtitles(&store, OpenSubtitlesEdit::RemoveLogin)?;
+        edit_opensubtitles(
+            &store,
+            OpenSubtitlesEdit::ApiKey(SecretString::new("k".into())),
+        )?;
+        edit_opensubtitles(
+            &store,
+            OpenSubtitlesEdit::Login {
+                username: SecretString::new("u".into()),
+                password: SecretString::new("p".into()),
+            },
+        )?;
+        let status = store.status().map_err(|e| e.to_string())?;
+        assert!(status.api_key && status.login);
+        edit_opensubtitles(&store, OpenSubtitlesEdit::RemoveLogin)?;
+        let status = store.status().map_err(|e| e.to_string())?;
+        assert!(status.api_key && !status.login);
         Ok(())
     }
     mod sessions;

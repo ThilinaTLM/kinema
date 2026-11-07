@@ -119,3 +119,37 @@ fn credential_failure_is_not_empty_or_missing() {
         AccountStatus::Unavailable
     );
 }
+
+#[test]
+fn subtitle_changes_edit_the_ordered_list_and_keep_it_valid() {
+    let mut settings = Settings::default();
+    apply_change(&mut settings, SettingChange::SubtitleAdd("pt"));
+    apply_change(&mut settings, SettingChange::SubtitleAdd("pt"));
+    apply_change(&mut settings, SettingChange::SubtitleAdd("fr"));
+    assert_eq!(settings.subtitle_languages.codes(), ["en", "pt", "fr"]);
+    apply_change(&mut settings, SettingChange::SubtitleUp("fr"));
+    apply_change(&mut settings, SettingChange::SubtitleDown("en"));
+    assert_eq!(settings.subtitle_languages.codes(), ["fr", "en", "pt"]);
+    for code in ["fr", "en", "pt"] {
+        apply_change(&mut settings, SettingChange::SubtitleRemove(code));
+    }
+    assert_eq!(
+        settings.subtitle_languages.codes(),
+        ["pt"],
+        "last one stays"
+    );
+}
+#[test]
+fn language_add_menu_offers_only_unchosen_languages() -> Result<(), Box<dyn std::error::Error>> {
+    let chosen = kinema_core::subtitle_languages::SubtitleLanguages::new(["en", "de"])?;
+    let options = subtitles::add_options(&chosen);
+    assert_eq!(options[0].0, None);
+    assert!(
+        options
+            .iter()
+            .skip(1)
+            .all(|(code, name)| code.is_some_and(|c| !chosen.contains(c)) && !name.is_empty())
+    );
+    assert!(options.iter().any(|(code, _)| *code == Some("fr")));
+    Ok(())
+}

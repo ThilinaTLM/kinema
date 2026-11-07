@@ -22,8 +22,10 @@ mod general;
 #[cfg(all(test, feature = "ui-probe-test"))]
 mod interaction_tests;
 mod keyboard;
+mod opensubtitles;
 mod playback;
 mod storage;
+mod subtitles;
 #[cfg(test)]
 mod tests;
 
@@ -32,6 +34,7 @@ use accounts::*;
 use gpui::{prelude::*, *};
 use kinema_core::provider::{ProviderId, ProviderPriority};
 use kinema_core::sources::{DebridKind, IndexerKind};
+use opensubtitles::OpenSubtitlesState;
 use std::collections::HashMap;
 use storage::bytes_label;
 
@@ -242,6 +245,10 @@ enum SettingChange {
     ProviderDown(ProviderId),
     Indexer(IndexerKind),
     Debrid(DebridKind),
+    SubtitleAdd(&'static str),
+    SubtitleRemove(&'static str),
+    SubtitleUp(&'static str),
+    SubtitleDown(&'static str),
 }
 fn apply_change(settings: &mut Settings, change: SettingChange) {
     match change {
@@ -252,6 +259,18 @@ fn apply_change(settings: &mut Settings, change: SettingChange) {
         SettingChange::ProviderDown(id) => settings.metadata_priority.move_down(id),
         SettingChange::Indexer(v) => settings.indexer = v,
         SettingChange::Debrid(v) => settings.debrid = v,
+        SettingChange::SubtitleAdd(code) => {
+            settings.subtitle_languages.add(code);
+        }
+        SettingChange::SubtitleRemove(code) => {
+            settings.subtitle_languages.remove(code);
+        }
+        SettingChange::SubtitleUp(code) => {
+            settings.subtitle_languages.move_up(code);
+        }
+        SettingChange::SubtitleDown(code) => {
+            settings.subtitle_languages.move_down(code);
+        }
     }
 }
 
@@ -266,6 +285,18 @@ pub struct SettingsWindow {
     debrid: Entity<Select<DebridKind>>,
     limit: Entity<TextInput>,
     secret: Entity<TextInput>,
+    os_api_key: Entity<TextInput>,
+    os_username: Entity<TextInput>,
+    os_password: Entity<TextInput>,
+    os_state: OpenSubtitlesState,
+    os_busy: usize,
+    os_checking: bool,
+    os_note: Option<String>,
+    os_applied: u64,
+    language_add: Option<Entity<Select<subtitles::LanguageChoice>>>,
+    /// The list the add menu was built for; it is rebuilt when the list changes.
+    language_add_for: Option<kinema_core::subtitle_languages::SubtitleLanguages>,
+    language_add_subscription: Option<Subscription>,
     editing: Option<Account>,
     status: HashMap<Account, AccountStatus>,
     snapshots: HashMap<Account, Option<CredentialState>>,
@@ -322,6 +353,17 @@ impl SettingsWindow {
             input.set_placeholder("New token — stored only in OS secure storage", cx);
             input
         });
+        let mut os_input = |label: &'static str, secret: bool, cx: &mut Context<Self>| {
+            cx.new(|cx| {
+                let mut input = TextInput::new(window, cx);
+                input.set_secret(secret, cx);
+                input.set_label(label, cx);
+                input
+            })
+        };
+        let os_api_key = os_input("OpenSubtitles API key", true, cx);
+        let os_username = os_input("OpenSubtitles username", false, cx);
+        let os_password = os_input("OpenSubtitles password", true, cx);
         let subscriptions = vec![
             cx.subscribe(&coordinator, |this, _, event, cx| {
                 if let CoordinatorEvent::App(event) = event {
@@ -367,6 +409,17 @@ impl SettingsWindow {
             debrid,
             limit,
             secret,
+            os_api_key,
+            os_username,
+            os_password,
+            os_state: OpenSubtitlesState::Loading,
+            os_busy: 0,
+            os_checking: false,
+            os_note: None,
+            os_applied: 0,
+            language_add: None,
+            language_add_for: None,
+            language_add_subscription: None,
             editing: None,
             status: HashMap::new(),
             snapshots: HashMap::new(),
@@ -380,6 +433,7 @@ impl SettingsWindow {
             wheel: SmoothWheel::new(),
         };
         this.sync(cx);
+        this.load_opensubtitles(cx);
         this.sidebar.focus(window, cx);
         this
     }
@@ -422,6 +476,9 @@ impl SettingsWindow {
                 .update(cx, |select, cx| select.set_value(self.settings.indexer, cx));
             self.debrid
                 .update(cx, |select, cx| select.set_value(self.settings.debrid, cx));
+        }
+        if self.language_add_for.as_ref() != Some(&self.settings.subtitle_languages) {
+            self.rebuild_language_add(cx);
         }
     }
     fn show_error(&mut self, field: &'static str, message: String) -> Option<String> {
@@ -521,7 +578,7 @@ impl SettingsWindow {
         body = match self.section {
             Section::General => self.general(body, p),
             Section::Accounts => self.accounts_section(body, p, weak, cx),
-            Section::Playback => self.playback(body, p, weak),
+            Section::Playback => self.playback(body, p, weak, cx),
             Section::KeyboardMouse => self.keyboard_mouse(body, p),
             Section::Storage => self.storage(body, p, weak, cx),
             Section::Appearance => self.appearance(body, p, weak),
@@ -662,7 +719,15 @@ impl SettingsWindow {
             .insert(Account::RealDebrid, AccountStatus::Verified);
         view.status
             .insert(Account::AllDebrid, AccountStatus::Missing);
+        view.os_state = OpenSubtitlesState::Ready(crate::credentials::OpenSubtitlesStatus {
+            api_key: true,
+            login: false,
+        });
         view
+    }
+    /// Fixture variant: no OpenSubtitles API key yet.
+    pub fn fixture_opensubtitles_missing(&mut self) {
+        self.os_state = OpenSubtitlesState::Ready(Default::default());
     }
     /// Fixture variant: no saved TMDB token.
     pub fn fixture_tmdb_missing(&mut self) {

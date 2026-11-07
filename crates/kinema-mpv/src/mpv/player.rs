@@ -26,6 +26,57 @@ use std::{
 pub const MAX_VOLUME: f64 = 150.0;
 /// Most external subtitle files accepted by one `Player::add_subtitles` call.
 pub const MAX_SUBTITLE_FILES: usize = 8;
+/// Longest accepted subtitle track title, in bytes.
+pub const MAX_SUBTITLE_TITLE_BYTES: usize = 256;
+/// Longest accepted subtitle language tag, in bytes.
+pub const MAX_SUBTITLE_LANG_BYTES: usize = 16;
+
+/// One external subtitle file for `Player::add_subtitles`. `title` and `lang`
+/// become mpv's `sub-add` title and language arguments (mpv otherwise titles
+/// the track with the file name and detects language from a trailing tag).
+/// `lang` requires `title` because mpv takes them positionally.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SubtitleFile<'a> {
+    pub path: &'a str,
+    pub title: Option<&'a str>,
+    pub lang: Option<&'a str>,
+}
+
+impl<'a> SubtitleFile<'a> {
+    /// A file labelled by mpv's defaults.
+    pub fn local(path: &'a str) -> Self {
+        Self {
+            path,
+            title: None,
+            lang: None,
+        }
+    }
+
+    fn validate(&self) -> Result<()> {
+        if !std::path::Path::new(self.path).is_absolute() {
+            return Err(Error::InvalidInput("subtitle path must be absolute"));
+        }
+        if let Some(title) = self.title
+            && (title.is_empty()
+                || title.len() > MAX_SUBTITLE_TITLE_BYTES
+                || title.contains(['\0', '\n', '\r']))
+        {
+            return Err(Error::InvalidInput("subtitle title is invalid"));
+        }
+        if let Some(lang) = self.lang {
+            if self.title.is_none() {
+                return Err(Error::InvalidInput("subtitle language requires a title"));
+            }
+            if lang.is_empty()
+                || lang.len() > MAX_SUBTITLE_LANG_BYTES
+                || !lang.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            {
+                return Err(Error::InvalidInput("subtitle language is invalid"));
+            }
+        }
+        Ok(())
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -574,15 +625,12 @@ impl Player {
     /// `load` makes it stale, and mpv drops external tracks on the next load.
     /// Acceptance is not proof the file parsed; a new external track in the
     /// observed `tracks`, or an error in state, is the outcome.
-    pub fn add_subtitles(&self, paths: &[&str]) -> Result<()> {
-        if paths.is_empty() || paths.len() > MAX_SUBTITLE_FILES {
+    pub fn add_subtitles(&self, files: &[SubtitleFile<'_>]) -> Result<()> {
+        if files.is_empty() || files.len() > MAX_SUBTITLE_FILES {
             return Err(Error::InvalidInput("subtitle file count out of range"));
         }
-        if paths
-            .iter()
-            .any(|path| !std::path::Path::new(path).is_absolute())
-        {
-            return Err(Error::InvalidInput("subtitle path must be absolute"));
+        for file in files {
+            file.validate()?;
         }
         let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
         if self.shared.stopped.load(Ordering::Acquire) {
@@ -593,13 +641,25 @@ impl Player {
                 "adding subtitles requires a loaded file",
             ));
         }
-        let last = paths.len() - 1;
-        let mut commands: Vec<[&str; 3]> = paths
+        let last = files.len() - 1;
+        let mut commands: Vec<Vec<&str>> = files
             .iter()
             .enumerate()
-            .map(|(i, path)| ["sub-add", path, if i == last { "select" } else { "auto" }])
+            .map(|(i, file)| {
+                // mpv: sub-add <url> [<flags> [<title> [<lang>]]]
+                let mut args = vec![
+                    "sub-add",
+                    file.path,
+                    if i == last { "select" } else { "auto" },
+                ];
+                args.extend(file.title);
+                if file.title.is_some() {
+                    args.extend(file.lang);
+                }
+                args
+            })
             .collect();
-        commands.push(["set", "sub-visibility", "yes"]);
+        commands.push(vec!["set", "sub-visibility", "yes"]);
         let commands: Vec<&[&str]> = commands.iter().map(|c| c.as_slice()).collect();
         self.submit(
             &commands,
@@ -1442,15 +1502,40 @@ mod tests {
         let second = dir.join("second.ass");
         let (first, second) = (first.to_str().unwrap(), second.to_str().unwrap());
         assert!(matches!(
-            player.add_subtitles(&[first]),
+            player.add_subtitles(&[SubtitleFile::local(first)]),
             Err(Error::InvalidInput(_))
         ));
         ready_video_and_subtitle(&player);
         for invalid in [
             &[][..],
-            &["relative.srt"][..],
-            &[first; MAX_SUBTITLE_FILES + 1][..],
-            &[""][..],
+            &[SubtitleFile::local("relative.srt")][..],
+            &[SubtitleFile::local(first); MAX_SUBTITLE_FILES + 1][..],
+            &[SubtitleFile::local("")][..],
+            &[SubtitleFile {
+                path: first,
+                title: Some("a\0b"),
+                lang: None,
+            }][..],
+            &[SubtitleFile {
+                path: first,
+                title: Some(""),
+                lang: None,
+            }][..],
+            &[SubtitleFile {
+                path: first,
+                title: Some("t"),
+                lang: Some("en us"),
+            }][..],
+            &[SubtitleFile {
+                path: first,
+                title: Some("t"),
+                lang: Some(""),
+            }][..],
+            &[SubtitleFile {
+                path: first,
+                title: None,
+                lang: Some("en"),
+            }][..],
         ] {
             assert!(matches!(
                 player.add_subtitles(invalid),
@@ -1459,13 +1544,22 @@ mod tests {
         }
         assert!(receiver.try_recv().is_err());
         let before = player.state();
-        player.add_subtitles(&[first, second]).unwrap();
+        player
+            .add_subtitles(&[
+                SubtitleFile::local(first),
+                SubtitleFile {
+                    path: second,
+                    title: Some("1080p WEB-DL"),
+                    lang: Some("pt-BR"),
+                },
+            ])
+            .unwrap();
         let operation = receiver.try_recv().unwrap();
         assert_eq!(
             arguments(&operation),
             [
                 vec!["sub-add", first, "auto"],
-                vec!["sub-add", second, "select"],
+                vec!["sub-add", second, "select", "1080p WEB-DL", "pt-BR"],
                 vec!["set", "sub-visibility", "yes"],
             ]
         );
@@ -1473,7 +1567,7 @@ mod tests {
         assert_eq!(operation.generation, Some(0));
         assert_eq!(player.state(), before, "no optimistic track");
         player.shared.state.lock().unwrap().loading = true;
-        assert!(player.add_subtitles(&[first]).is_err());
+        assert!(player.add_subtitles(&[SubtitleFile::local(first)]).is_err());
     }
     #[test]
     fn frame_step_is_one_ordered_operation_without_optimistic_state() {
@@ -3291,7 +3385,14 @@ mod tests {
                 .all(|t| t.kind != crate::TrackKind::Subtitle)
         );
         player
-            .add_subtitles(&[first.to_str().unwrap(), second.to_str().unwrap()])
+            .add_subtitles(&[
+                SubtitleFile::local(first.to_str().unwrap()),
+                SubtitleFile {
+                    path: second.to_str().unwrap(),
+                    title: Some("Release Name"),
+                    lang: Some("fr"),
+                },
+            ])
             .unwrap();
         wait_for(&player, |s| {
             s.tracks
@@ -3310,11 +3411,14 @@ mod tests {
         // not follow request order; selection must still follow the last file.
         let selected: Vec<_> = subs.iter().filter(|t| t.selected).collect();
         assert_eq!(selected.len(), 1, "{subs:?}");
-        assert_eq!(selected[0].title.as_deref(), Some("second.ass"));
+        assert_eq!(selected[0].title.as_deref(), Some("Release Name"));
+        assert_eq!(selected[0].lang.as_deref(), Some("fr"));
         assert_eq!(state.subtitle_visibility, Some(true));
         assert_eq!(state.error, None);
         // A file mpv cannot parse surfaces as an error, never as a new track.
-        player.add_subtitles(&[broken.to_str().unwrap()]).unwrap();
+        player
+            .add_subtitles(&[SubtitleFile::local(broken.to_str().unwrap())])
+            .unwrap();
         wait_for(&player, |s| s.error.is_some());
         assert_eq!(
             player.state().tracks.iter().filter(|t| t.external).count(),

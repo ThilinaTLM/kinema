@@ -81,6 +81,47 @@ the same boundary.
 - An account check means "the credential authenticates". It does not mean
   premium status or playback readiness.
 
+## Subtitles (OpenSubtitles.com)
+
+`providers::opensubtitles::OpenSubtitlesClient` is a blocking adapter for the REST
+API, using the **user's own** `Api-Key` (nothing is bundled) and an optional user
+login. Call it only from an owned background worker; it passes a `&AtomicBool` for
+cancellation like the debrid adapters. Pure types, ranking, the OpenSubtitles
+movie hash and `PlaybackTarget` conversion live in `kinema_core::subtitle_search`.
+
+- **Headers:** `Api-Key`, `User-Agent: Kinema v<version>`, `Accept: application/json`,
+  and `Authorization: Bearer` whenever a session exists (always on vip-api). Key and
+  token are marked sensitive. The link host receives neither.
+- **Hosts (HTTPS allowlist):** `api.opensubtitles.com`; `vip-api.opensubtitles.com`
+  only when `/login` returned it as `base_url`; `www.opensubtitles.com` for
+  download links. Anything else is `InvalidResponse`. No redirects: a 3xx is
+  `ServiceFailure`.
+- **Search** sends one canonical query (alphabetical parameters, lowercase, no
+  default values, IMDb ids without `tt`/leading zeros, sorted comma-joined
+  languages, `+` for spaces, 16-hex `moviehash`) and returns ranked results.
+  `ai_translated`/`machine_translated` are omitted (service defaults); machine
+  translations are also dropped locally. Only page 1 is read. Items with no
+  usable file are skipped; a nonempty `data` where every item is malformed is
+  `InvalidResponse`. An empty `data` is a successful empty result.
+- **Download** is `POST /download` then a bounded GET of the temporary link
+  (never logged, cached or returned). The file cap is
+  `kinema_core::subtitles::MAX_SUBTITLE_BYTES`; empty bodies are rejected. JSON
+  bodies are capped at 4 MiB.
+- **Errors:** `Empty` is not an error. 401 on `/login` is `LoginRejected`; 401/403
+  otherwise `ApiKeyRejected`; 401 on `/download` without a session `SignInRequired`
+  (with a session, any 401 is `SessionExpired`); 406 from `/download` is
+  `QuotaExhausted { reset_time_utc }`; 429 `RateLimited`; 5xx, other 4xx and 3xx
+  `ServiceFailure`; transport `Network`; `Cancelled`; malformed `InvalidResponse`.
+  The 406-as-quota and 403-as-bad-key mappings are assumptions from the public
+  reference, not live-verified.
+- **Limits:** requests are spaced 200 ms (5 per second), logins 1 s. After a 401 on
+  `/login` the client remembers an in-memory fingerprint of those credentials and
+  refuses to send them again without a request.
+- **Logging:** only host, status, result/byte counts, durations and fixed
+  categories. Never the key, token, credentials, query, file names or links.
+- Tests use loopback fixtures; no live OpenSubtitles account, key or download has
+  been exercised.
+
 ## Credentials
 
 - Credentials are stored **only in the OS keyring** through the `keyring` crate,
@@ -100,6 +141,15 @@ the same boundary.
   authentication rejection also invalidates the cached client.
 - The keyring library can cache a failed initialization for the rest of the
   process. After restoring access to the store, restart Kinema.
+- **OpenSubtitles** uses three accounts: `opensubtitles-api-key` (the user's own
+  key, nothing is bundled), and the optional `opensubtitles-username` and
+  `opensubtitles-password`. `OpenSubtitlesCredentialStore::credentials()` returns
+  the key (missing is distinct from access denied or unavailable) and a login
+  only when both parts exist; a half-stored login is ignored, and a failed
+  login save removes what it wrote. Edits bump `opensubtitles_generation()`.
+  The login token is never stored. Presence is read on demand when Settings
+  opens, not at startup. **Check** signs in and reports the allowance, or runs
+  one fixed search to prove an API key without a login; it spends no download.
 - Credential presence in Settings means "stored", not "accepted by the service".
   **Test** uses the saved token, not unsaved text.
 

@@ -607,3 +607,60 @@ fn stop_reports_service_failure_instead_of_claiming_release()
     assert_eq!(service.release("session").err(), Some(MediaError::Storage));
     Ok(())
 }
+
+#[test]
+fn hash_window_needs_both_durable_windows_and_never_acquires()
+-> Result<(), Box<dyn std::error::Error>> {
+    use kinema_core::media::ByteRange;
+    const WINDOW: u64 = 64 * 1024;
+    let root = tempfile::tempdir()?;
+    let service = service(root.path());
+    // Local files: path and size, but not below one window.
+    let big = root.path().join("big.mp4");
+    std::fs::write(&big, vec![0u8; 3 * WINDOW as usize])?;
+    let small = root.path().join("small.mp4");
+    std::fs::write(&small, vec![0u8; 10])?;
+    let local = service.register_local(&big)?;
+    assert_eq!(
+        service.hash_window(&local.id),
+        Some((3 * WINDOW, big.canonicalize()?))
+    );
+    let tiny = service.register_local(&small)?;
+    assert_eq!(service.hash_window(&tiny.id), None);
+    assert_eq!(service.hash_window("unknown"), None);
+    service.release(&local.id)?;
+    assert_eq!(service.hash_window(&local.id), None);
+    // Remote assets: only when head and tail are both durable.
+    let size = 4 * WINDOW;
+    let identity = identity(size);
+    let asset = storage::create(&service.shared.root, &storage::key(&identity), identity)?;
+    let lease = service.lease(Source::Remote(asset.clone()))?;
+    let set = |ranges: &[(u64, u64)]| -> Result<(), Box<dyn std::error::Error>> {
+        let mut state = asset.state.lock().map_err(|_| "asset lock")?;
+        state.ranges = RangeSet::new();
+        for (start, end) in ranges {
+            state
+                .ranges
+                .insert(ByteRange::new(*start, *end).ok_or("range")?);
+        }
+        Ok(())
+    };
+    let expected = Some((size, asset.dir.join("payload")));
+    assert_eq!(service.hash_window(&lease.id), None);
+    set(&[(0, WINDOW)])?;
+    assert_eq!(service.hash_window(&lease.id), None);
+    set(&[(size - WINDOW, size)])?;
+    assert_eq!(service.hash_window(&lease.id), None);
+    set(&[(0, WINDOW - 1), (size - WINDOW, size)])?;
+    assert_eq!(service.hash_window(&lease.id), None);
+    set(&[(0, WINDOW), (size - WINDOW, size)])?;
+    assert_eq!(service.hash_window(&lease.id), expected);
+    assert!(
+        !asset.running.load(Ordering::Acquire),
+        "reading the window must not start acquisition"
+    );
+    assert_eq!(asset.state.lock().map_err(|_| "asset lock")?.priority, None);
+    service.release(&lease.id)?;
+    assert_eq!(service.hash_window(&lease.id), None);
+    Ok(())
+}

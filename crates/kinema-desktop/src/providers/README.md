@@ -102,3 +102,7 @@ hints, both provider flows, nested/multiple files, selected-link mapping, renewe
 identity, HTTP/envelope auth failures, malformed responses, body limits,
 readiness/delayed timeouts, cancelable sleeps, and redaction. No credentialed live
 provider account, real playback, or OS behavior is claimed by these tests.
+
+`opensubtitles.rs` is the OpenSubtitles.com subtitle search/download adapter (user's
+own API key, optional login). Its hosts, error mapping and limits are in
+`docs/architecture/providers.md#subtitles-opensubtitlescom`; it does not use `DebridError`.

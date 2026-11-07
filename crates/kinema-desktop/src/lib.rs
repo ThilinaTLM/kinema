@@ -44,6 +44,8 @@ pub mod settings;
 #[cfg(not(target_family = "wasm"))]
 mod sources;
 #[cfg(not(target_family = "wasm"))]
+pub mod subtitle_cache;
+#[cfg(not(target_family = "wasm"))]
 mod tmdb;
 
 pub mod player_shortcuts;

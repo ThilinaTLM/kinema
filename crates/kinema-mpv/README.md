@@ -201,8 +201,11 @@ accepts finite −60..=60 seconds; positive means later. Observed
 `subtitle_visibility: Option<bool>` and `subtitle_delay: Option<f64>` remain
 unavailable until sampled for loaded media. Explicit subtitle selection enables
 visibility; replacement loads reset visibility to true and delay to zero.
-`add_subtitles(&[path])` loads 1..=`MAX_SUBTITLE_FILES` absolute local
-subtitle files into the loaded media as one generation-tagged operation
+`add_subtitles(&[SubtitleFile])` loads 1..=`MAX_SUBTITLE_FILES` absolute local
+subtitle files (`SubtitleFile::local(path)`, or a `title` and `lang` that become
+mpv's positional `sub-add <path> <flag> <title> <lang>` arguments; `lang`
+requires `title`; title at most `MAX_SUBTITLE_TITLE_BYTES` with no NUL or line
+breaks, lang ASCII alphanumerics and `-` up to `MAX_SUBTITLE_LANG_BYTES`) into the loaded media as one generation-tagged operation
 (`sub-add … auto` for each, `select` for the last, then visibility on). mpv
 may load them concurrently, so resulting track IDs need not follow request
 order. It

@@ -16,7 +16,7 @@ caches.
 
 Debug and release use **separate databases**, and nothing is copied between
 them. Settings live in `config/settings.toml`. Logs go to `cache/logs`, artwork to
-`cache/artwork` and media to `cache/media`. Credentials are not stored in any of
+`cache/artwork`, downloaded subtitles to `cache/subtitles` and media to `cache/media`. Credentials are not stored in any of
 these places. **Deleting the database deletes the Library, watched state and
 resume progress.**
 
@@ -167,6 +167,36 @@ Personal records are Library membership, watched state and playback progress.
   and offline errors are never remembered.
 - Redirects are limited, HTTPS-only and validated on every hop. A pending image
   stays in Loading and is never shown as a fallback.
+
+## Settings file
+
+`config/settings.toml` is versioned (`version = 1`) and nonsecret. A malformed or
+unsupported file is never rewritten on load or reset; explicit saves refuse to
+replace it. `subtitle_languages` is an ordered list of ISO 639-1 codes
+(`kinema_core::subtitle_languages`). A missing key means `["en"]`. Aliases
+(`eng`), case and duplicates are normalized on load without rewriting the file;
+an unknown code or an empty list is `Invalid` and preserves the file, like other
+keys. **Medium risk:** it is a persisted contract.
+
+## Subtitle cache
+
+`subtitle_cache.rs` stores downloaded online subtitles. Pure blocking API, called
+from a background executor.
+
+- **Disk:** `cache/subtitles/<sha256("opensubtitles:" + file_id)>.<ext>`, with
+  `<ext>` from `kinema_core::subtitles::SubtitleFormat`. Debug builds use
+  `./data/subtitles`, like artwork.
+- **Writes** go to a temp file in the same directory and are renamed into
+  place. Empty content and files over the 64 MiB subtitle cap or the cache budget
+  are refused.
+- **Budget:** its own 64 MiB, separate from the media quota. Each write evicts
+  the oldest entries by mtime until it fits, never the file just written. A
+  lookup hit touches mtime. Stale interrupted temp files (over 1 h) are removed.
+- **Lookups** treat missing, empty, oversized, symlinked or non-file entries as
+  misses; a hit avoids spending download allowance.
+- **MUST: only delete owned names** (64 lowercase hex digits plus a known
+  subtitle extension, or the temp prefix). Errors and logs carry categories
+  only, never ids, paths or contents.
 
 ## Response caches
 

@@ -244,7 +244,11 @@ impl PlayerWindow {
             self.show_subtitle_notice(SubtitleNotice::NotReady, cx);
             return;
         }
-        let paths: Vec<&str> = admission.accepted.iter().map(String::as_str).collect();
+        let files: Vec<kinema_mpv::SubtitleFile<'_>> = admission
+            .accepted
+            .iter()
+            .map(|path| kinema_mpv::SubtitleFile::local(path))
+            .collect();
         let pending = SubtitlePending {
             media_generation: self.state.media_generation,
             external: external_subtitles(&self.state),
@@ -252,7 +256,7 @@ impl PlayerWindow {
             skipped: admission.skipped,
             since: Instant::now(),
         };
-        if self.request_command(|player| player.add_subtitles(&paths), cx) {
+        if self.request_command(|player| player.add_subtitles(&files), cx) {
             self.subtitle_notice = None;
             self.subtitle_pending = Some(pending);
         } else {

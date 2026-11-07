@@ -13,6 +13,13 @@ use std::{
 pub(crate) static METADATA_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 static METADATA_GENERATION: AtomicU64 = AtomicU64::new(0);
+static OPENSUBTITLES_GENERATION: AtomicU64 = AtomicU64::new(0);
+/// Advances whenever an OpenSubtitles credential is saved or removed; cached sessions
+/// and in-flight searches made with older credentials are stale.
+#[allow(dead_code, reason = "consumed by the subtitle search session")]
+pub(crate) fn opensubtitles_generation() -> u64 {
+    OPENSUBTITLES_GENERATION.load(Ordering::Acquire)
+}
 pub(crate) fn metadata_generation() -> u64 {
     METADATA_GENERATION.load(Ordering::Acquire)
 }
@@ -228,6 +235,168 @@ impl MetadataCredentialStore {
         }
     }
 }
+const OS_API_KEY: &str = "opensubtitles-api-key";
+const OS_USERNAME: &str = "opensubtitles-username";
+const OS_PASSWORD: &str = "opensubtitles-password";
+
+/// What online subtitle search needs: the user's own API key, and optionally a login.
+pub struct OpenSubtitlesCredentials {
+    pub api_key: SecretString,
+    /// Username and password; present only when both are stored.
+    pub login: Option<(SecretString, SecretString)>,
+}
+impl fmt::Debug for OpenSubtitlesCredentials {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OpenSubtitlesCredentials")
+            .field("login", &self.login.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+/// Which OpenSubtitles credentials exist; never exposes their values.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct OpenSubtitlesStatus {
+    pub api_key: bool,
+    /// Both username and password are stored.
+    pub login: bool,
+}
+
+/// Separate OpenSubtitles credential namespace (API key, optional username and password).
+pub struct OpenSubtitlesCredentialStore {
+    vault: Box<dyn Vault>,
+}
+impl Default for OpenSubtitlesCredentialStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+impl OpenSubtitlesCredentialStore {
+    /// Does not contact the OS until a method is called.
+    pub fn new() -> Self {
+        Self {
+            vault: Box::new(OsVault),
+        }
+    }
+    /// `Missing` when there is no API key. A login is returned only when both parts
+    /// exist; a half-stored login is ignored. Secure-storage failures stay errors.
+    pub fn credentials(&self) -> Result<OpenSubtitlesCredentials, CredentialError> {
+        let api_key = diagnose(
+            OS_API_KEY,
+            CredentialOperation::Get,
+            self.vault.get(OS_API_KEY),
+        )?;
+        let username = self.optional(OS_USERNAME)?;
+        let password = self.optional(OS_PASSWORD)?;
+        Ok(OpenSubtitlesCredentials {
+            api_key,
+            login: username.zip(password),
+        })
+    }
+    fn optional(&self, account: &'static str) -> Result<Option<SecretString>, CredentialError> {
+        match diagnose(
+            account,
+            CredentialOperation::OptionalGet,
+            self.vault.get(account),
+        ) {
+            Ok(secret) => Ok(Some(secret)),
+            Err(CredentialError::Missing) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+    pub fn status(&self) -> Result<OpenSubtitlesStatus, CredentialError> {
+        let present = |account| match diagnose(
+            account,
+            CredentialOperation::Status,
+            self.vault.get(account),
+        ) {
+            Ok(_) => Ok(true),
+            Err(CredentialError::Missing) => Ok(false),
+            Err(error) => Err(error),
+        };
+        Ok(OpenSubtitlesStatus {
+            api_key: present(OS_API_KEY)?,
+            login: present(OS_USERNAME)? && present(OS_PASSWORD)?,
+        })
+    }
+    pub fn set_api_key(&self, secret: SecretString) -> Result<(), CredentialError> {
+        diagnose(
+            OS_API_KEY,
+            CredentialOperation::Set,
+            self.vault.set(OS_API_KEY, secret),
+        )?;
+        Self::mutated();
+        Ok(())
+    }
+    pub fn delete_api_key(&self) -> Result<(), CredentialError> {
+        diagnose(
+            OS_API_KEY,
+            CredentialOperation::Delete,
+            self.vault.delete(OS_API_KEY),
+        )?;
+        Self::mutated();
+        Ok(())
+    }
+    /// Stores both parts; a failure leaves no half-stored login behind.
+    pub fn set_login(
+        &self,
+        username: SecretString,
+        password: SecretString,
+    ) -> Result<(), CredentialError> {
+        let stored = diagnose(
+            OS_USERNAME,
+            CredentialOperation::Set,
+            self.vault.set(OS_USERNAME, username),
+        )
+        .and_then(|()| {
+            diagnose(
+                OS_PASSWORD,
+                CredentialOperation::Set,
+                self.vault.set(OS_PASSWORD, password),
+            )
+        });
+        if let Err(error) = stored {
+            // Best effort: the original error is the one to report.
+            let _ = self.vault.delete(OS_USERNAME);
+            let _ = self.vault.delete(OS_PASSWORD);
+            Self::mutated();
+            return Err(error);
+        }
+        Self::mutated();
+        Ok(())
+    }
+    /// Removes both parts; Missing only when neither existed.
+    pub fn delete_login(&self) -> Result<(), CredentialError> {
+        let username = diagnose(
+            OS_USERNAME,
+            CredentialOperation::Delete,
+            self.vault.delete(OS_USERNAME),
+        );
+        let password = diagnose(
+            OS_PASSWORD,
+            CredentialOperation::Delete,
+            self.vault.delete(OS_PASSWORD),
+        );
+        let result = match (username, password) {
+            (Err(CredentialError::Missing), Err(CredentialError::Missing)) => {
+                Err(CredentialError::Missing)
+            }
+            (Err(error), _) | (_, Err(error)) if error != CredentialError::Missing => Err(error),
+            _ => Ok(()),
+        };
+        if result.is_ok() {
+            Self::mutated();
+        }
+        result
+    }
+    fn mutated() {
+        OPENSUBTITLES_GENERATION.fetch_add(1, Ordering::AcqRel);
+        tracing::debug!(
+            provider = "opensubtitles",
+            reason = "credential_mutation",
+            "Subtitle credential generation advanced"
+        );
+    }
+}
 fn debrid_account(kind: DebridKind) -> &'static str {
     match kind {
         DebridKind::RealDebrid => "real-debrid",
@@ -272,6 +441,13 @@ impl Vault for OsVault {
 #[cfg(test)]
 pub(crate) fn test_metadata_store() -> MetadataCredentialStore {
     MetadataCredentialStore {
+        vault: Box::<tests::FakeVault>::default(),
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn test_opensubtitles_store() -> OpenSubtitlesCredentialStore {
+    OpenSubtitlesCredentialStore {
         vault: Box::<tests::FakeVault>::default(),
     }
 }
@@ -523,6 +699,91 @@ mod tests {
         assert_eq!(metadata.delete(), Err(CredentialError::Missing));
         assert_eq!(metadata_generation(), before + 1);
         assert!(debrid.status(DebridKind::RealDebrid)?);
+        Ok(())
+    }
+
+    fn opensubtitles(vault: FakeVault) -> OpenSubtitlesCredentialStore {
+        OpenSubtitlesCredentialStore {
+            vault: Box::new(vault),
+        }
+    }
+
+    #[test]
+    fn opensubtitles_roundtrip_status_and_generation() -> Result<(), CredentialError> {
+        let vault = FakeVault::default();
+        let store = opensubtitles(vault.clone());
+        assert_eq!(store.status()?, OpenSubtitlesStatus::default());
+        assert_eq!(store.credentials().err(), Some(CredentialError::Missing));
+        let before = opensubtitles_generation();
+        store.set_api_key(SecretString::new("own-api-key".into()))?;
+        assert!(opensubtitles_generation() > before);
+        let credentials = store.credentials()?;
+        assert_eq!(credentials.api_key.expose(), "own-api-key");
+        assert!(credentials.login.is_none());
+        assert!(!format!("{credentials:?}").contains("own-api-key"));
+        assert_eq!(
+            store.status()?,
+            OpenSubtitlesStatus {
+                api_key: true,
+                login: false
+            }
+        );
+        let before = opensubtitles_generation();
+        store.set_login(
+            SecretString::new("someone".into()),
+            SecretString::new("hunter2".into()),
+        )?;
+        assert!(opensubtitles_generation() > before);
+        let login = store.credentials()?.login;
+        let (user, pass) = login.as_ref().ok_or(CredentialError::Missing)?;
+        assert_eq!((user.expose(), pass.expose()), ("someone", "hunter2"));
+        assert!(store.status()?.login);
+        // Debrid and TMDB accounts are untouched by this namespace.
+        let debrid = CredentialStore {
+            vault: Box::new(vault),
+        };
+        assert!(!debrid.status(DebridKind::RealDebrid)?);
+        let before = opensubtitles_generation();
+        store.delete_login()?;
+        assert!(opensubtitles_generation() > before);
+        assert!(store.credentials()?.login.is_none());
+        assert_eq!(store.delete_login(), Err(CredentialError::Missing));
+        store.delete_api_key()?;
+        assert_eq!(store.delete_api_key(), Err(CredentialError::Missing));
+        assert_eq!(store.status()?, OpenSubtitlesStatus::default());
+        Ok(())
+    }
+
+    #[test]
+    fn opensubtitles_half_stored_login_is_ignored_and_failures_stay_distinct()
+    -> Result<(), CredentialError> {
+        let vault = FakeVault::default();
+        let store = opensubtitles(vault.clone());
+        store.set_api_key(SecretString::new("key".into()))?;
+        vault.set(OS_USERNAME, SecretString::new("only-user".into()))?;
+        assert!(store.credentials()?.login.is_none());
+        assert!(!store.status()?.login);
+        for category in [CredentialError::Unavailable, CredentialError::AccessDenied] {
+            let failing = OpenSubtitlesCredentialStore {
+                vault: Box::new(FailedVault(category)),
+            };
+            assert_eq!(failing.credentials().err(), Some(category));
+            assert_eq!(failing.status(), Err(category));
+            assert_eq!(
+                failing.set_api_key(SecretString::new("key".into())),
+                Err(category)
+            );
+            assert_eq!(
+                failing.set_login(SecretString::new("u".into()), SecretString::new("p".into())),
+                Err(category)
+            );
+            assert_eq!(failing.delete_login(), Err(category));
+        }
+        // Missing API key is a distinct, expected state, not a storage failure.
+        let missing = OpenSubtitlesCredentialStore {
+            vault: Box::new(FailedVault(CredentialError::Missing)),
+        };
+        assert_eq!(missing.status()?, OpenSubtitlesStatus::default());
         Ok(())
     }
 

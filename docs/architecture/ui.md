@@ -120,7 +120,12 @@ accessible names.
   kill the player. Cleanup reports freed and protected bytes.
 - The **Settings window** has the sections General, Accounts, Playback,
   Keyboard & Mouse, Storage, Appearance and About. Theme, poster size and motion
-  apply live.
+  apply live. **Playback** holds the ordered subtitle language list (add menu
+  offering only unchosen languages, move up/down, remove; the last one cannot be
+  removed). **Accounts** has an OpenSubtitles block (API key, optional username
+  and password, Save/Remove per part, Check); fields clear as soon as they are
+  submitted. Design-lab scenes: `settings-playback-subtitles`,
+  `settings-accounts-no-subtitle-key`.
 - The **quit sheet** appears only when sessions or launches are active. Cancel is
   focused first, and Esc cancels.
 

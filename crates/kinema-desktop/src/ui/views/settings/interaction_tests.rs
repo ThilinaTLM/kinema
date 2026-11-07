@@ -134,3 +134,96 @@ fn settings_window_is_reused_and_closing_does_not_quit_main(cx: &mut TestAppCont
             .unwrap();
     });
 }
+
+#[gpui::test]
+fn opensubtitles_results_update_state_and_failures_stay_distinct(cx: &mut TestAppContext) {
+    use crate::credentials::OpenSubtitlesStatus;
+    cx.update(theme::init);
+    let handle = cx.add_window(|window, cx| {
+        let coordinator = cx.new(|cx| AppCoordinator::fixture(Vec::new(), None, cx));
+        SettingsWindow::fixture(coordinator, Section::Accounts, window, cx)
+    });
+    handle
+        .update(cx, |view, _, cx| {
+            let event = |generation, outcome| crate::app::AppEvent {
+                generation,
+                outcome,
+            };
+            view.pending.insert(5, Pending::OpenSubtitles(true));
+            view.os_busy = 1;
+            view.outcome(
+                &event(
+                    5,
+                    AppOutcome::OpenSubtitles {
+                        status: OpenSubtitlesStatus {
+                            api_key: true,
+                            login: true,
+                        },
+                    },
+                ),
+                cx,
+            );
+            assert_eq!(view.os_busy, 0);
+            assert_eq!(
+                view.os_state,
+                OpenSubtitlesState::Ready(OpenSubtitlesStatus {
+                    api_key: true,
+                    login: true
+                })
+            );
+            // An older result must not overwrite a newer one.
+            view.pending.insert(4, Pending::OpenSubtitles(false));
+            view.outcome(
+                &event(
+                    4,
+                    AppOutcome::OpenSubtitles {
+                        status: OpenSubtitlesStatus::default(),
+                    },
+                ),
+                cx,
+            );
+            assert!(matches!(view.os_state, OpenSubtitlesState::Ready(s) if s.api_key));
+            // Unreadable secure storage is not "missing".
+            view.pending.insert(6, Pending::OpenSubtitles(false));
+            view.outcome(
+                &event(
+                    6,
+                    AppOutcome::Failed {
+                        message: crate::credentials::CredentialError::Unavailable.to_string(),
+                    },
+                ),
+                cx,
+            );
+            assert_eq!(view.os_state, OpenSubtitlesState::Unavailable);
+            assert!(view.errors.contains_key("OpenSubtitles"));
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn opensubtitles_fields_clear_on_save_and_reject_empty(cx: &mut TestAppContext) {
+    cx.update(theme::init);
+    let handle = cx.add_window(|window, cx| {
+        let coordinator = cx.new(|cx| AppCoordinator::fixture(Vec::new(), None, cx));
+        SettingsWindow::fixture(coordinator, Section::Accounts, window, cx)
+    });
+    handle
+        .update(cx, |view, _, cx| {
+            view.opensubtitles_edit(opensubtitles::OpenSubtitlesPart::ApiKey, false, cx);
+            assert!(view.errors.contains_key("OpenSubtitles"));
+            view.os_api_key
+                .update(cx, |input, cx| input.set_text("fixture-key", cx));
+            view.opensubtitles_edit(opensubtitles::OpenSubtitlesPart::ApiKey, false, cx);
+            assert_eq!(view.os_api_key.read(cx).text(), "");
+            assert!(!view.errors.contains_key("OpenSubtitles"));
+            view.os_username
+                .update(cx, |input, cx| input.set_text("someone", cx));
+            view.opensubtitles_edit(opensubtitles::OpenSubtitlesPart::Login, false, cx);
+            assert!(
+                view.errors.contains_key("OpenSubtitles"),
+                "password missing"
+            );
+            assert_eq!(view.os_username.read(cx).text(), "");
+        })
+        .unwrap();
+}
