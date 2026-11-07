@@ -1163,7 +1163,7 @@ impl AppCoordinator {
                     .player_titles
                     .get(&session.id)
                     .cloned()
-                    .unwrap_or_else(|| kinema_core::media::playback_title(file_name, None));
+                    .unwrap_or_else(|| kinema_core::media::file_playback_title(file_name));
                 let intent = self
                     .playback
                     .intents

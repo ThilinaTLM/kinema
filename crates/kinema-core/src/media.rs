@@ -5,6 +5,9 @@
 pub struct PlaybackTitle {
     pub full: String,
     pub compact: String,
+    /// The title alone (no episode), for display matching only, never identity.
+    pub name: String,
+    pub episode_name: Option<String>,
 }
 
 /// Formats catalog identity only; local file names pass through unchanged.
@@ -14,25 +17,58 @@ pub fn playback_title(title: &str, episode: Option<(u32, u32, Option<&str>)>) ->
         return PlaybackTitle {
             full: title.into(),
             compact: title.into(),
+            name: title.into(),
+            episode_name: None,
         };
     };
     let compact = format!("{title} · S{season:02}E{episode:02}");
-    let full = match name.map(str::trim).filter(|name| !name.is_empty()) {
+    let episode_name = name.map(str::trim).filter(|name| !name.is_empty());
+    let full = match episode_name {
         Some(name) => format!("{compact} · {name}"),
         None => compact.clone(),
     };
-    PlaybackTitle { full, compact }
+    PlaybackTitle {
+        full,
+        compact,
+        name: title.into(),
+        episode_name: episode_name.map(Into::into),
+    }
+}
+
+/// A title for media known only by its file name: shown unchanged, while
+/// `name` drops the extension so added subtitle names can be shortened.
+pub fn file_playback_title(file_name: &str) -> PlaybackTitle {
+    let mut title = playback_title(file_name, None);
+    if let Some((stem, extension)) = file_name.rsplit_once('.')
+        && !stem.is_empty()
+        && (2..=4).contains(&extension.len())
+        && extension.chars().all(|c| c.is_ascii_alphanumeric())
+    {
+        title.name = stem.into();
+    }
+    title
 }
 
 #[cfg(test)]
 mod playback_title_tests {
-    use super::playback_title;
+    use super::{file_playback_title, playback_title};
+
+    #[test]
+    fn file_titles_show_the_name_and_match_on_the_stem() {
+        let title = file_playback_title("Immortal.2026.720p.mkv");
+        assert_eq!(title.full, "Immortal.2026.720p.mkv");
+        assert_eq!(title.name, "Immortal.2026.720p");
+        assert_eq!(file_playback_title("no-extension").name, "no-extension");
+        assert_eq!(file_playback_title(".hidden").name, ".hidden");
+    }
 
     #[test]
     fn episode_name_is_optional_and_dropped_before_identity() {
         let title = playback_title("The Outsider", Some((1, 4, Some("Que Viene el Coco"))));
         assert_eq!(title.full, "The Outsider · S01E04 · Que Viene el Coco");
         assert_eq!(title.compact, "The Outsider · S01E04");
+        assert_eq!(title.name, "The Outsider");
+        assert_eq!(title.episode_name.as_deref(), Some("Que Viene el Coco"));
         for name in [None, Some(""), Some("  ")] {
             let unnamed = playback_title("The Outsider", Some((1, 4, name)));
             assert_eq!(unnamed.full, title.compact);

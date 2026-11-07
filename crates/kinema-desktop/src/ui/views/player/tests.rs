@@ -722,10 +722,9 @@ fn disabled_controls_explain_themselves() {
         tracks_known: true,
     };
     assert_eq!(disabled_reason(PLAY, a), None);
-    assert_eq!(
-        disabled_reason(SUBTITLES, a),
-        Some("No subtitle tracks in this media")
-    );
+    // With no tracks the subtitle menu stays open for adding a file.
+    assert!(control_enabled(SUBTITLES, a));
+    assert_eq!(disabled_reason(SUBTITLES, a), None);
     assert_eq!(
         disabled_reason(CHAPTERS, a),
         Some("No chapters in this media")
@@ -819,9 +818,14 @@ fn disabled_controls_are_skipped() {
     };
     assert!(
         !control_enabled(CHAPTERS, bare)
-            && !control_enabled(SUBTITLES, bare)
+            && control_enabled(SUBTITLES, bare)
             && !control_enabled(AUDIO, bare)
     );
+    let unknown = Availability {
+        tracks_known: false,
+        ..bare
+    };
+    assert!(!control_enabled(SUBTITLES, unknown));
 }
 #[test]
 fn recoverable_control_error_keeps_player_and_lease() {

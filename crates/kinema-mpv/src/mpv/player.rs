@@ -24,6 +24,8 @@ use std::{
 
 /// Upper bound for `volume`; mpv amplifies (softvol) above 100.
 pub const MAX_VOLUME: f64 = 150.0;
+/// Most external subtitle files accepted by one `Player::add_subtitles` call.
+pub const MAX_SUBTITLE_FILES: usize = 8;
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -565,6 +567,44 @@ impl Player {
         } else {
             self.submit(&[&["set", "sid", &value]], generation)
         }
+    }
+    /// Load external subtitle files (absolute local paths, read in place) into
+    /// the current media and select the last one; the others stay available.
+    /// Requires a loaded file. One generation-tagged operation: a racing
+    /// `load` makes it stale, and mpv drops external tracks on the next load.
+    /// Acceptance is not proof the file parsed; a new external track in the
+    /// observed `tracks`, or an error in state, is the outcome.
+    pub fn add_subtitles(&self, paths: &[&str]) -> Result<()> {
+        if paths.is_empty() || paths.len() > MAX_SUBTITLE_FILES {
+            return Err(Error::InvalidInput("subtitle file count out of range"));
+        }
+        if paths
+            .iter()
+            .any(|path| !std::path::Path::new(path).is_absolute())
+        {
+            return Err(Error::InvalidInput("subtitle path must be absolute"));
+        }
+        let state = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
+        if self.shared.stopped.load(Ordering::Acquire) {
+            return Err(Error::Disconnected);
+        }
+        if !state.file_loaded || state.loading || state.media_stopped {
+            return Err(Error::InvalidInput(
+                "adding subtitles requires a loaded file",
+            ));
+        }
+        let last = paths.len() - 1;
+        let mut commands: Vec<[&str; 3]> = paths
+            .iter()
+            .enumerate()
+            .map(|(i, path)| ["sub-add", path, if i == last { "select" } else { "auto" }])
+            .collect();
+        commands.push(["set", "sub-visibility", "yes"]);
+        let commands: Vec<&[&str]> = commands.iter().map(|c| c.as_slice()).collect();
+        self.submit(
+            &commands,
+            Some(self.command_generation.load(Ordering::Acquire)),
+        )
     }
     /// Pause and step one video frame as a single bounded worker operation.
     /// `false` steps forward; `true` steps backward and requires observed
@@ -1379,6 +1419,11 @@ mod tests {
                 selected: true,
                 title: None,
                 lang: None,
+                external: false,
+                forced: false,
+                hearing_impaired: false,
+                codec: None,
+                channels: None,
             })
             .collect();
     }
@@ -1388,6 +1433,47 @@ mod tests {
             .iter()
             .map(|args| args.iter().map(|s| s.to_str().unwrap()).collect())
             .collect()
+    }
+    #[test]
+    fn add_subtitles_is_one_generation_tagged_operation_selecting_the_last_file() {
+        let (player, receiver) = mock_player();
+        let dir = std::env::temp_dir();
+        let first = dir.join("first.srt");
+        let second = dir.join("second.ass");
+        let (first, second) = (first.to_str().unwrap(), second.to_str().unwrap());
+        assert!(matches!(
+            player.add_subtitles(&[first]),
+            Err(Error::InvalidInput(_))
+        ));
+        ready_video_and_subtitle(&player);
+        for invalid in [
+            &[][..],
+            &["relative.srt"][..],
+            &[first; MAX_SUBTITLE_FILES + 1][..],
+            &[""][..],
+        ] {
+            assert!(matches!(
+                player.add_subtitles(invalid),
+                Err(Error::InvalidInput(_))
+            ));
+        }
+        assert!(receiver.try_recv().is_err());
+        let before = player.state();
+        player.add_subtitles(&[first, second]).unwrap();
+        let operation = receiver.try_recv().unwrap();
+        assert_eq!(
+            arguments(&operation),
+            [
+                vec!["sub-add", first, "auto"],
+                vec!["sub-add", second, "select"],
+                vec!["set", "sub-visibility", "yes"],
+            ]
+        );
+        assert_eq!(operation.kind, OperationKind::Control);
+        assert_eq!(operation.generation, Some(0));
+        assert_eq!(player.state(), before, "no optimistic track");
+        player.shared.state.lock().unwrap().loading = true;
+        assert!(player.add_subtitles(&[first]).is_err());
     }
     #[test]
     fn frame_step_is_one_ordered_operation_without_optimistic_state() {
@@ -1973,6 +2059,11 @@ mod tests {
                 title: None,
                 lang: None,
                 selected: true,
+                external: false,
+                forced: false,
+                hearing_impaired: false,
+                codec: None,
+                channels: None,
             }],
             buffered_ranges: Some(vec![crate::BufferedRange {
                 start: 0.0,
@@ -3059,6 +3150,184 @@ mod tests {
         wait_for(&player, |s| s.error.is_some() && !s.loading);
         assert!(player.state().chapters.is_empty());
         assert!(player.state().tracks.is_empty());
+    }
+    #[test]
+    #[ignore = "requires libmpv and ffmpeg; real track codec/channels/disposition metadata"]
+    fn real_track_metadata_for_labels() {
+        let media = TemporaryMedia::new();
+        let captions = media.0.join("captions.srt");
+        let path = media.0.join("labels.mkv");
+        std::fs::write(&captions, "1\n00:00:00,000 --> 00:00:02,000\nHi\n").unwrap();
+        assert!(
+            std::process::Command::new("ffmpeg")
+                .args([
+                    "-v",
+                    "error",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=black:s=160x90:r=10",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=frequency=440:sample_rate=8000",
+                    "-i"
+                ])
+                .arg(&captions)
+                .args([
+                    "-map",
+                    "0:v",
+                    "-map",
+                    "1:a",
+                    "-map",
+                    "2:s",
+                    "-ac",
+                    "2",
+                    "-metadata:s:s:0",
+                    "language=eng",
+                    "-metadata:s:s:0",
+                    "title=www.example.site",
+                    "-disposition:s:0",
+                    "forced+hearing_impaired",
+                    "-c:v",
+                    "mpeg4",
+                    "-c:a",
+                    "aac",
+                    "-c:s",
+                    "srt",
+                    "-t",
+                    "2"
+                ])
+                .arg(&path)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let player = Player::new(Config {
+            render_backend: RenderBackend::Cpu,
+            hardware_decoding: HardwareDecoding::Disabled,
+            ..Config::default()
+        })
+        .unwrap();
+        player.set_paused(true).unwrap();
+        player.select_audio(None).unwrap();
+        player.load(path.to_str().unwrap()).unwrap();
+        wait_for(&player, |s| s.tracks.len() == 3);
+        let state = player.state();
+        let audio = state
+            .tracks
+            .iter()
+            .find(|t| t.kind == crate::TrackKind::Audio)
+            .unwrap();
+        assert_eq!(audio.codec.as_deref(), Some("aac"));
+        assert_eq!(audio.channels, Some(2));
+        let sub = state
+            .tracks
+            .iter()
+            .find(|t| t.kind == crate::TrackKind::Subtitle)
+            .unwrap();
+        assert_eq!(sub.codec.as_deref(), Some("subrip"));
+        assert_eq!(sub.lang.as_deref(), Some("eng"));
+        assert_eq!(sub.title.as_deref(), Some("www.example.site"));
+        assert!(
+            sub.forced && sub.hearing_impaired && !sub.external,
+            "{sub:?}"
+        );
+        drop(player);
+    }
+    #[test]
+    #[ignore = "requires libmpv and ffmpeg; real external subtitle add/select/reload"]
+    fn real_external_subtitles() {
+        let media = TemporaryMedia::new();
+        let path = media.0.join("bare.mkv");
+        let first = media.0.join("first.srt");
+        let second = media.0.join("second.ass");
+        let broken = media.0.join("broken.srt");
+        std::fs::write(&first, "1\n00:00:00,000 --> 00:00:04,000\nFirst\n").unwrap();
+        std::fs::write(
+            &second,
+            "[Script Info]\nScriptType: v4.00+\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour\nStyle: Default,Sans,40,&H00FFFFFF\n\n[Events]\nFormat: Layer, Start, End, Style, Text\nDialogue: 0,0:00:00.00,0:00:04.00,Default,Second\n",
+        )
+        .unwrap();
+        std::fs::write(&broken, [0xff_u8, 0x00, 0xfe, 0x01]).unwrap();
+        assert!(
+            std::process::Command::new("ffmpeg")
+                .args([
+                    "-v",
+                    "error",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=black:s=320x180:r=10",
+                    "-c:v",
+                    "mpeg4",
+                    "-t",
+                    "4"
+                ])
+                .arg(&path)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let player = Player::new(Config {
+            render_backend: RenderBackend::Cpu,
+            hardware_decoding: HardwareDecoding::Disabled,
+            ..Config::default()
+        })
+        .unwrap();
+        player.set_paused(true).unwrap();
+        player.resize(320, 180).unwrap();
+        player.load(path.to_str().unwrap()).unwrap();
+        wait_for(&player, |s| {
+            s.file_loaded && !s.loading && s.tracks_available
+        });
+        assert!(
+            player
+                .state()
+                .tracks
+                .iter()
+                .all(|t| t.kind != crate::TrackKind::Subtitle)
+        );
+        player
+            .add_subtitles(&[first.to_str().unwrap(), second.to_str().unwrap()])
+            .unwrap();
+        wait_for(&player, |s| {
+            s.tracks
+                .iter()
+                .filter(|t| t.kind == crate::TrackKind::Subtitle && t.external)
+                .count()
+                == 2
+        });
+        let state = player.state();
+        let subs: Vec<_> = state
+            .tracks
+            .iter()
+            .filter(|t| t.kind == crate::TrackKind::Subtitle)
+            .collect();
+        // mpv may load async sub-add commands concurrently, so track IDs need
+        // not follow request order; selection must still follow the last file.
+        let selected: Vec<_> = subs.iter().filter(|t| t.selected).collect();
+        assert_eq!(selected.len(), 1, "{subs:?}");
+        assert_eq!(selected[0].title.as_deref(), Some("second.ass"));
+        assert_eq!(state.subtitle_visibility, Some(true));
+        assert_eq!(state.error, None);
+        // A file mpv cannot parse surfaces as an error, never as a new track.
+        player.add_subtitles(&[broken.to_str().unwrap()]).unwrap();
+        wait_for(&player, |s| s.error.is_some());
+        assert_eq!(
+            player.state().tracks.iter().filter(|t| t.external).count(),
+            2
+        );
+        // External tracks belong to one load; a reload drops them.
+        let generation = player.state().media_generation;
+        player.load(path.to_str().unwrap()).unwrap();
+        wait_for(&player, |s| {
+            s.media_generation > generation && s.file_loaded && !s.loading && s.tracks_available
+        });
+        assert!(player.state().tracks.iter().all(|t| !t.external));
+        drop(player);
     }
     #[test]
     #[ignore = "requires libmpv and ffmpeg; real source/viewport/audio-only control lifecycle"]

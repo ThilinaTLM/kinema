@@ -217,6 +217,8 @@ impl PlayerWindow {
             mode,
             #[cfg(feature = "ui-probe")]
             fixture_image: None,
+            #[cfg(feature = "ui-probe")]
+            fixture_subtitles: false,
             #[cfg(feature = "gpu-surface")]
             gpu_frame: None,
             last_activity: Instant::now(),
@@ -243,6 +245,11 @@ impl PlayerWindow {
             transfer: TransferRate::default(),
             last_transfer_poll: None,
             subtitle_position: None,
+            drop_hover: None,
+            subtitle_chooser: None,
+            subtitle_admission: Task::ready(()),
+            subtitle_pending: None,
+            subtitle_notice: None,
             startup_cancel,
             _initialize: Task::ready(()),
             _updates: updates,
@@ -617,6 +624,17 @@ impl PlayerWindow {
                 }
             }
             state_changed |= self.state != previous;
+        }
+        let hold = false;
+        #[cfg(feature = "ui-probe")]
+        let hold = hold || self.fixture_subtitles;
+        if !hold {
+            state_changed |= self.observe_subtitles(Instant::now());
+        }
+        // A platform drag can end without a drop or exit event reaching us.
+        if !hold && self.drop_hover.is_some() && !cx.has_active_drag() {
+            self.drop_hover = None;
+            state_changed = true;
         }
         // A fresh state snapshot or surface-validation error can become fatal
         // within this sample. Probes have no lease but must also release frames.
@@ -1025,6 +1043,7 @@ impl PlayerWindow {
             self.state.loading || self.state.paused_for_cache || self.player.is_none(),
             self.error.is_some()
                 || self.control_notice
+                || self.subtitle_notice.is_some()
                 || self.state.error.is_some()
                 || self.progress.as_ref().is_some_and(|p| p.notice),
             self.dock_hover
@@ -1112,6 +1131,18 @@ impl Render for PlayerWindow {
             .on_mouse_move(cx.listener(|view, event: &MouseMoveEvent, _, cx| view.pointer_moved(event, cx)))
             .on_mouse_up(MouseButton::Left, cx.listener(|view, _: &MouseUpEvent, _, cx| view.finish_drag(cx)))
             .on_mouse_up_out(MouseButton::Left, cx.listener(|view, _: &MouseUpEvent, _, cx| view.finish_drag(cx)))
+            .on_drag_move::<ExternalPaths>(cx.listener(|view, event: &DragMoveEvent<ExternalPaths>, _, cx| {
+                let subtitles = has_subtitle_name(event.drag(cx).paths());
+                if view.drop_hover != Some(subtitles) {
+                    view.drop_hover = Some(subtitles);
+                    view.activity(cx);
+                }
+            }))
+            .on_file_drop_exit(cx.listener(|view, _, _, cx| {
+                view.drop_hover = None;
+                cx.notify();
+            }))
+            .on_drop(cx.listener(|view, paths: &ExternalPaths, _, cx| view.add_subtitle_files(paths.paths().to_vec(), cx)))
             .child(div().id("player-surface").key_context("KinemaPlayerSurface").track_focus(&self.surface_focus).absolute().size_full()
                 .on_mouse_down(MouseButton::Left, cx.listener(|view, event: &MouseDownEvent, window, cx| {
                     view.surface_focus.focus(window, cx);
@@ -1168,6 +1199,7 @@ impl Render for PlayerWindow {
                     .child(Button::new("progress-untracked", "Play without saving").on_click(cx.listener(|view, _, _, cx| view.play_without_saving(cx)))))
             })
             .when(self.help_focus.is_some(), |el| el.child(self.shortcut_help(window, cx)))
+            .children(self.drop_hint())
             // Opt-in diagnostics only: no handlers, id or focus, so it never takes input.
             .when_some(self.cadence_text.clone(), |el, text| {
                 el.child(

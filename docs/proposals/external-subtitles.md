@@ -4,27 +4,16 @@
 
 ## Problem
 
-The embedded player can only show subtitle tracks that are muxed into the media.
-Many releases ship without the language a user wants, or with subtitles that are
-out of sync. Users need to (a) load a subtitle file they already have, and
-(b) find one online for the title they are watching.
+Many releases ship without the subtitle language a user wants, or with
+subtitles that are out of sync. Users can already add a file they have (see
+[playback](../architecture/playback.md#external-subtitles)); they also need to
+find one online for the title they are watching.
 
 ## Current state
 
-- `kinema-mpv` observes `track-list` and can select, hide, delay and position
-  subtitles (`Player::select_subtitle` and friends). There is no `sub-add`, and
-  the track parser (`mpv/metadata.rs`) reads only `id`, `type`, `title`, `lang`
-  and `selected`, not `external`.
-- Media reaches mpv as an opaque loopback URL, so mpv's `sub-auto` sidecar
-  matching never applies, and `config=no` disables user mpv config.
-- The player is its own OS window (`ui/views/player`). Its subtitle menu is built
-  from tracks and is unavailable when the media has no subtitle track.
-- GPUI `gpui-pre 0.3.9` routes OS file drops into the element tree as an
-  `ExternalPaths` drag on X11, Wayland, Windows and macOS (`on_drop`,
-  `drag_over`). The video is a plain `gpu_surface` element, so a handler on the
-  player root should receive drops. This is code-read only, not runtime tested.
-- `cx.prompt_for_paths` has no file-type filters on any platform; Linux needs
-  an xdg-desktop-portal file chooser.
+- Local subtitle files are implemented: **Add file** in the subtitle menu and
+  drag and drop, loaded through `Player::add_subtitles` and reported as
+  `Track::external`. Online search reuses that load path.
 - Playback identity: the coordinator session holds `PlaybackTarget`
   (IMDb ID, plus series/season/episode). `PendingOpen` and the player window do
   not carry it. `PlayLocal` files have no identity.
@@ -32,34 +21,7 @@ out of sync. Users need to (a) load a subtitle file they already have, and
 
 ## Proposed design
 
-Ship in two phases. Phase 1 is useful alone and builds the load path that
-phase 2 reuses.
-
-### Phase 1: local subtitle files
-
-- **mpv:** `Player::add_subtitle(&Path)` submits `sub-add <path> select` as a
-  generation-tagged control operation. A load that races a new `loadfile` is
-  rejected like other stale commands. mpv drops external tracks on the next
-  `loadfile`, which matches per-file intent. Parse `external` (and `codec`) into
-  `Track`, so the menu can label added tracks. `external-filename` is a user
-  path: never log it.
-- **Validation (desktop, off the UI thread):** extension allowlist (`srt`, `ass`,
-  `ssa`, `vtt`, `sub`, `sup`), regular file, size cap (for example 16 MiB).
-  Non-UTF-8 paths fail explicitly. The file is read in place and never copied
-  or deleted. mpv parses the file at `sub-add` time and handles text encoding
-  detection; a parse failure surfaces as a player notice, not a silent no-op.
-- **Entry points:**
-  - Drag and drop onto the player window, with a `drag_over` hint ("Drop to add
-    subtitles"). Multiple subtitle files are added in order; the last one is
-    selected. Non-subtitle drops get a notice and do nothing.
-  - "Add subtitle file…" in the subtitle menu, through `prompt_for_paths` owned by
-    the player window (task kept in a field, so it is cancelled with the window).
-  - The subtitle menu becomes available whenever a file is loaded, even with no
-    tracks, so these actions are always reachable.
-- **Not in phase 1:** remembering an added file for the next resume. See open
-  questions.
-
-### Phase 2: online search (OpenSubtitles.com)
+### Online search (OpenSubtitles.com)
 
 **Provider facts** (OpenSubtitles admin reply, October 2026,
 <https://forum.opensubtitles.com/t/proper-flow-and-quotas-for-integration-into-free-app/8038>;
@@ -109,11 +71,11 @@ verify against the API docs before building):
   file id>.<ext>`, with their own small size budget (LRU by mtime, like artwork),
   separate from the media quota. Reusing a cached file avoids spending
   allowance. This is cache, not personal data.
-- **UI:** "Search subtitles…" in the subtitle menu opens a panel in the player
+- **UI:** **Search online** in the subtitle menu opens a panel in the player
   with a language filter and results (release name, language, downloads, HI and
   forced flags, hash-match badge) and the remaining allowance once known. Every
   state is distinct: loading, empty, failed, rate limited, quota exhausted,
-  sign-in required. Choosing a result downloads it and calls the phase 1 load path.
+  sign-in required. Choosing a result downloads it and calls the existing load path.
 - **Settings:** an ordered `subtitle_languages` list (Medium-risk settings key,
   normalized on load) that the user picks in Settings, defaulting to English,
   plus the optional account under provider settings.
@@ -135,11 +97,12 @@ verify against the API docs before building):
 
 - **Account:** anonymous by default through the shipped key; optional
   OpenSubtitles login in Settings for a personal allowance.
-- **Search runs only on request** ("Search subtitles…"), never automatically,
+- **Search runs only on request** (**Search online**), never automatically,
   because every download spends allowance.
 - **Languages:** chosen in Settings; default English.
-- **Remembering added subtitles across resume:** deferred until phase 1 ships.
-  It would be persisted state (likely a SQLite change, High risk).
+- **Remembering added subtitles across resume:** not built; local files are
+  per load. Revisit after online search. It would be persisted state (likely a
+  SQLite change, High risk).
 
 ## Open questions
 

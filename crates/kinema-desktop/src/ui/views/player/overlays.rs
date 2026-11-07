@@ -77,7 +77,17 @@ impl PlayerWindow {
                 } else {
                     TrackKind::Audio
                 };
-                let tracks = self.state.tracks.iter().filter(|t| t.kind == wanted);
+                let tracks: Vec<_> = self
+                    .state
+                    .tracks
+                    .iter()
+                    .filter(|t| t.kind == wanted)
+                    .collect();
+                let names = kinema_core::tracks::MediaNames {
+                    title: &self.title.name,
+                    episode_name: self.title.episode_name.as_deref(),
+                };
+                let labels = track_labels(wanted, &tracks, Some(names));
                 let mut items = Vec::new();
                 if subtitles {
                     let none_selected = !self
@@ -92,11 +102,12 @@ impl PlayerWindow {
                         Rc::new(|view, cx| view.command(|p| p.select_subtitle(None), cx)),
                     ));
                 }
-                for track in tracks {
+                for (track, label) in tracks.into_iter().zip(labels) {
                     let id = track.id;
+                    // The dimmed right column shows the source/format.
                     items.push(action(
-                        track_label(track),
-                        None,
+                        label.primary,
+                        label.detail,
                         track.selected,
                         Rc::new(move |view, cx| {
                             if subtitles {
@@ -105,6 +116,15 @@ impl PlayerWindow {
                                 view.command(|p| p.select_audio(Some(id)), cx)
                             }
                         }),
+                    ));
+                }
+                if subtitles {
+                    items.push(MenuItem::Separator);
+                    items.push(action(
+                        "Add file".into(),
+                        None,
+                        false,
+                        Rc::new(|view, cx| view.request_subtitle_files(cx)),
                     ));
                 }
                 items

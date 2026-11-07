@@ -43,6 +43,7 @@ mod overlays;
 mod probe;
 mod registry;
 mod startup;
+mod subtitles;
 #[cfg(test)]
 mod tests;
 mod volume;
@@ -53,13 +54,14 @@ use diagnostics::*;
 #[allow(unused_imports)]
 use probe::*;
 #[cfg(feature = "ui-probe")]
-pub use probe::{run_probe, run_probe_mode};
+pub use probe::{SubtitleScene, run_probe, run_probe_mode, run_subtitle_probe};
 use registry::*;
 pub(crate) use registry::{
     authorize_progress, checkpoint_all, close_session, desktop_snapshots, dispatch_transport,
     invalidate_progress, open, progress_notice, show_player, take_focus_events,
 };
 use startup::*;
+use subtitles::{SubtitleNotice, SubtitlePending, has_subtitle_name};
 
 #[cfg(feature = "gpu-surface")]
 use kinema_mpv::ResolutionPolicy;
@@ -75,7 +77,7 @@ use crate::{
 use controls::{
     Scrub, VOLUME_STEP, chapter_index, chapter_label, chapter_ticks, displayed_position,
     displayed_volume, format_clock, format_remaining, ratio_in_span, scrub_settled, speed_label,
-    step_volume, subtitle_position, track_label, volume_at, volume_fraction, volume_rail_height,
+    step_volume, subtitle_position, track_labels, volume_at, volume_fraction, volume_rail_height,
     volume_settled,
 };
 
@@ -157,6 +159,9 @@ pub struct PlayerWindow {
     // Static offline artwork only, never populated from a backend frame.
     #[cfg(feature = "ui-probe")]
     fixture_image: Option<Arc<RenderImage>>,
+    /// Lab only: hold the subtitle notice and drop hint for capture.
+    #[cfg(feature = "ui-probe")]
+    fixture_subtitles: bool,
     #[cfg(feature = "gpu-surface")]
     gpu_frame: Option<Arc<VideoSurfaceFrame>>,
     last_activity: Instant,
@@ -185,6 +190,12 @@ pub struct PlayerWindow {
     last_transfer_poll: Option<Instant>,
     /// Last `sub-pos` sent for this load; None = unknown, resend on next sync.
     subtitle_position: Option<u8>,
+    /// Files dragged over the window: Some(true) when any looks like a subtitle.
+    drop_hover: Option<bool>,
+    subtitle_chooser: Option<Task<()>>,
+    subtitle_admission: Task<()>,
+    subtitle_pending: Option<SubtitlePending>,
+    subtitle_notice: Option<(SubtitleNotice, Instant)>,
     startup_cancel: Arc<std::sync::atomic::AtomicBool>,
     _initialize: Task<()>,
     _updates: Task<()>,
@@ -235,7 +246,8 @@ fn control_enabled(index: usize, a: Availability) -> bool {
         CLOSE | FULLSCREEN | HELP => true,
         TIMELINE | BACK | FORWARD => a.backend && a.seekable,
         CHAPTERS => a.backend && a.seekable && a.chapters,
-        SUBTITLES => a.backend && a.subtitles,
+        // Open with no tracks too: the menu also adds external files.
+        SUBTITLES => a.backend && (a.subtitles || a.tracks_known),
         AUDIO => a.backend && a.audio,
         _ => a.backend,
     }
@@ -251,8 +263,7 @@ fn disabled_reason(index: usize, a: Availability) -> Option<&'static str> {
         CHAPTERS if !a.seekable => "Seeking unavailable for this media",
         CHAPTERS if !a.chapters_known => "Chapter information unavailable",
         CHAPTERS => "No chapters in this media",
-        SUBTITLES if !a.tracks_known => "Subtitle tracks unavailable",
-        SUBTITLES => "No subtitle tracks in this media",
+        SUBTITLES => "Subtitle tracks unavailable",
         AUDIO if !a.tracks_known => "Audio tracks unavailable",
         AUDIO => "No audio tracks in this media",
         _ => "Unavailable",
