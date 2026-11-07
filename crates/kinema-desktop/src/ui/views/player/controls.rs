@@ -3,7 +3,8 @@
 use crate::ui::theme::motion::timing;
 use std::time::Instant;
 
-use kinema_mpv::{Chapter, MAX_VOLUME, Track};
+use kinema_core::tracks::{TrackFacts, TrackLabel, TrackRole};
+use kinema_mpv::{Chapter, MAX_VOLUME, Track, TrackKind};
 
 /// Volume change for the Up/Down keys.
 pub const VOLUME_STEP: f64 = 5.;
@@ -176,23 +177,27 @@ pub fn chapter_label(index: usize, chapter: &Chapter) -> String {
     }
 }
 
-pub fn track_label(track: &Track) -> String {
-    let title = track
-        .title
-        .as_deref()
-        .map(str::trim)
-        .filter(|t| !t.is_empty());
-    let lang = track
-        .lang
-        .as_deref()
-        .map(str::trim)
-        .filter(|l| !l.is_empty());
-    match (title, lang) {
-        (Some(title), Some(lang)) => format!("{title} · {}", lang.to_uppercase()),
-        (Some(label), None) => label.to_owned(),
-        (None, Some(lang)) => lang.to_uppercase(),
-        (None, None) => format!("Track {}", track.id),
-    }
+/// Readable menu labels for one kind of track, in order (see `kinema_core::tracks`).
+pub fn track_labels(kind: TrackKind, tracks: &[&Track]) -> Vec<TrackLabel> {
+    let role = if kind == TrackKind::Audio {
+        TrackRole::Audio
+    } else {
+        TrackRole::Subtitle
+    };
+    let facts: Vec<TrackFacts<'_>> = tracks
+        .iter()
+        .map(|t| TrackFacts {
+            id: t.id,
+            title: t.title.as_deref(),
+            lang: t.lang.as_deref(),
+            codec: t.codec.as_deref(),
+            channels: t.channels,
+            external: t.external,
+            forced: t.forced,
+            hearing_impaired: t.hearing_impaired,
+        })
+        .collect();
+    kinema_core::tracks::track_labels(role, &facts)
 }
 
 pub fn speed_label(speed: f64) -> String {
@@ -329,13 +334,25 @@ mod tests {
             lang: lang.map(Into::into),
             selected: false,
             external: false,
+            forced: false,
+            hearing_impaired: false,
+            codec: None,
+            channels: None,
+        };
+        let labels = |tracks: &[Track]| {
+            track_labels(TrackKind::Audio, &tracks.iter().collect::<Vec<_>>())
+                .into_iter()
+                .map(|l| l.primary)
+                .collect::<Vec<_>>()
         };
         assert_eq!(
-            track_label(&track(Some("Stereo"), Some("en"))),
-            "Stereo · EN"
+            labels(&[
+                track(Some("Stereo"), Some("en")),
+                track(None, Some("fr")),
+                track(Some(" "), None)
+            ]),
+            ["English · Stereo", "French", "Track 7"]
         );
-        assert_eq!(track_label(&track(None, Some("fr"))), "FR");
-        assert_eq!(track_label(&track(Some(" "), None)), "Track 7");
         let chapter = Chapter {
             time: 0.,
             title: Some("".into()),
@@ -445,6 +462,10 @@ mod shortcut_tests {
             title: None,
             lang: None,
             external: false,
+            forced: false,
+            hearing_impaired: false,
+            codec: None,
+            channels: None,
         };
         let tracks = [
             track(42, TrackKind::Subtitle, true),

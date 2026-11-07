@@ -114,6 +114,13 @@ pub(super) unsafe fn tracks(property: &Property) -> Option<Vec<Track>> {
             lang,
             selected: flag("selected"),
             external: flag("external"),
+            forced: flag("forced"),
+            hearing_impaired: flag("hearing-impaired"),
+            codec: unsafe { field(node, "codec").and_then(|n| string(n)) },
+            channels: unsafe { field(node, "demux-channel-count") }
+                .filter(|n| n.format == 4)
+                .and_then(|n| u32::try_from(unsafe { n.value.int64 }).ok())
+                .filter(|c| *c > 0),
         });
     }
     Some(result)
@@ -222,6 +229,14 @@ mod tests {
                 ),
                 ("type", string(c"sub")),
                 ("lang", string(c"eng")),
+                ("codec", string(c"subrip")),
+                (
+                    "demux-channel-count",
+                    Node {
+                        format: 4,
+                        value: NodeValue { int64: -2 },
+                    },
+                ),
                 (
                     "selected",
                     Node {
@@ -247,7 +262,11 @@ mod tests {
                 title: None,
                 lang: Some("eng".into()),
                 selected: true,
-                external: true
+                external: true,
+                forced: false,
+                hearing_impaired: false,
+                codec: Some("subrip".into()),
+                channels: None,
             }]
         );
     }

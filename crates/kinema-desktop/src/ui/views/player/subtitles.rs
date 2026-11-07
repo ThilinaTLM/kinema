@@ -500,6 +500,10 @@ mod tests {
             lang: None,
             selected: true,
             external: false,
+            forced: false,
+            hearing_impaired: false,
+            codec: None,
+            channels: None,
         });
         assert_eq!(pending_outcome(&pending, &embedded, start), None);
         let mut added = embedded.clone();

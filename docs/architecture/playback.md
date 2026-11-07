@@ -158,7 +158,8 @@ is a [proposal](../proposals/external-subtitles.md).
   outcome categories only.
 - **Loading** is one generation-tagged `Player::add_subtitles` operation
   (`sub-add … auto` for each file, `select` for the last). A racing load makes
-  it stale. External tracks belong to one load: mpv drops them on reload or
+  it stale. mpv may load the files concurrently, so track order need not follow
+  request order; the last requested file is still the one selected. External tracks belong to one load: mpv drops them on reload or
   replay, and they are not remembered across sessions.
 - **Outcome is observed, not assumed.** Success is a new track with
   `Track::external`; an mpv error, or no new track within
@@ -169,6 +170,24 @@ is a [proposal](../proposals/external-subtitles.md).
   will do: "Drop to add", "Not a subtitle" (judged by name only) or "Player not
   ready". Drop support is code-read for X11, Wayland, Windows and macOS and
   tested through GPUI dispatch, not yet by hand on each platform.
+
+### Track labels
+
+Audio and subtitle menus use `kinema_core::tracks`, never raw metadata:
+
+- **Language first**, as a name: `en-IN` → "English (India)", `eng` →
+  "English". Unknown codes fall back to the code in capitals; `und`/`mul` mean
+  no language.
+- **Titles only when meaningful.** Web addresses and watermarks
+  ("www.…", "site.org"), and titles that repeat the language, are dropped.
+  Real titles stay ("English · Commentary"). Added files with no language show
+  their file name without extension; long names are cut at 40 characters.
+- **Tags** from observed track flags: Forced, SDH; audio adds the layout
+  (Mono, Stereo, 5.1, 7.1).
+- **Source in the dimmed right column:** "Built-in" or "File · SRT" for
+  subtitles, the codec (AAC, E-AC-3 …) for audio.
+- Rows that would read the same are numbered in order ("English 1",
+  "English 2"). Identity is still the mpv track ID; labels never select.
 
 **Shortcuts** come from one catalog, `player_shortcuts.rs`. The player's `?`
 help, Settings → Keyboard & Mouse, and the tooltips all read from it, so add or

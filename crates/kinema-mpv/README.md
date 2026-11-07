@@ -169,9 +169,11 @@ Shutdown pause `enqueued=true` is explicitly a request only, not proof of silenc
 ## Cinema Dock observations and commands
 
 `PlaybackState.chapters` contains ordered `Chapter { time, title }` values;
-`tracks` contains `Track { id, kind, title, lang, selected, external }`, where
-`TrackKind` is Video, Audio, or Subtitle and `external` marks a track loaded
-from a separate file. `chapters_available` and `tracks_available` are true
+`tracks` contains `Track { id, kind, title, lang, selected, external, forced,
+hearing_impaired, codec, channels }`, where `TrackKind` is Video, Audio, or
+Subtitle, `external` marks a track loaded from a separate file, the two flags
+are container dispositions, `codec` is the FFmpeg codec name and `channels` the
+demuxer channel count (None when unknown). `chapters_available` and `tracks_available` are true
 only for successfully parsed observations, including empty lists. Both default
 and reset to false; unavailable/malformed properties clear the corresponding Vec
 and availability flag. Hosts must check availability before presenting a definitive
@@ -201,7 +203,9 @@ unavailable until sampled for loaded media. Explicit subtitle selection enables
 visibility; replacement loads reset visibility to true and delay to zero.
 `add_subtitles(&[path])` loads 1..=`MAX_SUBTITLE_FILES` absolute local
 subtitle files into the loaded media as one generation-tagged operation
-(`sub-add … auto` for each, `select` for the last, then visibility on). It
+(`sub-add … auto` for each, `select` for the last, then visibility on). mpv
+may load them concurrently, so resulting track IDs need not follow request
+order. It
 requires a loaded file and never adds tracks optimistically: success is a new
 `external` track, failure an error in state. Reloads drop external tracks.
 Paths are user data; never log them.

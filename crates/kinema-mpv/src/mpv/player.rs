@@ -1420,6 +1420,10 @@ mod tests {
                 title: None,
                 lang: None,
                 external: false,
+                forced: false,
+                hearing_impaired: false,
+                codec: None,
+                channels: None,
             })
             .collect();
     }
@@ -2056,6 +2060,10 @@ mod tests {
                 lang: None,
                 selected: true,
                 external: false,
+                forced: false,
+                hearing_impaired: false,
+                codec: None,
+                channels: None,
             }],
             buffered_ranges: Some(vec![crate::BufferedRange {
                 start: 0.0,
@@ -3144,6 +3152,91 @@ mod tests {
         assert!(player.state().tracks.is_empty());
     }
     #[test]
+    #[ignore = "requires libmpv and ffmpeg; real track codec/channels/disposition metadata"]
+    fn real_track_metadata_for_labels() {
+        let media = TemporaryMedia::new();
+        let captions = media.0.join("captions.srt");
+        let path = media.0.join("labels.mkv");
+        std::fs::write(&captions, "1\n00:00:00,000 --> 00:00:02,000\nHi\n").unwrap();
+        assert!(
+            std::process::Command::new("ffmpeg")
+                .args([
+                    "-v",
+                    "error",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=black:s=160x90:r=10",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=frequency=440:sample_rate=8000",
+                    "-i"
+                ])
+                .arg(&captions)
+                .args([
+                    "-map",
+                    "0:v",
+                    "-map",
+                    "1:a",
+                    "-map",
+                    "2:s",
+                    "-ac",
+                    "2",
+                    "-metadata:s:s:0",
+                    "language=eng",
+                    "-metadata:s:s:0",
+                    "title=www.example.site",
+                    "-disposition:s:0",
+                    "forced+hearing_impaired",
+                    "-c:v",
+                    "mpeg4",
+                    "-c:a",
+                    "aac",
+                    "-c:s",
+                    "srt",
+                    "-t",
+                    "2"
+                ])
+                .arg(&path)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let player = Player::new(Config {
+            render_backend: RenderBackend::Cpu,
+            hardware_decoding: HardwareDecoding::Disabled,
+            ..Config::default()
+        })
+        .unwrap();
+        player.set_paused(true).unwrap();
+        player.select_audio(None).unwrap();
+        player.load(path.to_str().unwrap()).unwrap();
+        wait_for(&player, |s| s.tracks.len() == 3);
+        let state = player.state();
+        let audio = state
+            .tracks
+            .iter()
+            .find(|t| t.kind == crate::TrackKind::Audio)
+            .unwrap();
+        assert_eq!(audio.codec.as_deref(), Some("aac"));
+        assert_eq!(audio.channels, Some(2));
+        let sub = state
+            .tracks
+            .iter()
+            .find(|t| t.kind == crate::TrackKind::Subtitle)
+            .unwrap();
+        assert_eq!(sub.codec.as_deref(), Some("subrip"));
+        assert_eq!(sub.lang.as_deref(), Some("eng"));
+        assert_eq!(sub.title.as_deref(), Some("www.example.site"));
+        assert!(
+            sub.forced && sub.hearing_impaired && !sub.external,
+            "{sub:?}"
+        );
+        drop(player);
+    }
+    #[test]
     #[ignore = "requires libmpv and ffmpeg; real external subtitle add/select/reload"]
     fn real_external_subtitles() {
         let media = TemporaryMedia::new();
@@ -3213,10 +3306,11 @@ mod tests {
             .iter()
             .filter(|t| t.kind == crate::TrackKind::Subtitle)
             .collect();
-        assert!(
-            !subs[0].selected && subs[1].selected,
-            "last file selected: {subs:?}"
-        );
+        // mpv may load async sub-add commands concurrently, so track IDs need
+        // not follow request order; selection must still follow the last file.
+        let selected: Vec<_> = subs.iter().filter(|t| t.selected).collect();
+        assert_eq!(selected.len(), 1, "{subs:?}");
+        assert_eq!(selected[0].title.as_deref(), Some("second.ass"));
         assert_eq!(state.subtitle_visibility, Some(true));
         assert_eq!(state.error, None);
         // A file mpv cannot parse surfaces as an error, never as a new track.

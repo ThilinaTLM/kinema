@@ -54,7 +54,7 @@ use diagnostics::*;
 #[allow(unused_imports)]
 use probe::*;
 #[cfg(feature = "ui-probe")]
-pub use probe::{run_probe, run_probe_mode, run_subtitle_probe};
+pub use probe::{SubtitleScene, run_probe, run_probe_mode, run_subtitle_probe};
 use registry::*;
 pub(crate) use registry::{
     authorize_progress, checkpoint_all, close_session, desktop_snapshots, dispatch_transport,
@@ -77,7 +77,7 @@ use crate::{
 use controls::{
     Scrub, VOLUME_STEP, chapter_index, chapter_label, chapter_ticks, displayed_position,
     displayed_volume, format_clock, format_remaining, ratio_in_span, scrub_settled, speed_label,
-    step_volume, subtitle_position, track_label, volume_at, volume_fraction, volume_rail_height,
+    step_volume, subtitle_position, track_labels, volume_at, volume_fraction, volume_rail_height,
     volume_settled,
 };
 

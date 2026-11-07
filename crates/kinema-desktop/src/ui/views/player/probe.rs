@@ -222,21 +222,26 @@ pub fn run_probe_mode(
     mode: PlayerChoice,
     stress_resize: bool,
 ) -> bool {
-    run_probe_inner(
-        media,
-        seconds,
-        light,
-        dimensions,
-        mode,
-        stress_resize,
-        false,
-    )
+    run_probe_inner(media, seconds, light, dimensions, mode, stress_resize, None)
 }
 
-/// Fixture with an added external subtitle, its status notice and the
-/// drop hint held on screen (lab scene `player-subtitles`).
+/// Subtitle fixtures held on screen for capture.
 #[cfg(feature = "ui-probe")]
-pub fn run_subtitle_probe(seconds: u64, light: bool, dimensions: [f32; 2]) -> bool {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SubtitleScene {
+    /// `player-subtitles`: drop hint and "Subtitle added" status.
+    Drop,
+    /// `player-tracks`: subtitle menu open over messy real-world metadata.
+    Menu,
+}
+
+#[cfg(feature = "ui-probe")]
+pub fn run_subtitle_probe(
+    scene: SubtitleScene,
+    seconds: u64,
+    light: bool,
+    dimensions: [f32; 2],
+) -> bool {
     run_probe_inner(
         None,
         seconds,
@@ -244,7 +249,7 @@ pub fn run_subtitle_probe(seconds: u64, light: bool, dimensions: [f32; 2]) -> bo
         dimensions,
         PlayerChoice::Embedded,
         false,
-        true,
+        Some(scene),
     )
 }
 
@@ -256,9 +261,9 @@ fn run_probe_inner(
     dimensions: [f32; 2],
     mode: PlayerChoice,
     stress_resize: bool,
-    subtitles: bool,
+    subtitles: Option<SubtitleScene>,
 ) -> bool {
-    if subtitles && media.is_some() {
+    if subtitles.is_some() && media.is_some() {
         eprintln!("player probe: category=invalid-probe-capability");
         return false;
     }
@@ -305,13 +310,22 @@ fn run_probe_inner(
             if gpu_playback { cx.defer_in(window, |_, _, _| install_probe_gpu_guard()); }
             if !native {
                 let chapter = |time, title: &str| kinema_mpv::Chapter { time, title: Some(title.into()) };
-                let track = |id, kind, title: &str, lang: &str, selected| kinema_mpv::Track { id, kind, title: Some(title.into()), lang: Some(lang.into()), selected, external: false };
+                let track = |id, kind, title: &str, lang: &str, selected| kinema_mpv::Track { id, kind, title: Some(title.into()), lang: Some(lang.into()), selected, external: false, forced: false, hearing_impaired: false, codec: None, channels: None };
                 view.state = PlaybackState {
                     position: 1837., duration: Some(6840.), paused: true, volume: 80.,
                     chapters_available: true, tracks_available: true,
                     chapters: vec![chapter(0., "Opening"), chapter(821., "The long road"), chapter(1586., "First light"), chapter(2899., "The other shore"), chapter(4868., "Homeward")],
-                    tracks: if subtitles {
-                        vec![track(1, TrackKind::Audio, "Stereo", "en", true), track(2, TrackKind::Subtitle, "English", "en", false), kinema_mpv::Track { external: true, ..track(4, TrackKind::Subtitle, "The.Outsider.S01E04.es.srt", "", true) }]
+                    tracks: if subtitles.is_some() {
+                        // Watermark titles, region codes and a file without a language,
+                        // as real releases ship them.
+                        vec![
+                            kinema_mpv::Track { codec: Some("eac3".into()), channels: Some(6), ..track(1, TrackKind::Audio, "www.1TamilMV.style", "tam", true) },
+                            kinema_mpv::Track { codec: Some("subrip".into()), ..track(2, TrackKind::Subtitle, "www.1TamilMV.style", "en-IN", false) },
+                            kinema_mpv::Track { codec: Some("hdmv_pgs_subtitle".into()), forced: true, ..track(3, TrackKind::Subtitle, "Signs & Songs", "eng", false) },
+                            kinema_mpv::Track { codec: Some("subrip".into()), hearing_impaired: true, ..track(4, TrackKind::Subtitle, "", "eng", false) },
+                            kinema_mpv::Track { external: true, codec: Some("subrip".into()), ..track(5, TrackKind::Subtitle, "Immortal 2026 720p 10bit DS4K AMZN WEBRip TAM-HIN AAC5.1 x26.srt", "", true) },
+                            kinema_mpv::Track { external: true, codec: Some("ass".into()), ..track(6, TrackKind::Subtitle, "Immortal.2026.ta.ass", "ta", false) },
+                        ]
                     } else {
                         vec![track(1, TrackKind::Audio, "Stereo", "en", true), track(2, TrackKind::Subtitle, "English", "en", true), track(3, TrackKind::Subtitle, "Français", "fr", false)]
                     },
@@ -325,10 +339,15 @@ fn run_probe_inner(
                     let glow = ((1. - ((x as f32 - 610.) / 600.).abs()).max(0.) * (1. - ((y as f32 - 260.) / 210.).abs()).max(0.) * 40.) as u8;
                     pixels.extend_from_slice(&[8 + glow / 2, 16 + glow, 23 + glow, 255]);
                 }}
-                if subtitles {
+                if let Some(scene) = subtitles {
                     view.fixture_subtitles = true;
-                    view.drop_hover = Some(true);
                     view.subtitle_notice = Some((SubtitleNotice::Added { skipped: 1 }, Instant::now()));
+                    match scene {
+                        SubtitleScene::Drop => view.drop_hover = Some(true),
+                        SubtitleScene::Menu => cx.defer_in(window, |view, window, cx| {
+                            view.toggle_menu(MenuKind::Subtitles, true, window, cx)
+                        }),
+                    }
                 }
                 view.fixture_image = image::RgbaImage::from_raw(960, 540, pixels)
                     .map(|buffer| Arc::new(RenderImage::new([image::Frame::new(buffer)])));
