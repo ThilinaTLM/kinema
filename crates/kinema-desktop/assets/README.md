@@ -29,6 +29,8 @@ Pinned sources (downloaded 2026-10-18):
   with only the stroke-width adjustment.
   Player chrome additions (`keyboard`, `timer`) were downloaded from the pinned
   0.468.0 release on 2026-11-01, with only the stroke-width adjustment.
+  The notifications bell (`bell`) was downloaded from the pinned 0.468.0
+  release on 2026-11-07, with only the stroke-width adjustment.
   License: https://raw.githubusercontent.com/lucide-icons/lucide/0.468.0/LICENSE
   retained as `icons/LICENSE-lucide.txt` (ISC; includes Feather attribution).
 - **TMDB logo**: existing, unchanged; source URL and terms are in root `NOTICE`.
@@ -99,6 +101,7 @@ a03dd3d1082ccb12ada187ed7c10a602f1d11e49c831fd341187d81d0b2d75ff  icons/bookmark
 b1b8b00316f2abf2fbac51a78cddd001603ea561524524c3d4efb412b0973c2c  icons/circle-check.svg
 e79eb8be1a5e9f59d621488bb8ff2c725456b1cf1d0ba454746af3d3e8806bbb  icons/keyboard.svg
 a8b665cfdedac76584e1545888276a4a1ebe69ddb445f1d49e8e529ec4e2f30d  icons/timer.svg
+6674069bad38acec2ff4cc247f798c9f6bf82fc296c276e59a4ca77552292af9  icons/bell.svg
 ```
 
 Verify from this directory: `awk 'NF == 2 && length($1) == 64' README.md | sha256sum -c -`.

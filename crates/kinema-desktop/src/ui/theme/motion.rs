@@ -85,8 +85,10 @@ pub mod timing {
     pub const COPIED_FEEDBACK: Duration = Duration::from_millis(1500);
     /// Player chrome auto-hides after this much inactivity while playing.
     pub const CHROME_IDLE: Duration = Duration::from_millis(2500);
-    /// How long a transient banner notice stays before it dismisses itself.
-    pub const NOTICE_TIMEOUT: Duration = Duration::from_secs(10);
+    /// How long a timed toast (a confirmation) stays before it closes itself.
+    pub const TOAST_TIMEOUT: Duration = Duration::from_secs(5);
+    /// How long a timed toast that offers an action (such as Undo) stays.
+    pub const TOAST_ACTION_TIMEOUT: Duration = Duration::from_secs(10);
     /// A requested value (seek, speed, subtitle delay) stays authoritative
     /// until the player confirms it or this long passes.
     pub const REQUEST_PENDING: Duration = Duration::from_millis(1200);

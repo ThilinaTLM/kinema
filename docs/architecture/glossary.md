@@ -30,5 +30,6 @@ proposals and code reviews use these terms exactly as defined here.
 | Session | A media session, which is a lease plus its local URL ([media](media.md#rules)) | A playback run or a player window |
 | Slot | A queue position in the catalog worker per operation, kind or indexer; it holds at most one queued request ([runtime](runtime.md#catalog-worker)) | A thread |
 | Subject | The typed identity whose progress is saved: `Movie`, `Episode` or `Untracked` ([playback](playback.md#progress-and-resume)) | A display title or session ID |
+| Toast | A top-right card for an outcome or a page condition, derived from state each render and keyed by slot; each occurrence is also kept in the bell's notification log ([UI](ui.md#toasts)) | An inline `Alert`, a native OS notification |
 | Token (design) | A named value in `ui/theme` (color, size, spacing, opacity, timing) ([design system](design-system.md)) | Credentials or API tokens |
 | Watched | A manual or 90%-rule flag on a movie or episode; seasons and shows derive it ([data](data.md#personal-records)) | Progress, membership or download completion |

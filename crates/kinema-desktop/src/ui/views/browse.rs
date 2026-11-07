@@ -12,10 +12,11 @@ use crate::{
     ui::blocks::poster_card::{CardOpened, MembershipRequested, MembershipRetry, PosterCard},
     ui::blocks::skeleton_card::SkeletonCard,
     ui::motion::{Axis, SmoothWheel},
-    ui::primitives::alert::{Alert, AlertTone},
+    ui::primitives::alert::AlertTone,
     ui::primitives::button::Button,
     ui::primitives::icon::IconName,
     ui::primitives::menu::MenuItem,
+    ui::primitives::toast::ToastSpec,
     ui::theme::typography::{TextSize, TypeExt},
     ui::theme::{self, Mode, opacity, size, theme},
 };
@@ -712,6 +713,49 @@ fn card_menu(
     }));
     items
 }
+impl Browse {
+    /// Stale results: loaded cards stay on screen after a failed request, and a
+    /// sticky toast names the failure and offers Retry.
+    pub(crate) fn toast_spec(&self, cx: &mut Context<Self>) -> Option<ToastSpec> {
+        let library = self.scope == Scope::Library;
+        let error = {
+            let state = self.coordinator.read(cx);
+            if library {
+                state.library.error().map(str::to_owned)
+            } else {
+                state.collection.error().map(str::to_owned)
+            }
+        };
+        let error = error.filter(|_| !self.cells.is_empty())?;
+        let coordinator = self.coordinator.clone();
+        let weak = cx.entity().downgrade();
+        Some(
+            ToastSpec::new(
+                if library {
+                    "browse-stale-library"
+                } else {
+                    "browse-stale-discover"
+                },
+                AlertTone::Warning,
+                "Showing previous results",
+            )
+            .body(error)
+            .action("Retry", move |_, cx| {
+                if library {
+                    // A failed page keeps loaded cards; reload only if none remain.
+                    if coordinator.read(cx).library_titles.is_empty() {
+                        let _ = weak.update(cx, |b, cx| b.reload_library(cx));
+                    } else {
+                        coordinator.update(cx, |c, cx| c.next_library_page(cx));
+                    }
+                } else {
+                    coordinator.update(cx, |c, cx| c.retry_page(cx))
+                }
+            }),
+        )
+    }
+}
+
 impl Render for Browse {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync(window, cx);
@@ -755,13 +799,7 @@ impl Render for Browse {
         };
         let filtered = library && self.library.is_filtered(&query);
         let is_list = !(count == 0 && !busy);
-        let stale = !self.cells.is_empty() && error.is_some();
-        // A stale strip sits directly under the header and pushes the grid down.
-        let top_inset = if stale {
-            size::PAGE_INSET
-        } else {
-            size::PAGE_TOP
-        };
+        let top_inset = size::PAGE_TOP;
         let content = if count == 0 && !busy {
             let coordinator = self.coordinator.clone();
             let weak_retry = cx.entity().downgrade();
@@ -1068,33 +1106,6 @@ impl Render for Browse {
                     cx.notify();
                 }
             }))
-            .when(stale, |el| {
-                let coordinator = self.coordinator.clone();
-                let weak_retry = cx.entity().downgrade();
-                el.child(
-                    div().pt(size::TOOLBAR_HEIGHT).child(
-                        Alert::new(
-                            AlertTone::Warning,
-                            "Showing previous results · request failed",
-                        )
-                        .strip()
-                        .action(
-                            Button::new("retry-stale", "Retry").on_click(move |_, _, cx| {
-                                if library {
-                                    // A failed page keeps loaded cards; reload only if none remain.
-                                    if coordinator.read(cx).library_titles.is_empty() {
-                                        let _ = weak_retry.update(cx, |b, cx| b.reload_library(cx));
-                                    } else {
-                                        coordinator.update(cx, |c, cx| c.next_library_page(cx));
-                                    }
-                                } else {
-                                    coordinator.update(cx, |c, cx| c.retry_page(cx))
-                                }
-                            }),
-                        ),
-                    ),
-                )
-            })
             .child(div().flex_1().min_h_0().child(content))
     }
 }

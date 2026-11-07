@@ -224,23 +224,6 @@ impl Detail {
         if let Some(notices) = self.personal_notices(cx) {
             section = section.child(notices);
         }
-        if let Some(error) = status.error.clone() {
-            let retry = cx.listener(|this, _, _, cx| this.retry_metadata(cx));
-            section = section.child(body_shell(
-                div().w_full().pt(s::S12).child(
-                    crate::ui::primitives::alert::Alert::new(
-                        crate::ui::primitives::alert::AlertTone::Warning,
-                        if status.loaded {
-                            "Couldn’t refresh title details"
-                        } else {
-                            "Couldn’t load title details"
-                        },
-                    )
-                    .body(error)
-                    .action(Button::new("detail-meta-retry", "Retry").on_click(retry)),
-                ),
-            ));
-        }
         let commands = self.hero_commands(cx);
         section
             .context_menu("detail-hero-menu", move |_, _| commands.clone())

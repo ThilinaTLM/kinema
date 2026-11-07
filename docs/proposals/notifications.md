@@ -4,31 +4,28 @@
 
 ## Problem
 
-In-app messages, such as personal-state toasts with Undo, notices and alert
-strips, are placed inconsistently. Kinema also sends no native notifications for
-important events, such as a download finishing or failing while the main window
-is hidden.
+Kinema sends no native notifications for important events, such as a download
+finishing or failing while the main window is hidden.
 
 ## Current state
 
-Each window presents its own messages: personal-state toasts with Undo,
-notices and the stale alert strip (see
-[state presentation](../architecture/ui.md#state-presentation)). There is no
-shared toast primitive in `ui/primitives` and no native notification
-dependency.
+In-app messages are toasts in the main window, and the header bell keeps a
+session log of them (see [UI › Toasts](../architecture/ui.md#toasts)). Both are
+only seen while the window is visible, and the log is not persisted. The only native notification is the one-time "Kinema is
+still running" message when Main hides to the tray
+([runtime](../architecture/runtime.md)), sent through GPUI's
+`show_system_notification`.
 
 ## Recommendation
 
-1. **A shared `Toast` primitive** in `ui/primitives`. It uses one placement and
-   stacking rule, at most one action, timeouts from `theme::motion::timing`, and
-   presets for motion. It is announced to assistive technology. Existing ad-hoc
-   messages move to it.
-2. **Native notifications** for a short allowlist of events: acquisition
-   failed, the main window was hidden to the tray, and critical storage errors.
-   Use an existing cross-platform crate, check that it has no KDE dependency,
-   and show only safe text (no URLs or paths).
+Native notifications for a short allowlist of events, such as acquisition
+failed and critical storage errors. Reuse the GPUI path that already sends the
+tray message (confirm its behavior on each OS and that it has no KDE
+dependency), and show only safe text (no URLs or paths). Derive them from the same state that drives
+toasts, and send one only when the main window is hidden, so an event is never
+reported twice.
 
 ## Open questions
 
-- Which events justify a native notification, as opposed to an in-app one?
+- Which events justify a native notification, as opposed to a toast?
 - Should Settings have a "do not disturb while playing" option?

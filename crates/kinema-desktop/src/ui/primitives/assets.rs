@@ -67,6 +67,7 @@ const ICONS: &[(&str, &[u8])] = icons![
     "arrow-down-wide-narrow",
     "keyboard",
     "timer",
+    "bell",
 ];
 
 const LOGO: &[u8] = include_bytes!("../../../assets/tmdb-logo.svg");

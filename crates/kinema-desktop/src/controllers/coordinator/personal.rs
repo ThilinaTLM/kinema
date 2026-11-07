@@ -279,6 +279,9 @@ impl PersonalStore {
         revision >= self.revision
     }
 }
+/// Label of every failed personal write toast.
+const SAVE_FAILED: &str = "Couldn’t save change";
+
 impl AppCoordinator {
     /// Native fixture seam only: no worker, SQLite, provider or credential access.
     #[cfg(feature = "ui-probe")]
@@ -339,17 +342,22 @@ impl AppCoordinator {
             .and_then(|reference| self.personal_state.title_labels.get(&title_key(reference)))
             .map(String::as_str)
     }
-    fn mutation_message(
-        &self,
-        operation: &LibraryOperation,
-        prefix: &str,
-        error: Option<&str>,
-    ) -> String {
-        let label = self.mutation_label(operation).unwrap_or("this item");
+    /// Toast description for a write: the title, plus the error on failure.
+    fn mutation_message(&self, operation: &LibraryOperation, error: Option<&str>) -> String {
+        let label = self.mutation_label(operation).unwrap_or("This item");
         match error {
-            Some(error) => format!("{prefix} {label}: {error}"),
-            None => format!("{prefix} {label}."),
+            Some(error) => format!("{label}: {error}"),
+            None => label.to_owned(),
         }
+    }
+    /// Set the personal-state notice: a short label and its description.
+    fn set_personal_notice(&mut self, label: &'static str, detail: String) {
+        self.personal_notice = Some(detail);
+        self.personal_notice_label = Some(label);
+    }
+    fn clear_personal_notice(&mut self) {
+        self.personal_notice = None;
+        self.personal_notice_label = None;
     }
     /// Test-only committed-result seam for native landing interaction tests.
     /// Applies the same revision/generation policy as production event draining.
@@ -487,7 +495,7 @@ impl AppCoordinator {
         {
             self.personal_state.failed_write = None;
             self.personal_state.notice_failed = false;
-            self.personal_notice = None;
+            self.clear_personal_notice();
         }
         for key in keys {
             self.personal_state.pending.insert(key, id);
@@ -628,8 +636,8 @@ impl AppCoordinator {
                 .is_none()
                 .then_some(self.personal_state.route_generation);
             self.personal_state.failed_write = Some((operation.clone(), error.clone()));
-            self.personal_notice =
-                Some(self.mutation_message(&operation, "Could not update", Some(error)));
+            let detail = self.mutation_message(&operation, Some(error));
+            self.set_personal_notice(SAVE_FAILED, detail);
         }
         cx.notify();
         result
@@ -735,7 +743,7 @@ impl AppCoordinator {
         self.personal_state.failed_write = None;
         self.personal_state.notice_failed = true;
         self.personal_state.notice_route = Some(self.personal_state.route_generation);
-        self.personal_notice = Some(message);
+        self.set_personal_notice(SAVE_FAILED, message);
         cx.notify();
     }
     pub(crate) fn can_retry_personal_write(&self) -> bool {
@@ -751,7 +759,7 @@ impl AppCoordinator {
             })
     }
     pub(crate) fn dismiss_personal_notice(&mut self, cx: &mut Context<Self>) {
-        self.personal_notice = None;
+        self.clear_personal_notice();
         self.personal_state.failed_write = None;
         self.personal_state.notice_failed = false;
         cx.notify();
@@ -765,7 +773,7 @@ impl AppCoordinator {
             .map(|(operation, _)| operation.clone())
             .ok_or("There is no failed personal change to retry.")?;
         self.submit_mutation(operation, Ok(()), cx)?;
-        self.personal_notice = None;
+        self.clear_personal_notice();
         cx.notify();
         Ok(())
     }
@@ -993,7 +1001,7 @@ impl AppCoordinator {
         self.personal_state.route_generation =
             self.personal_state.route_generation.saturating_add(1);
         if self.personal_state.notice_route.is_some() {
-            self.personal_notice = None;
+            self.clear_personal_notice();
             self.personal_state.failed_write = None;
             self.personal_state.undo = None;
             self.personal_state.notice_route = None;
@@ -1140,11 +1148,8 @@ impl AppCoordinator {
                         self.season_snapshot.failed(request.generation, error);
                     }
                     _ => {
-                        self.personal_notice = Some(self.mutation_message(
-                            &request.operation,
-                            "Could not update",
-                            Some(&error),
-                        ));
+                        let detail = self.mutation_message(&request.operation, Some(&error));
+                        self.set_personal_notice(SAVE_FAILED, detail);
                     }
                 }
                 false
@@ -1160,7 +1165,10 @@ impl AppCoordinator {
                         let (PlaybackProgressResult::Applied(snapshot)
                         | PlaybackProgressResult::Stale(snapshot)) = result;
                         self.apply_playback_snapshot(snapshot);
-                        self.personal_notice = Some("Saved playback progress cleared.".into());
+                        self.set_personal_notice(
+                            "Progress cleared",
+                            "Playback will start from the beginning.".into(),
+                        );
                     }
                     LibraryResult::Titles(states) => {
                         if let LibraryOperation::ReadTitles(refs) = &request.operation {
@@ -1241,17 +1249,18 @@ impl AppCoordinator {
                         {
                             self.personal_state.undo =
                                 Some((personal.title_id, time, request.request_id, reference));
-                            self.personal_notice = Some(self.mutation_message(
-                                &request.operation,
-                                "Removed from Library:",
-                                None,
-                            ));
+                            let detail = self.mutation_message(&request.operation, None);
+                            self.set_personal_notice("Removed from Library", detail);
                         } else {
-                            self.personal_notice = Some(self.mutation_message(
-                                &request.operation,
-                                "Library updated for",
-                                None,
-                            ));
+                            let detail = self.mutation_message(&request.operation, None);
+                            self.set_personal_notice(
+                                if personal.added_at.is_some() {
+                                    "Added to Library"
+                                } else {
+                                    "Removed from Library"
+                                },
+                                detail,
+                            );
                         }
                         self.personal_state.put_title(personal);
                     }
@@ -1261,29 +1270,20 @@ impl AppCoordinator {
                             self.personal_state.record_resolution(title, &state);
                         }
                         self.personal_state.put_title(state);
-                        self.personal_notice = Some(self.mutation_message(
-                            &request.operation,
-                            "Watched state saved for",
-                            None,
-                        ));
+                        let detail = self.mutation_message(&request.operation, None);
+                        self.set_personal_notice("Watched state saved", detail);
                     }
                     LibraryResult::Episode(state) => {
                         self.personal_state.put_episode(state);
-                        self.personal_notice = Some(self.mutation_message(
-                            &request.operation,
-                            "Watched state saved for",
-                            None,
-                        ));
+                        let detail = self.mutation_message(&request.operation, None);
+                        self.set_personal_notice("Watched state saved", detail);
                     }
                     LibraryResult::Season(states) => {
                         for state in states {
                             self.personal_state.put_episode(state);
                         }
-                        self.personal_notice = Some(self.mutation_message(
-                            &request.operation,
-                            "Season watched state saved for",
-                            None,
-                        ));
+                        let detail = self.mutation_message(&request.operation, None);
+                        self.set_personal_notice("Season updated", detail);
                     }
                     LibraryResult::SeasonSnapshot(snapshot) => {
                         self.season_snapshot

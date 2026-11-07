@@ -248,6 +248,17 @@ impl MainWindow {
                     .content(self.transfers.clone()),
             )
             .divider()
+            .child({
+                let unread = self.toasts.read(cx).unread_count();
+                let host = self.toasts.clone();
+                let opened = self.toasts.clone();
+                Popover::new("notifications")
+                    .align(PopoverAlign::End)
+                    .label(NotificationBell::description(unread))
+                    .on_open(move |_, cx| opened.update(cx, |h, cx| h.open_log(cx)))
+                    .trigger_with(move |open| NotificationBell::new(unread, open))
+                    .content_with(move |_, _, cx| super::super::notifications::panel(host, cx))
+            })
             .child(
                 Button::icon_button("settings", IconName::Settings, "Settings").on_click({
                     let coordinator = self.coordinator.clone();

@@ -2,6 +2,7 @@
 pub(crate) mod browse;
 pub(crate) mod detail;
 pub mod main_window;
+pub(crate) mod notifications;
 pub mod player;
 pub(crate) mod quit;
 pub mod settings;

@@ -121,50 +121,109 @@ impl MainWindow {
         self.search.update(cx, |s, cx| s.set_text("", cx));
         cx.notify();
     }
+    /// Every toast the main window should show now, derived from state: the
+    /// global notice, the personal-state notice, the Transfers cleanup result
+    /// and the current route's conditions. See `ui::primitives::toast`.
+    pub(super) fn toast_specs(&self, cx: &mut Context<Self>) -> Vec<ToastSpec> {
+        let mut specs = Vec::new();
+        let (notice, topic) = {
+            let c = self.coordinator.read(cx);
+            (c.notice.clone(), c.notice_topic)
+        };
+        if let Some(message) = notice {
+            let coordinator = self.coordinator.downgrade();
+            let seen = message.clone();
+            let tone = if topic.is_info() {
+                AlertTone::Info
+            } else {
+                AlertTone::Warning
+            };
+            specs.push(
+                ToastSpec::new("app-notice", tone, topic.label())
+                    .body(message)
+                    .on_close(move |cx| {
+                        let _ = coordinator.update(cx, |c, cx| c.dismiss_notice(&seen, cx));
+                    }),
+            );
+        }
+        specs.extend(self.personal_toast(cx));
+        specs.extend(self.transfers.update(cx, |t, cx| t.toast_spec(cx)));
+        match &self.route {
+            Route::Browse => specs.extend(self.browse.update(cx, |b, cx| b.toast_spec(cx))),
+            Route::Detail(detail) => specs.extend(detail.update(cx, |d, cx| d.toast_specs(cx))),
+        }
+        specs
+    }
+
+    /// Hand the derived toasts to the host. Called from render and from the
+    /// coordinator observer, so timers start even before the next frame.
+    pub(super) fn sync_toasts(&mut self, cx: &mut Context<Self>) {
+        let specs = self.toast_specs(cx);
+        self.toasts.update(cx, |host, cx| host.sync(specs, cx));
+    }
+
     /// The one global personal-state toast: confirmation (with Undo after a
     /// removal) or the latest failure (with the coordinator's exact Retry).
-    pub(super) fn personal_notice(&self, cx: &mut Context<Self>) -> Option<Alert> {
-        let (message, failed, retry, undo) = {
+    /// Only confirmations expire; every failure (retryable or not) stays until
+    /// Retry, the close button or a newer outcome replaces it.
+    fn personal_toast(&self, cx: &mut Context<Self>) -> Option<ToastSpec> {
+        let (message, label, failed, retry, undo) = {
             let c = self.coordinator.read(cx);
             let failed = c.personal_notice_failed();
             (
                 c.personal_notice.clone()?,
+                c.personal_notice_label,
                 failed,
                 failed && c.can_retry_personal_write(),
                 !failed && c.can_undo_membership(),
             )
         };
-        let kind = match (failed, undo) {
+        let tone = match (failed, undo) {
             (true, _) => AlertTone::Error,
             (_, true) => AlertTone::Info,
             _ => AlertTone::Success,
         };
-        let label = if retry {
-            "Retry"
-        } else if undo {
-            "Undo"
-        } else {
-            "Dismiss"
+        let close = {
+            let coordinator = self.coordinator.downgrade();
+            let seen = message.clone();
+            move |cx: &mut App| {
+                let _ = coordinator.update(cx, |c, cx| {
+                    if c.personal_notice.as_deref() == Some(seen.as_str()) {
+                        c.dismiss_personal_notice(cx);
+                    }
+                });
+            }
         };
-        Some(Alert::new(kind, message).action(
-            Button::new("personal-notice-action", label).on_click(cx.listener(
-                move |this, _, _, cx| {
-                    this.coordinator.update(cx, |c, cx| {
-                        let result = if retry {
-                            c.retry_personal_write(cx)
-                        } else if undo {
-                            c.undo_membership(cx)
-                        } else {
-                            c.dismiss_personal_notice(cx);
-                            Ok(())
-                        };
-                        if let Err(error) = result {
-                            c.report_personal_failure(error, cx);
-                        }
-                    });
-                },
-            )),
-        ))
+        let label = label.unwrap_or(match tone {
+            AlertTone::Error => "Couldn’t save change",
+            _ => "Library updated",
+        });
+        let mut spec = ToastSpec::new("personal-notice", tone, label)
+            .body(message)
+            .on_close(close);
+        if retry || undo {
+            let coordinator = self.coordinator.downgrade();
+            spec = spec.action(if retry { "Retry" } else { "Undo" }, move |_, cx| {
+                let _ = coordinator.update(cx, |c, cx| {
+                    let result = if retry {
+                        c.retry_personal_write(cx)
+                    } else {
+                        c.undo_membership(cx)
+                    };
+                    if let Err(error) = result {
+                        c.report_personal_failure(error, cx);
+                    }
+                });
+            });
+        }
+        if !failed {
+            spec = spec.timeout(if undo {
+                timing::TOAST_ACTION_TIMEOUT
+            } else {
+                timing::TOAST_TIMEOUT
+            });
+        }
+        Some(spec)
     }
 
     pub(super) fn open_local(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -192,7 +251,10 @@ impl MainWindow {
                             category = "file_chooser",
                             "The local file chooser could not be opened"
                         );
-                        c.notice = Some("The local file chooser could not be opened.".into());
+                        c.set_notice(
+                            crate::controllers::coordinator::NoticeTopic::Files,
+                            "The local file chooser could not be opened.",
+                        );
                         cx.notify();
                     });
                 }

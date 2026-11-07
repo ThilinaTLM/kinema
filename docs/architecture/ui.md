@@ -54,8 +54,9 @@ in.
 | Center | Search, 180–440 px | — |
 | Trailing | **Filters** chip with an active-count badge, then the global capsule | Global capsule |
 
-The global capsule holds the transfers status, Settings and the overflow menu
-(Open local file, Refresh, About, Quit). **Filters** is the only home for
+The global capsule holds Open local file, Refresh, the transfers status, the
+[notifications](#toasts) bell, Settings and the overflow menu (Open local file,
+Refresh, About, Quit). **Filters** is the only home for
 advanced options, so the header never grows. Facets are never faked: if the
 primary provider can't filter server-side, Kinema offers only "sort loaded
 results" and says why. Below 1100 px, chips become icon-only and keep their
@@ -133,11 +134,57 @@ Every collection and personal-state surface tells these states apart:
 | Empty success | A centered state block that names the reason and offers a fix action (Clear search, Browse Discover) |
 | Failure | ⚠ plus the service and reason, with Retry. **MUST never show as "no results"** |
 | Missing credential | 🔑 plus "Open Settings" |
-| Stale | A one-line alert strip under the toolbar. Saved content stays visible |
+| Stale | Saved content stays visible, and a sticky Warning toast names the failure with Retry |
 | Personal state unknown | The controls are disabled, never shown as unsaved or unwatched |
 
 Show a rating only when it is known. Show `0.0` when the known value is zero.
 Show an unknown duration as `—`.
+
+### Toasts
+
+Outcomes and page conditions never sit inline in the layout. They are toasts
+in one region per window, at the **top-right just below the header** (never
+over it), aligned with the header's right edge, newest on top.
+
+- **Label and description.** Every toast has a short label naming what
+  happened ("Added to Library", "Playback problem", "Couldn’t save change")
+  and a description with the specifics (the title, the reason). Global notices
+  carry a topic that supplies the label and tone; the personal-state notice
+  carries its own label.
+- **Derived, not pushed.** The main window builds the toasts that should exist
+  now from state, every render: the global notice, the personal-state notice,
+  the Transfers cleanup result and the current route's conditions. A condition
+  that clears removes its toast.
+- **What is a toast:** results of an action (saved, removed with Undo, a write
+  failed with Retry, cleanup finished or failed), app notices (playback or file
+  chooser failed), and conditions of the page (stale results, title details or
+  Library status unavailable, streams not available for a title).
+- **One place per failure.** A failure the screen already shows (stream
+  preparation or play in the play panel, cleanup in its own toast) never also
+  becomes the global notice.
+- **What stays inline:** loading skeletons, empty and full-failure state blocks
+  (no content to keep, so the block *is* the page), confirmations that ask
+  before acting (clear progress, stop serving), the play preparation panel, and
+  the player dock's status. Settings shows errors per field.
+- **Lifetime:** confirmations close after `TOAST_TIMEOUT` (5 s), or
+  `TOAST_ACTION_TIMEOUT` (10 s) when they offer Undo. Failures and conditions
+  are sticky. Hover pauses every timer. The close button is always there.
+- **Identity:** one toast per slot key; changed text is a new occurrence. A
+  closed condition stays closed while it persists and shows again when it
+  comes back.
+- At most three are visible.
+- **Notification panel.** Every toast occurrence is also logged, so it can be
+  read after the toast is gone. The header **bell** opens the log (newest
+  first, with tone icon, text and age) and shows an unread-count badge (`9+`
+  above nine). An entry is read once the user closes its toast, uses its
+  action or opens the panel; a toast that expires stays unread. Opening the
+  panel marks all read, and entries that were unread keep a "New" marker while
+  it is open. Entries carry no actions (Retry or Undo belong to the live
+  toast). The log keeps the newest 50 entries for this session only; it is not
+  persisted. **Clear all** empties it.
+- A failure toast **never replaces** the honest state: unknown personal state
+  still disables its controls, and a collection that failed with nothing saved
+  still shows its inline failure block.
 
 ## Library
 
@@ -155,8 +202,8 @@ Show an unknown duration as `—`.
   names describe the *next* action.
 - **Child controls never bubble** into card, Detail, Streams or playback
   navigation.
-- One global personal-state notice confirms changes. A removal offers **Undo**, and
-  a failed write offers **Retry** while leaving the state unchanged.
+- One global personal-state [toast](#toasts) confirms changes. A removal offers
+  **Undo**, and a failed write offers **Retry** while leaving the state unchanged.
   When a filter removes the focused card, focus moves to the next card, then
   the previous one, then the empty-state action.
 

@@ -20,6 +20,7 @@ pub mod sheet;
 pub mod switch;
 pub mod tag_list;
 pub mod text_input;
+pub mod toast;
 pub mod tooltip;
 
 mod card;

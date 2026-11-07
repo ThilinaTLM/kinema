@@ -14,6 +14,7 @@ use crate::{
     ui::blocks::ViewState,
     ui::blocks::poster_card::{CardOpened, MembershipRequested, PosterCard},
     ui::blocks::state_toggle::{StateToggle, ToggleKind, ToggleStatus},
+    ui::blocks::toolbar::NotificationBell,
     ui::blocks::toolbar::{Toolbar, ToolbarChip, ToolbarGroup},
     ui::primitives::Badge,
     ui::primitives::BadgeTone,
@@ -36,14 +37,16 @@ use crate::{
     ui::primitives::sheet::Sheet,
     ui::primitives::switch::{Checkbox, Radio, Switch},
     ui::primitives::text_input::TextInput,
+    ui::primitives::toast::Toast,
     ui::primitives::tooltip::tooltip,
+    ui::theme::layout::controls::TOAST_WIDTH,
     ui::theme::typography::{TextSize, TypeExt, Weight},
     ui::theme::{self, Mode, Palette, layout, size, space as s},
 };
 
 actions!(design_lab, [NextFocus, PreviousFocus]);
 
-const SCENES: [&str; 54] = [
+const SCENES: [&str; 55] = [
     "patterns",
     "patterns-states",
     "detail-live-tmdb-movie",
@@ -54,6 +57,8 @@ const SCENES: [&str; 54] = [
     "library-live",
     "library-live-filtered",
     "library-live-empty",
+    // Library with a global notice and a personal confirmation as toasts.
+    "library-live-toasts",
     "detail-live-local-movie",
     "detail-live-local-movie-unsaved",
     "detail-live-local-movie-failed",
@@ -301,6 +306,14 @@ pub fn run_native() {
                                 if i % 7 != 6 {
                                     c.fixture_art.insert(title.key(), art(i, 240, 360));
                                 }
+                            }
+                            if scene == "library-live-toasts" {
+                                c.set_notice(
+                                    crate::controllers::coordinator::NoticeTopic::Playback,
+                                    "Embedded playback failed. Try another player in Settings.",
+                                );
+                                c.personal_notice = Some("North Harbor".into());
+                                c.personal_notice_label = Some("Added to Library");
                             }
                             c
                         });
@@ -1187,8 +1200,53 @@ impl Lab {
         ] {
             editors = editors.child(Alert::new(kind, label));
         }
-        editors =
-            editors.child(Alert::new(AlertTone::Warning, "Saved results · refresh failed").strip());
+        editors = editors.child(heading("Toasts"));
+        for (i, (kind, title, body, action)) in [
+            (
+                AlertTone::Success,
+                "Added to Library",
+                Some("Dune: Part Two"),
+                None,
+            ),
+            (
+                AlertTone::Info,
+                "Removed from Library",
+                Some("Dune"),
+                Some("Undo"),
+            ),
+            (
+                AlertTone::Warning,
+                "Showing previous results",
+                Some("TMDB request timed out."),
+                Some("Retry"),
+            ),
+            (
+                AlertTone::Error,
+                "Cleanup failed",
+                Some("Application service unavailable or busy. Retry."),
+                None,
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut toast = Toast::new(("lab-toast", i), kind, title).on_close(|_, _| {});
+            if let Some(body) = body {
+                toast = toast.body(body);
+            }
+            if let Some(action) = action {
+                toast = toast.action(Button::new(("lab-toast-action", i), action));
+            }
+            editors = editors.child(div().w(TOAST_WIDTH).child(toast));
+        }
+        editors = editors.child(heading("Notification bell")).child(
+            div()
+                .flex()
+                .gap(s::S8)
+                .child(NotificationBell::new(0, false))
+                .child(NotificationBell::new(3, false))
+                .child(NotificationBell::new(12, true)),
+        );
         let mut typography = col().child(heading("Type scale"));
         typography = typography
             .child(
@@ -1893,12 +1951,9 @@ impl Lab {
                 } else {
                     cell = cell
                         .child(
-                            Alert::new(
-                                AlertTone::Warning,
-                                "Showing saved results · refresh failed",
-                            )
-                            .strip()
-                            .action(Button::new("stale-retry", "Retry")),
+                            Toast::new("stale-toast", AlertTone::Warning, "Showing saved results")
+                                .body("The refresh failed.")
+                                .action(Button::new("stale-retry", "Retry")),
                         )
                         .child(
                             row()

@@ -1,4 +1,5 @@
-//! Inline status panels and compact under-toolbar strips.
+//! Inline status panels for content that belongs on the page (confirmations,
+//! workflow phases). Outcomes and page conditions use `toast` instead.
 //!
 //! Accessibility: the panel exposes `Role::Alert` for warnings and errors and
 //! `Role::Status` otherwise, with the title (plus body) as its accessible name;
@@ -29,7 +30,6 @@ pub struct Alert {
     title: SharedString,
     body: Option<SharedString>,
     action: Option<Button>,
-    strip: bool,
 }
 impl Alert {
     pub fn new(kind: AlertTone, title: impl Into<SharedString>) -> Self {
@@ -38,7 +38,6 @@ impl Alert {
             title: title.into(),
             body: None,
             action: None,
-            strip: false,
         }
     }
     pub fn body(mut self, body: impl Into<SharedString>) -> Self {
@@ -47,10 +46,6 @@ impl Alert {
     }
     pub fn action(mut self, action: Button) -> Self {
         self.action = Some(action);
-        self
-    }
-    pub fn strip(mut self) -> Self {
-        self.strip = true;
         self
     }
 }
@@ -92,7 +87,7 @@ impl RenderOnce for Alert {
             .rounded(radius::MD)
             .gap(space::S12)
             .px(space::S12)
-            .py(if self.strip { space::S4 } else { space::S12 })
+            .py(space::S12)
             .bg(fill)
             .border(size::HAIRLINE)
             .border_color(edge)
@@ -103,19 +98,11 @@ impl RenderOnce for Alert {
                     .flex_1()
                     .min_w_0()
                     .gap(space::S4)
-                    .when(!self.strip, |el| el.flex_col())
+                    .flex_col()
                     .child(
                         div()
-                            .text(if self.strip {
-                                TextSize::Sm
-                            } else {
-                                TextSize::Base
-                            })
-                            .weight(if self.strip {
-                                Weight::Regular
-                            } else {
-                                Weight::Semibold
-                            })
+                            .text(TextSize::Base)
+                            .weight(Weight::Semibold)
                             .text_color(p.foreground)
                             .child(self.title),
                     )

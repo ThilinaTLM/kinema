@@ -14,7 +14,6 @@ use crate::{
     ui::blocks::watch_mark::{WatchMark, WatchMarkState},
     ui::blocks::watched_toggle::WatchedToggle,
     ui::motion::interaction::focus_ring,
-    ui::primitives::alert::{Alert, AlertTone},
 };
 use kinema_core::watch_progress::{self, Tally, WatchedState};
 
@@ -320,7 +319,7 @@ impl Detail {
         thumb_state(art, due, label)
     }
 
-    fn episode_streams_unavailable(&self, cx: &App) -> bool {
+    pub(super) fn episode_streams_unavailable(&self, cx: &App) -> bool {
         // Use the enriched details, just like `open_episode`: a TMDB browse
         // result may not carry the IMDb ID resolved by the details request.
         self.display_title(cx).imdb().is_none() && !self.meta_status(cx).busy
@@ -800,6 +799,44 @@ impl Detail {
         self.select_season(n, cx);
     }
 
+    /// Whether the shown season is loaded, still loading, and its failure.
+    pub(super) fn episodes_load(&self, cx: &App) -> (bool, bool, Option<String>) {
+        let c = self.coordinator.read(cx);
+        match &self.title {
+            BrowseTitle::Tmdb(t) => (
+                c.tmdb_season
+                    .value()
+                    .is_some_and(|s| s.series_id == t.id && Some(s.season) == self.season),
+                c.tmdb_details.busy() || c.tmdb_season.busy(),
+                c.tmdb_season
+                    .error()
+                    .or(c.tmdb_details.error())
+                    .map(str::to_owned),
+            ),
+            BrowseTitle::Cinemeta(_) => (
+                c.details.value().is_some(),
+                c.details.busy(),
+                c.details.error().map(str::to_owned),
+            ),
+            BrowseTitle::Local(_) => {
+                let season_error = self
+                    .local_tmdb(cx)
+                    .is_some_and(|id| c.tmdb_season.value().is_none_or(|s| s.series_id != id))
+                    .then(|| c.tmdb_season.error())
+                    .flatten();
+                (
+                    c.local_details.value().is_some(),
+                    c.local_details.busy() || c.tmdb_season.busy() || c.local_acquisition_busy(),
+                    c.local_details
+                        .error()
+                        .or(season_error)
+                        .or(c.local_acquisition_error())
+                        .map(str::to_owned),
+                )
+            }
+        }
+    }
+
     /// Episodes below the details: season tabs and a responsive card grid.
     /// Clicking a card opens the Streams page for that episode.
     pub(super) fn episodes_section(&mut self, width: Pixels, cx: &mut Context<Self>) -> AnyElement {
@@ -810,44 +847,7 @@ impl Detail {
             geometry::EPISODE_GRID_GAP,
         );
         let episodes = self.episodes(cx);
-        let (loaded, busy, error) = {
-            let c = self.coordinator.read(cx);
-            match &self.title {
-                BrowseTitle::Tmdb(t) => (
-                    c.tmdb_season
-                        .value()
-                        .is_some_and(|s| s.series_id == t.id && Some(s.season) == self.season),
-                    c.tmdb_details.busy() || c.tmdb_season.busy(),
-                    c.tmdb_season
-                        .error()
-                        .or(c.tmdb_details.error())
-                        .map(str::to_owned),
-                ),
-                BrowseTitle::Cinemeta(_) => (
-                    c.details.value().is_some(),
-                    c.details.busy(),
-                    c.details.error().map(str::to_owned),
-                ),
-                BrowseTitle::Local(_) => {
-                    let season_error = self
-                        .local_tmdb(cx)
-                        .is_some_and(|id| c.tmdb_season.value().is_none_or(|s| s.series_id != id))
-                        .then(|| c.tmdb_season.error())
-                        .flatten();
-                    (
-                        c.local_details.value().is_some(),
-                        c.local_details.busy()
-                            || c.tmdb_season.busy()
-                            || c.local_acquisition_busy(),
-                        c.local_details
-                            .error()
-                            .or(season_error)
-                            .or(c.local_acquisition_error())
-                            .map(str::to_owned),
-                    )
-                }
-            }
-        };
+        let (loaded, busy, error) = self.episodes_load(cx);
         let sel = selection(loaded, episodes.is_empty(), error.is_some(), busy);
         let mut header = Section::new("Episodes");
         // A count is only meaningful once the season is actually known.
@@ -888,12 +888,6 @@ impl Detail {
                         .pb(s::S8)
                         .child(self.season_header(season, marks, cx)),
                 );
-        }
-        if self.episode_streams_unavailable(cx) {
-            column = column.child(
-                Alert::new(AlertTone::Info, "Streams aren’t available for this title")
-                    .body("You can still browse its episodes."),
-            );
         }
         let weak = cx.entity().downgrade();
         let mut view = state_view("episodes", sel)

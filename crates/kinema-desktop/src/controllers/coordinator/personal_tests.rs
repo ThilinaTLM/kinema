@@ -410,6 +410,7 @@ mod integration {
             assert!(c.set_membership(&title, false, cx).is_err());
             assert!(c.can_retry_personal_write());
             assert!(c.personal_notice_failed());
+            assert_eq!(c.personal_notice_label, Some("Couldn’t save change"));
             assert!(
                 c.personal_notice
                     .as_deref()
@@ -430,6 +431,7 @@ mod integration {
             );
             assert!(!c.can_retry_personal_write());
             assert!(!c.personal_notice_failed());
+            assert_eq!(c.personal_notice_label, Some("Watched state saved"));
             assert!(
                 c.personal_notice
                     .as_deref()

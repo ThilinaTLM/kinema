@@ -11,6 +11,8 @@ use crate::{
     ui::primitives::button::{Button, ButtonVariant},
     ui::primitives::icon::IconName,
     ui::primitives::menu::ContextMenuExt,
+    ui::primitives::toast::ToastSpec,
+    ui::theme::motion::timing,
     ui::theme::typography::{TextSize, TypeExt, Weight},
     ui::theme::{self, space as s},
 };
@@ -21,7 +23,8 @@ pub(crate) struct Transfers {
     coordinator: Entity<AppCoordinator>,
     stop: Option<String>,
     cleanup: Option<u64>,
-    result: Option<String>,
+    /// Latest cleanup outcome: `(failed, message)`, shown as a toast.
+    result: Option<(bool, String)>,
     _events: Subscription,
     _observe: Subscription,
 }
@@ -41,18 +44,22 @@ impl Transfers {
                     tracing::warn!(message, "UI cleanup failure displayed");
                 }
                 this.cleanup = None;
-                this.result = Some(match &event.outcome {
-                    AppOutcome::Cleaned {
-                        bytes,
-                        protected_files,
-                    } => format!(
-                        "Freed {} · {} protected files. Original local files untouched.",
-                        crate::controllers::play_session::format_bytes(*bytes),
-                        protected_files
-                    ),
-                    AppOutcome::Failed { message } => message.clone(),
-                    _ => "Cleanup did not complete.".into(),
-                });
+                let failed = !matches!(event.outcome, AppOutcome::Cleaned { .. });
+                this.result = Some((
+                    failed,
+                    match &event.outcome {
+                        AppOutcome::Cleaned {
+                            bytes,
+                            protected_files,
+                        } => format!(
+                            "Freed {} · {} protected files. Original local files untouched.",
+                            crate::controllers::play_session::format_bytes(*bytes),
+                            protected_files
+                        ),
+                        AppOutcome::Failed { message } => message.clone(),
+                        _ => "Cleanup did not complete.".into(),
+                    },
+                ));
                 cx.notify();
             }
         });
@@ -64,6 +71,41 @@ impl Transfers {
             stop: None,
             _observe: observe,
         }
+    }
+}
+impl Transfers {
+    /// The cleanup outcome as a toast: success closes itself, failure stays.
+    pub(crate) fn toast_spec(&self, cx: &mut Context<Self>) -> Option<ToastSpec> {
+        let (failed, message) = self.result.clone()?;
+        let weak = cx.entity().downgrade();
+        let seen = message.clone();
+        let spec = ToastSpec::new(
+            "transfers-cleanup",
+            if failed {
+                AlertTone::Error
+            } else {
+                AlertTone::Success
+            },
+            if failed {
+                "Cleanup failed"
+            } else {
+                "Cleanup finished"
+            },
+        )
+        .body(message)
+        .on_close(move |cx| {
+            let _ = weak.update(cx, |t, cx| {
+                if t.result.as_ref().is_some_and(|(_, m)| *m == seen) {
+                    t.result = None;
+                    cx.notify();
+                }
+            });
+        });
+        Some(if failed {
+            spec
+        } else {
+            spec.timeout(timing::TOAST_TIMEOUT)
+        })
     }
 }
 impl Render for Transfers {
@@ -162,9 +204,6 @@ impl Render for Transfers {
             )),
             None => muted("Cache usage unavailable".into()),
         });
-        if let Some(result) = &self.result {
-            content = content.child(Alert::new(AlertTone::Info, result.clone()));
-        }
         content.child(
             div().flex().justify_end().child(
                 Button::new("clean-unused", "Clean unused")
@@ -178,8 +217,10 @@ impl Render for Transfers {
                             .coordinator
                             .update(cx, |c, cx| c.command(AppAction::CleanupUnused, cx));
                         if this.cleanup.is_none() {
-                            this.result =
-                                Some("Application service unavailable or busy. Retry.".into());
+                            this.result = Some((
+                                true,
+                                "Application service unavailable or busy. Retry.".into(),
+                            ));
                         }
                         cx.notify();
                     })),

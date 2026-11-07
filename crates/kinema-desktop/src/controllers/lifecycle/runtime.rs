@@ -206,7 +206,7 @@ impl DesktopRuntime {
             let coordinator = cx.global::<Lifecycle>().coordinator.clone();
             coordinator.update(cx, |c, cx| {
                 if c.notice.is_none() {
-                    c.notice = Some("Kinema could not prevent automatic screen locking during playback. Your system's power settings still apply.".into());
+                    c.set_notice(crate::controllers::coordinator::NoticeTopic::Power, "Kinema could not prevent automatic screen locking during playback. Your system's power settings still apply.");
                     cx.notify();
                 }
             });

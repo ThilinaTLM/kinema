@@ -146,6 +146,16 @@ pub mod controls {
     /// Active-tab underline: distance from the bottom edge and thickness.
     pub const INDICATOR_INSET: Pixels = px(3.);
     pub const INDICATOR_THICKNESS: Pixels = px(2.);
+    /// Width of a toast card in the bottom-right toast region.
+    pub const TOAST_WIDTH: Pixels = px(360.);
+    /// Most toasts shown at once; older open toasts wait for a free slot.
+    pub const TOAST_MAX_VISIBLE: usize = 3;
+    /// Most entries the notification log keeps (oldest dropped first).
+    pub const TOAST_LOG_LIMIT: usize = 50;
+    /// Unread-count badge on a toolbar icon: height and minimum width.
+    pub const COUNT_BADGE: Pixels = px(14.);
+    /// Height of the notification list before it scrolls.
+    pub const NOTIFICATION_LIST_MAX_HEIGHT: Pixels = px(420.);
 }
 
 #[cfg(test)]
