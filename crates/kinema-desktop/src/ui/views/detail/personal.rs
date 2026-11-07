@@ -358,63 +358,14 @@ impl Detail {
         )
     }
 
-    /// Error / undo notices below the hero. Unknown or failed reads are never
-    /// hidden: a failed personal read offers Retry without hiding metadata.
+    /// Inline content below the hero: only the progress-clear confirmation.
+    /// Failures here are toasts (see `toasts.rs`).
     pub(super) fn personal_notices(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        use crate::ui::primitives::alert::{Alert, AlertTone};
-        let c = self.coordinator.read(cx);
-        let view = c.personal(&self.title);
-        let mut stack = div().w_full().flex().flex_col().gap(s::S8).pt(s::S12);
-        let mut any = false;
-        if let PersonalLoad::Failed(error) = &view.state {
-            any = true;
-            stack = stack.child(
-                Alert::new(AlertTone::Warning, "Library status unavailable")
-                    .body(error.clone())
-                    .action(
-                        Button::new("personal-retry", "Retry")
-                            .on_click(cx.listener(|this, _, _, cx| this.retry_personal(cx))),
-                    ),
-            );
-        }
-        // A synchronous rejection retries exactly the rejected write.
-        if let Some((write, error)) = self.write_error.clone() {
-            any = true;
-            stack = stack.child(
-                Alert::new(AlertTone::Warning, "Couldn’t save your change")
-                    .body(error)
-                    .action(Button::new("personal-write-retry", "Retry").on_click(
-                        cx.listener(move |this, _, _, cx| this.perform(write.clone(), cx)),
-                    )),
-            );
-        }
-        // A bulk season change that could not start keeps its own Retry.
-        if let Some(request) = self.season_confirm.clone()
-            && let Some(error) = request.failure.clone()
-        {
-            any = true;
-            stack = stack.child(
-                Alert::new(
-                    AlertTone::Warning,
-                    format!("Couldn\u{2019}t update {}", season_label(request.season)),
-                )
-                .body(error)
-                .action(
-                    Button::new("season-write-retry", "Retry").on_click(cx.listener(
-                        move |this, _, _, cx| {
-                            this.request_season(request.season, request.watched, cx)
-                        },
-                    )),
-                ),
-            );
-        }
-        if let Some(confirm) = self.clear_confirmation(cx) {
-            any = true;
-            stack = stack.child(confirm);
-        }
-        // Commit failures, success and Undo use the shared MainWindow toast, so they
-        // are never duplicated here.
-        any.then(|| hero::body_shell(stack).into_any_element())
+        let confirm = self.clear_confirmation(cx)?;
+        Some(
+            hero::body_shell(div().w_full().flex().flex_col().pt(s::S12).child(confirm))
+                .into_any_element(),
+        )
     }
 
     // ── season bulk actions ──────────────────────────────────────────────

@@ -140,8 +140,7 @@ design. Remove an item once it ships and its rules are in `architecture/`.
 
 **UI**
 
-- [ ] Native desktop notifications and a shared in-app toast:
-  [notifications](notifications.md)
+- [ ] Native desktop notifications: [notifications](notifications.md)
 - [ ] Redesign Streams and Settings, and polish the player chrome:
   [UI refinements](ui-refinements.md)
 - [ ] Guided welcome wizard (tokens, debrid, cache): [welcome wizard](welcome-wizard.md)

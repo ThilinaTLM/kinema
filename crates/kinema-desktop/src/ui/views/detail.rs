@@ -51,6 +51,7 @@ mod streams;
 mod streams_page;
 #[cfg(test)]
 mod tests;
+mod toasts;
 #[cfg(all(test, feature = "ui-probe-test"))]
 mod work;
 use std::{cell::Cell, collections::HashMap, rc::Rc};
@@ -1101,9 +1102,7 @@ fn selection(has_value: bool, empty: bool, error: bool, busy: bool) -> ViewSelec
 }
 /// A `StateView` positioned by `selection`; callers add skeleton/content/etc.
 fn state_view(id: &'static str, sel: ViewSelection) -> StateView {
-    StateView::new(id, sel.state)
-        .refreshing(sel.refreshing)
-        .stale_error(sel.stale_error)
+    StateView::new(id, sel.state).refreshing(sel.refreshing)
 }
 
 impl Detail {

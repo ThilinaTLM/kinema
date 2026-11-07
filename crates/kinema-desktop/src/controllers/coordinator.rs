@@ -1278,6 +1278,14 @@ impl AppCoordinator {
         cx.notify();
     }
 
+    /// The user closed the global notice toast. A newer notice is kept.
+    pub(crate) fn dismiss_notice(&mut self, message: &str, cx: &mut Context<Self>) {
+        if self.notice.as_deref() == Some(message) {
+            self.notice = None;
+            cx.notify();
+        }
+    }
+
     /// Fatal initialization/render failure. Only static UI text is surfaced;
     /// backend diagnostics and capability URLs never enter notices or logs.
     pub fn embedded_player_failed(&mut self, session_id: String, cx: &mut Context<Self>) {

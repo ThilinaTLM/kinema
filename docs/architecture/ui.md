@@ -133,11 +133,41 @@ Every collection and personal-state surface tells these states apart:
 | Empty success | A centered state block that names the reason and offers a fix action (Clear search, Browse Discover) |
 | Failure | ⚠ plus the service and reason, with Retry. **MUST never show as "no results"** |
 | Missing credential | 🔑 plus "Open Settings" |
-| Stale | A one-line alert strip under the toolbar. Saved content stays visible |
+| Stale | Saved content stays visible, and a sticky Warning toast names the failure with Retry |
 | Personal state unknown | The controls are disabled, never shown as unsaved or unwatched |
 
 Show a rating only when it is known. Show `0.0` when the known value is zero.
 Show an unknown duration as `—`.
+
+### Toasts
+
+Outcomes and page conditions never sit inline in the layout. They are toasts
+in one region per window, at the **bottom-right**, aligned with the page frame.
+On Streams the region moves left of the inspector or above the play dock
+while a release is selected.
+
+- **Derived, not pushed.** The main window builds the toasts that should exist
+  now from state, every render: the global notice, the personal-state notice,
+  the Transfers cleanup result and the current route's conditions. A condition
+  that clears removes its toast.
+- **What is a toast:** results of an action (saved, removed with Undo, a write
+  failed with Retry, cleanup finished or failed), app notices (playback or file
+  chooser failed), and conditions of the page (stale results, title details or
+  Library status unavailable, streams not available for a title).
+- **What stays inline:** loading skeletons, empty and full-failure state blocks
+  (no content to keep, so the block *is* the page), confirmations that ask
+  before acting (clear progress, stop serving), the play preparation panel, and
+  the player dock's status. Settings shows errors per field.
+- **Lifetime:** confirmations close after `TOAST_TIMEOUT` (5 s), or
+  `TOAST_ACTION_TIMEOUT` (10 s) when they offer Undo. Failures and conditions
+  are sticky. Hover pauses every timer. The close button is always there.
+- **Identity:** one toast per slot key; changed text is a new occurrence. A
+  closed condition stays closed while it persists and shows again when it
+  comes back.
+- At most three are visible, newest nearest the corner.
+- A failure toast **never replaces** the honest state: unknown personal state
+  still disables its controls, and a collection that failed with nothing saved
+  still shows its inline failure block.
 
 ## Library
 
@@ -155,8 +185,8 @@ Show an unknown duration as `—`.
   names describe the *next* action.
 - **Child controls never bubble** into card, Detail, Streams or playback
   navigation.
-- One global personal-state notice confirms changes. A removal offers **Undo**, and
-  a failed write offers **Retry** while leaving the state unchanged.
+- One global personal-state [toast](#toasts) confirms changes. A removal offers
+  **Undo**, and a failed write offers **Retry** while leaving the state unchanged.
   When a filter removes the focused card, focus moves to the next card, then
   the previous one, then the empty-state action.
 

@@ -36,7 +36,9 @@ use crate::{
     ui::primitives::sheet::Sheet,
     ui::primitives::switch::{Checkbox, Radio, Switch},
     ui::primitives::text_input::TextInput,
+    ui::primitives::toast::Toast,
     ui::primitives::tooltip::tooltip,
+    ui::theme::layout::controls::TOAST_WIDTH,
     ui::theme::typography::{TextSize, TypeExt, Weight},
     ui::theme::{self, Mode, Palette, layout, size, space as s},
 };
@@ -1187,8 +1189,40 @@ impl Lab {
         ] {
             editors = editors.child(Alert::new(kind, label));
         }
-        editors =
-            editors.child(Alert::new(AlertTone::Warning, "Saved results · refresh failed").strip());
+        editors = editors.child(heading("Toasts"));
+        for (i, (kind, title, body, action)) in [
+            (AlertTone::Success, "Added “Dune” to Library", None, None),
+            (
+                AlertTone::Info,
+                "Removed “Dune” from Library",
+                None,
+                Some("Undo"),
+            ),
+            (
+                AlertTone::Warning,
+                "Showing previous results",
+                Some("TMDB request timed out."),
+                Some("Retry"),
+            ),
+            (
+                AlertTone::Error,
+                "Cleanup failed",
+                Some("Application service unavailable or busy. Retry."),
+                None,
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut toast = Toast::new(("lab-toast", i), kind, title).on_close(|_, _| {});
+            if let Some(body) = body {
+                toast = toast.body(body);
+            }
+            if let Some(action) = action {
+                toast = toast.action(Button::new(("lab-toast-action", i), action));
+            }
+            editors = editors.child(div().w(TOAST_WIDTH).child(toast));
+        }
         let mut typography = col().child(heading("Type scale"));
         typography = typography
             .child(
@@ -1893,12 +1927,9 @@ impl Lab {
                 } else {
                     cell = cell
                         .child(
-                            Alert::new(
-                                AlertTone::Warning,
-                                "Showing saved results · refresh failed",
-                            )
-                            .strip()
-                            .action(Button::new("stale-retry", "Retry")),
+                            Toast::new("stale-toast", AlertTone::Warning, "Showing saved results")
+                                .body("The refresh failed.")
+                                .action(Button::new("stale-retry", "Retry")),
                         )
                         .child(
                             row()

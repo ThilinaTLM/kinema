@@ -146,6 +146,12 @@ pub mod controls {
     /// Active-tab underline: distance from the bottom edge and thickness.
     pub const INDICATOR_INSET: Pixels = px(3.);
     pub const INDICATOR_THICKNESS: Pixels = px(2.);
+    /// Width of a toast card in the bottom-right toast region.
+    pub const TOAST_WIDTH: Pixels = px(360.);
+    /// Tone accent bar along a toast's leading edge.
+    pub const TOAST_ACCENT: Pixels = px(3.);
+    /// Most toasts shown at once; older open toasts wait for a free slot.
+    pub const TOAST_MAX_VISIBLE: usize = 3;
 }
 
 #[cfg(test)]

@@ -12,7 +12,7 @@ use crate::ui::theme::{motion::timing, opacity};
 use crate::{
     ui::blocks::toolbar::{Toolbar, ToolbarChip, ToolbarGroup, TransferStatus, icon_cell},
     ui::motion::{AnimateExt, transition::DISCLOSE},
-    ui::primitives::alert::{Alert, AlertTone},
+    ui::primitives::alert::AlertTone,
     ui::primitives::button::Button,
     ui::primitives::icon::IconName,
     ui::primitives::menu::Menu,
@@ -21,6 +21,7 @@ use crate::{
     ui::primitives::search_field::{SearchField, SearchFieldEvent},
     ui::primitives::segmented::Segmented,
     ui::primitives::text_input::TextInputEvent,
+    ui::primitives::toast::{ToastHost, ToastSpec},
     ui::theme::typography::{TextSize, TypeExt},
     ui::theme::{self, size, space as s},
 };
@@ -83,8 +84,7 @@ pub struct MainWindow {
     transfers: Entity<super::transfers::Transfers>,
     transfers_popover: Rc<RefCell<Option<PopoverHandle>>>,
     search: Entity<SearchField>,
-    notice_seen: Option<String>,
-    notice_task: Option<Task<()>>,
+    toasts: Entity<ToastHost>,
     pub(crate) route: Route,
     detail_subscription: Option<Subscription>,
     launch_pulse: u64,
@@ -124,7 +124,9 @@ impl MainWindow {
             s
         });
         let editor = search.read(cx).input();
+        let toasts = cx.new(|_| ToastHost::new());
         let subscriptions = vec![
+            cx.observe(&toasts, |_, _, cx| cx.notify()),
             cx.subscribe(&coordinator, |this, _, event: &CoordinatorEvent, cx| {
                 if matches!(
                     event,
@@ -159,29 +161,7 @@ impl MainWindow {
                         this.search.update(cx, |s, cx| s.set_text(query, cx));
                     }
                 }
-                let notice = coordinator.read(cx).personal_notice.clone();
-                if notice != this.notice_seen {
-                    this.notice_seen.clone_from(&notice);
-                    this.notice_task = None;
-                    // Only confirmations expire. Every failure (retryable or not)
-                    // stays until Retry, Dismiss or a newer outcome replaces it.
-                    if let Some(message) = notice
-                        && !coordinator.read(cx).personal_notice_failed()
-                    {
-                        this.notice_task = Some(cx.spawn(async move |this, cx| {
-                            cx.background_executor().timer(timing::NOTICE_TIMEOUT).await;
-                            let _ = this.update(cx, |this, cx| {
-                                this.coordinator.update(cx, |c, cx| {
-                                    if c.personal_notice.as_deref() == Some(message.as_str())
-                                        && !c.personal_notice_failed()
-                                    {
-                                        c.dismiss_personal_notice(cx);
-                                    }
-                                })
-                            });
-                        }));
-                    }
-                }
+                this.sync_toasts(cx);
                 cx.notify();
             }),
             cx.subscribe(&search, |this, search, event: &SearchFieldEvent, cx| {
@@ -239,8 +219,7 @@ impl MainWindow {
             transfers,
             transfers_popover: Rc::new(RefCell::new(None)),
             search,
-            notice_seen: None,
-            notice_task: None,
+            toasts,
             route: Route::Browse,
             detail_subscription: None,
             launch_pulse: 0,
@@ -257,7 +236,7 @@ impl Render for MainWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = *theme::palette(cx);
         let scope = self.browse.read(cx).scope();
-        let personal_notice = self.personal_notice(cx);
+        self.sync_toasts(cx);
         let in_detail = matches!(self.route, Route::Detail(_));
         let inset = if in_detail {
             super::detail::page_inset(window.viewport_size().width)
@@ -393,21 +372,22 @@ impl Render for MainWindow {
             .text(TextSize::Base)
             .child(div().flex_1().min_h_0().child(body))
             .child(scroll_scrim(scrolled, p.background))
+            .child(toolbar)
             .child({
-                let notice = self.coordinator.read(cx).notice.clone();
+                // One toast region per window, bottom-right, clear of the
+                // Streams inspector and play dock.
+                let (right, bottom) = match &self.route {
+                    Route::Browse => (size::PAGE_INSET, size::PAGE_INSET),
+                    Route::Detail(detail) => detail
+                        .read(cx)
+                        .toast_insets(window.viewport_size().width, cx),
+                };
                 div()
                     .absolute()
-                    .top(size::TOOLBAR_HEIGHT)
-                    .left_0()
-                    .right_0()
-                    .p(s::S8)
-                    .flex()
-                    .flex_col()
-                    .gap(s::S8)
-                    .children(notice)
-                    .children(personal_notice)
+                    .right(right)
+                    .bottom(bottom)
+                    .child(self.toasts.clone())
             })
-            .child(toolbar)
             .when_some(self.menu.clone(), |el, menu| {
                 el.child(
                     deferred(

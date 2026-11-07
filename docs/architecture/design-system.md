@@ -256,7 +256,7 @@ are not allowed. Write derived values as arithmetic of other tokens, for example
 | `layout::browse` | Search widths, scrim ramp, compact breakpoint |
 | `layout::settings`, `layout::transfers` | Window and popover sizes |
 | `layout::player` | Window, dock, top bar, timeline, volume, help and diagnostics metrics |
-| `layout::controls` | Primitive metrics that are not component sizes (choice tile, carousel slop, scrollbar, menu min width, indicator) |
+| `layout::controls` | Primitive metrics that are not component sizes (choice tile, carousel slop, scrollbar, menu min width, indicator, toast width, accent and visible limit) |
 
 ### Motion values: `theme::motion`
 
@@ -271,7 +271,8 @@ are not allowed. Write derived values as arithmetic of other tokens, for example
 and reduced motion does not affect them. They include `TOOLTIP_DELAY` 500 ms,
 `SEARCH_DEBOUNCE` 300 ms, `SCROLLBAR_IDLE` 600 ms, `TYPEAHEAD_RESET` 700 ms,
 `SKELETON_DELAY` 150 ms, `PULSE_PERIOD` 1600 ms, `COPIED_FEEDBACK` 1500 ms,
-`SPIN_PERIOD` 1000 ms, `CHROME_IDLE` 2500 ms, `NOTICE_TIMEOUT` 10 s, and the
+`SPIN_PERIOD` 1000 ms, `CHROME_IDLE` 2500 ms, `TOAST_TIMEOUT` 5 s,
+`TOAST_ACTION_TIMEOUT` 10 s, and the
 player and transfer sampling intervals. Any `Duration` that drives UI behavior
 belongs here.
 
@@ -350,7 +351,8 @@ preset to the test's `ALL` list.**
 | --- | --- |
 | `Button` | `Primary`, `Secondary`, `Ghost`, `Outline`, `Destructive`; sizes `Sm` (28), `Md` (32), `Icon`; `.square(true)` gives the icon form; `.selected(bool)` gives the toggled state (`selection`); busy keeps its width and label and blocks repeats |
 | `Badge` | `Neutral`, `Primary`, `Success`, `Warning`, `Destructive`, `OnArt`; `.strong(true)` gives the info look |
-| `Alert` | `Info`, `Success`, `Warning`, `Error`, `Empty`; each tone is paired with a distinct icon; at most one action |
+| `Alert` | `Info`, `Success`, `Warning`, `Error`, `Empty`; each tone is paired with a distinct icon; at most one action. Inline only, for content that belongs on the page (confirmations, workflow phases) |
+| `Toast` | `AlertTone` tones on a `popover` card with `lg` elevation, a tone accent bar and icon, at most one action and a close button. `ToastHost` (one per window) takes derived `ToastSpec`s; enters with `POPUP_IN`, leaves with `POPUP_OUT`. Product rules are in [UI › Toasts](ui.md#toasts) |
 
 - Every component implements all of its states: rest, hover, pressed,
   focus-visible and disabled, plus busy where relevant.

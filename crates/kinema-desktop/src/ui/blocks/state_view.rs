@@ -13,7 +13,6 @@ use crate::{
     ui::motion::{self, AnimateExt, transition::CROSSFADE},
     ui::primitives::Icon,
     ui::primitives::IconName,
-    ui::primitives::alert::{Alert, AlertTone},
     ui::primitives::button::Button,
     ui::theme::motion::timing,
     ui::theme::typography::{TextSize, TypeExt, Weight},
@@ -113,7 +112,6 @@ pub struct StateView {
     empty: Option<EmptySpec>,
     retry: Option<Retry>,
     refreshing: bool,
-    stale_error: bool,
 }
 
 impl StateView {
@@ -130,7 +128,6 @@ impl StateView {
             empty: None,
             retry: None,
             refreshing: false,
-            stale_error: false,
         }
     }
     /// Skeleton shown while loading and faded out when content arrives.
@@ -155,7 +152,8 @@ impl StateView {
         });
         self
     }
-    /// Failure text for [`ViewState::Error`] (and the stale-content strip).
+    /// Failure text for [`ViewState::Error`]. Stale content keeps showing; its
+    /// owner reports the failure as a toast (`ViewSelection::stale_error`).
     pub fn message(mut self, message: impl Into<SharedString>) -> Self {
         self.message = Some(message.into());
         self
@@ -173,15 +171,10 @@ impl StateView {
         self.refreshing = refreshing;
         self
     }
-    pub fn stale_error(mut self, stale_error: bool) -> Self {
-        self.stale_error = stale_error;
-        self
-    }
     #[cfg_attr(not(feature = "ui-probe"), allow(dead_code))]
     fn apply(mut self, selection: ViewSelection) -> Self {
         self.state = selection.state;
         self.refreshing = selection.refreshing;
-        self.stale_error = selection.stale_error;
         self
     }
 }
@@ -323,23 +316,7 @@ impl RenderOnce for StateView {
                     cx,
                     |el, t| el.opacity(t),
                 );
-                base.when(self.stale_error && self.state == ViewState::Content, |el| {
-                    let strip = Alert::new(AlertTone::Warning, "Showing saved results")
-                        .body(
-                            self.message
-                                .clone()
-                                .unwrap_or_else(|| "The refresh failed.".into()),
-                        )
-                        .strip();
-                    let strip = match self.retry.clone() {
-                        Some(retry) => {
-                            strip.action(retry_button((self.id.clone(), "retry"), retry))
-                        }
-                        None => strip,
-                    };
-                    el.child(div().w_full().pb(space::S8).child(strip))
-                })
-                .child(
+                base.child(
                     div()
                         .relative()
                         .w_full()

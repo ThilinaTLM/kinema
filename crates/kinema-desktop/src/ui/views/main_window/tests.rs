@@ -859,3 +859,31 @@ fn back_pops_streams_to_the_detail_page_then_to_browse(cx: &mut TestAppContext) 
     main.read_with(cx, |v, _| assert!(matches!(v.route, Route::Browse)))
         .unwrap();
 }
+
+#[gpui::test]
+fn notices_are_toasts_and_closing_clears_only_that_notice(cx: &mut TestAppContext) {
+    let (coordinator, main) = fixture_window(cx);
+    let toasts = main.read_with(cx, |v, _| v.toasts.clone()).unwrap();
+    coordinator.update(cx, |c, cx| {
+        c.notice = Some("Embedded playback failed.".into());
+        c.personal_notice = Some("Updated “Dune”.".into());
+        cx.notify();
+    });
+    draw(main, cx);
+    let titles = toasts.read_with(cx, |h, _| h.visible_titles());
+    assert_eq!(titles, ["Embedded playback failed.", "Updated “Dune”."]);
+    // Failures are sticky; the close button clears exactly that notice.
+    cx.background_executor
+        .advance_clock(Duration::from_secs(60));
+    draw(main, cx);
+    let titles = toasts.read_with(cx, |h, _| h.visible_titles());
+    assert_eq!(
+        titles,
+        ["Embedded playback failed."],
+        "the confirmation expired"
+    );
+    toasts.update(cx, |h, cx| h.dismiss_key("app-notice", cx));
+    draw(main, cx);
+    coordinator.read_with(cx, |c, _| assert!(c.notice.is_none()));
+    assert!(toasts.read_with(cx, |h, _| h.visible_titles().is_empty()));
+}
