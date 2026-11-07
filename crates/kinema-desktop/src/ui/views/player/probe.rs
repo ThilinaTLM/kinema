@@ -323,8 +323,8 @@ fn run_probe_inner(
                             kinema_mpv::Track { codec: Some("subrip".into()), ..track(2, TrackKind::Subtitle, "www.1TamilMV.style", "en-IN", false) },
                             kinema_mpv::Track { codec: Some("hdmv_pgs_subtitle".into()), forced: true, ..track(3, TrackKind::Subtitle, "Signs & Songs", "eng", false) },
                             kinema_mpv::Track { codec: Some("subrip".into()), hearing_impaired: true, ..track(4, TrackKind::Subtitle, "", "eng", false) },
-                            kinema_mpv::Track { external: true, codec: Some("subrip".into()), ..track(5, TrackKind::Subtitle, "Immortal 2026 720p 10bit DS4K AMZN WEBRip TAM-HIN AAC5.1 x26.srt", "", true) },
-                            kinema_mpv::Track { external: true, codec: Some("ass".into()), ..track(6, TrackKind::Subtitle, "Immortal.2026.ta.ass", "ta", false) },
+                            kinema_mpv::Track { external: true, codec: Some("subrip".into()), ..track(5, TrackKind::Subtitle, "The.Outsider.S01E04.1080p.AMZN.WEB-DL.DDP5.1.H.264.srt", "", true) },
+                            kinema_mpv::Track { external: true, codec: Some("ass".into()), ..track(6, TrackKind::Subtitle, "The Outsider - S01E04 - Que Viene el Coco 720p WEBRip.ta.ass", "ta", false) },
                         ]
                     } else {
                         vec![track(1, TrackKind::Audio, "Stereo", "en", true), track(2, TrackKind::Subtitle, "English", "en", true), track(3, TrackKind::Subtitle, "Français", "fr", false)]

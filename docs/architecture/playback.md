@@ -180,8 +180,15 @@ Audio and subtitle menus use `kinema_core::tracks`, never raw metadata:
   no language.
 - **Titles only when meaningful.** Web addresses and watermarks
   ("www.…", "site.org"), and titles that repeat the language, are dropped.
-  Real titles stay ("English · Commentary"). Added files with no language show
-  their file name without extension; long names are cut at 40 characters.
+  Real titles stay ("English · Commentary").
+- **Added files drop what is playing from their name.** A leading title
+  (catalog name, or the playing file's stem), then any year, episode tag
+  (`S01E04`, `1x04`) and episode name are removed, as is a trailing language
+  tag: "Immortal.2026.1080p.WEB-DL.en.srt" reads "English · 1080p WEB-DL".
+  Matching ignores case and punctuation and stops at word boundaries; if
+  nothing matches or nothing is left, the whole name is kept. This is display
+  only and never identity. Dots become spaces except in "5.1" and "H.264";
+  names longer than 40 characters end at a word with "…".
 - **Tags** from observed track flags: Forced, SDH; audio adds the layout
   (Mono, Stereo, 5.1, 7.1).
 - **Source in the dimmed right column:** "Built-in" or "File · SRT" for

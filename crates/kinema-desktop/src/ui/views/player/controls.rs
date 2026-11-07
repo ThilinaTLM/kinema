@@ -3,7 +3,7 @@
 use crate::ui::theme::motion::timing;
 use std::time::Instant;
 
-use kinema_core::tracks::{TrackFacts, TrackLabel, TrackRole};
+use kinema_core::tracks::{MediaNames, TrackFacts, TrackLabel, TrackRole};
 use kinema_mpv::{Chapter, MAX_VOLUME, Track, TrackKind};
 
 /// Volume change for the Up/Down keys.
@@ -178,7 +178,12 @@ pub fn chapter_label(index: usize, chapter: &Chapter) -> String {
 }
 
 /// Readable menu labels for one kind of track, in order (see `kinema_core::tracks`).
-pub fn track_labels(kind: TrackKind, tracks: &[&Track]) -> Vec<TrackLabel> {
+/// `names` (what is playing) only shortens added files' names for display.
+pub fn track_labels(
+    kind: TrackKind,
+    tracks: &[&Track],
+    names: Option<MediaNames<'_>>,
+) -> Vec<TrackLabel> {
     let role = if kind == TrackKind::Audio {
         TrackRole::Audio
     } else {
@@ -197,7 +202,7 @@ pub fn track_labels(kind: TrackKind, tracks: &[&Track]) -> Vec<TrackLabel> {
             hearing_impaired: t.hearing_impaired,
         })
         .collect();
-    kinema_core::tracks::track_labels(role, &facts)
+    kinema_core::tracks::track_labels(role, &facts, names)
 }
 
 pub fn speed_label(speed: f64) -> String {
@@ -340,7 +345,7 @@ mod tests {
             channels: None,
         };
         let labels = |tracks: &[Track]| {
-            track_labels(TrackKind::Audio, &tracks.iter().collect::<Vec<_>>())
+            track_labels(TrackKind::Audio, &tracks.iter().collect::<Vec<_>>(), None)
                 .into_iter()
                 .map(|l| l.primary)
                 .collect::<Vec<_>>()

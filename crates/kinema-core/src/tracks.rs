@@ -27,6 +27,15 @@ pub struct TrackFacts<'a> {
     pub hearing_impaired: bool,
 }
 
+/// Names of what is playing, used only to shorten added files' names for
+/// display ("Immortal.2026.720p.WEBRip" → "720p WEBRip"). Never identity.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct MediaNames<'a> {
+    /// Catalog title, or a local file's name without extension.
+    pub title: &'a str,
+    pub episode_name: Option<&'a str>,
+}
+
 /// Menu text: `primary` names the track, `detail` is the dimmed source/format.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TrackLabel {
@@ -35,8 +44,12 @@ pub struct TrackLabel {
 }
 
 /// Labels for one menu, in order. Rows that would read the same are numbered.
-pub fn track_labels(role: TrackRole, tracks: &[TrackFacts<'_>]) -> Vec<TrackLabel> {
-    let mut labels: Vec<TrackLabel> = tracks.iter().map(|t| track_label(role, t)).collect();
+pub fn track_labels(
+    role: TrackRole,
+    tracks: &[TrackFacts<'_>],
+    names: Option<MediaNames<'_>>,
+) -> Vec<TrackLabel> {
+    let mut labels: Vec<TrackLabel> = tracks.iter().map(|t| track_label(role, t, names)).collect();
     let primaries: Vec<String> = labels.iter().map(|l| l.primary.clone()).collect();
     let mut seen: Vec<(String, usize)> = Vec::new();
     for label in &mut labels {
@@ -67,27 +80,39 @@ fn numbered(primary: &str, index: usize) -> String {
     }
 }
 
-pub fn track_label(role: TrackRole, track: &TrackFacts<'_>) -> TrackLabel {
+pub fn track_label(
+    role: TrackRole,
+    track: &TrackFacts<'_>,
+    names: Option<MediaNames<'_>>,
+) -> TrackLabel {
     let language = track.lang.and_then(language_name);
     let layout = (role == TrackRole::Audio)
         .then(|| track.channels.and_then(channel_layout))
         .flatten();
-    let title = track
-        .title
-        .map(str::trim)
-        .filter(|t| !t.is_empty())
-        .map(|t| if track.external { file_stem(t) } else { t })
+    let raw = track.title.map(str::trim).filter(|t| !t.is_empty());
+    // An added file's name minus the playing title: its release details.
+    let release = raw
+        .filter(|_| track.external)
+        .and_then(|t| names.and_then(|n| release_details(file_stem(t), n, track.lang)));
+    let stem = raw.filter(|_| track.external).map(|t| spaced(file_stem(t)));
+    let title = stem
+        .as_deref()
+        .or(raw)
         .filter(|t| meaningful_title(t, track.lang, language.as_deref()))
         .filter(|t| layout.is_none_or(|l| !t.eq_ignore_ascii_case(l)));
     let mut parts: Vec<String> = Vec::new();
     match (&language, title) {
-        (Some(language), Some(title)) if !track.external => {
+        (Some(language), _) if track.external => {
+            parts.push(language.clone());
+            parts.extend(release.as_deref().map(shorten));
+        }
+        (Some(language), Some(title)) => {
             parts.push(language.clone());
             parts.push(shorten(title));
         }
-        (Some(language), _) => parts.push(language.clone()),
-        // A file's name is the only name it has.
-        (None, Some(title)) => parts.push(shorten(title)),
+        (Some(language), None) => parts.push(language.clone()),
+        // A file's name is the only name it has, less what is playing.
+        (None, Some(title)) => parts.push(shorten(release.as_deref().unwrap_or(title))),
         (None, None) => parts.push(format!("Track {}", track.id)),
     }
     if let Some(layout) = layout {
@@ -137,6 +162,155 @@ pub fn meaningful_title(title: &str, code: Option<&str>, language: Option<&str>)
     !(code.is_some_and(same) || language.is_some_and(same))
 }
 
+/// The part of a file stem after the playing title (and a following year,
+/// episode tag or episode name), with dot/underscore separators made spaces.
+/// None when the stem does not start with the title or nothing is left.
+pub fn release_details(stem: &str, names: MediaNames<'_>, lang: Option<&str>) -> Option<String> {
+    let mut at = match_words(stem, 0, names.title)?;
+    loop {
+        let start = skip_separators(stem, at);
+        let next = year_end(stem, start)
+            .or_else(|| episode_tag_end(stem, start))
+            .or_else(|| names.episode_name.and_then(|n| match_words(stem, start, n)));
+        match next {
+            Some(end) if end > start => at = end,
+            _ => break,
+        }
+    }
+    let mut rest = stem[skip_separators(stem, at)..].trim_end_matches(is_separator);
+    // A trailing language tag ("….en") is already the language column.
+    if let Some(code) = lang.map(str::trim).filter(|c| !c.is_empty())
+        && let Some((head, tail)) = rest.rsplit_once(is_separator)
+        && tail.eq_ignore_ascii_case(code)
+    {
+        rest = head.trim_end_matches(is_separator);
+    }
+    if rest.is_empty() || rest.eq_ignore_ascii_case(lang.unwrap_or_default()) {
+        return None;
+    }
+    Some(spaced(rest))
+}
+
+fn is_separator(c: char) -> bool {
+    c.is_whitespace() || matches!(c, '.' | '_' | '-' | '[' | ']' | '(' | ')' | '·')
+}
+
+fn skip_separators(text: &str, from: usize) -> usize {
+    text[from..]
+        .char_indices()
+        .find(|(_, c)| !is_separator(*c))
+        .map_or(text.len(), |(i, _)| from + i)
+}
+
+/// Matches `words`' letters and digits at `from`, ignoring case, punctuation and
+/// separators; ends on a word boundary. Returns the byte index after the match.
+fn match_words(text: &str, from: usize, words: &str) -> Option<usize> {
+    let mut wanted = words
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .peekable();
+    wanted.peek()?;
+    let mut end = from;
+    for (i, c) in text[from..].char_indices() {
+        if wanted.peek().is_none() {
+            break;
+        }
+        if !c.is_alphanumeric() {
+            continue;
+        }
+        for lower in c.to_lowercase() {
+            if wanted.next() != Some(lower) {
+                return None;
+            }
+        }
+        end = from + i + c.len_utf8();
+    }
+    if wanted.peek().is_some()
+        || text[end..]
+            .chars()
+            .next()
+            .is_some_and(char::is_alphanumeric)
+    {
+        return None;
+    }
+    Some(end)
+}
+
+fn boundary(text: &str, end: usize) -> Option<usize> {
+    (!text[end..]
+        .chars()
+        .next()
+        .is_some_and(char::is_alphanumeric))
+    .then_some(end)
+}
+
+fn digits(text: &str, from: usize, min: usize, max: usize) -> Option<usize> {
+    let count = text[from..].bytes().take_while(u8::is_ascii_digit).count();
+    (min..=max).contains(&count).then_some(from + count)
+}
+
+/// "2026" from 1900 to 2099.
+fn year_end(text: &str, from: usize) -> Option<usize> {
+    let end = digits(text, from, 4, 4)?;
+    matches!(&text[from..from + 2], "19" | "20").then_some(())?;
+    boundary(text, end)
+}
+
+/// "S01E04", "s1.e4", "S01E04E05" or "1x04".
+fn episode_tag_end(text: &str, from: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    if bytes
+        .get(from)
+        .is_some_and(|b| b.eq_ignore_ascii_case(&b's'))
+    {
+        let mut at = digits(text, from + 1, 1, 2)?;
+        if matches!(bytes.get(at), Some(b'.' | b' ' | b'_' | b'-')) {
+            at += 1;
+        }
+        let mut episodes = 0;
+        while bytes.get(at).is_some_and(|b| b.eq_ignore_ascii_case(&b'e')) {
+            at = digits(text, at + 1, 1, 3)?;
+            episodes += 1;
+        }
+        return (episodes > 0)
+            .then_some(at)
+            .and_then(|end| boundary(text, end));
+    }
+    let at = digits(text, from, 1, 2)?;
+    if !bytes.get(at).is_some_and(|b| b.eq_ignore_ascii_case(&b'x')) {
+        return None;
+    }
+    boundary(text, digits(text, at + 1, 2, 3)?)
+}
+
+/// Dots and underscores become spaces, except decimal points ("AAC5.1", "H.264").
+fn spaced(text: &str) -> String {
+    if text.contains(' ') {
+        return text.to_owned();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    for (i, &c) in chars.iter().enumerate() {
+        let prev = i.checked_sub(1).map(|p| chars[p]);
+        let next = chars.get(i + 1).copied();
+        // "5.1"/"2.0" channel layouts and "H.264"/"H.265" codecs keep their dot.
+        let layout = prev.is_some_and(|p| p.is_ascii_digit())
+            && next.is_some_and(|n| n.is_ascii_digit())
+            && !chars.get(i + 2).is_some_and(char::is_ascii_alphanumeric);
+        let codec = matches!(prev, Some('H' | 'h'))
+            && (i < 2 || !chars[i - 2].is_alphanumeric())
+            && next.is_some_and(|n| n.is_ascii_digit());
+        let decimal = c == '.' && (layout || codec);
+        out.push(if matches!(c, '.' | '_') && !decimal {
+            ' '
+        } else {
+            c
+        });
+    }
+    out
+}
+
 fn file_stem(name: &str) -> &str {
     // mpv titles external tracks with the file name; drop a known extension.
     match name.rsplit_once('.') {
@@ -171,6 +345,11 @@ fn shorten(text: &str) -> String {
         return text.to_owned();
     }
     let kept: String = text.chars().take(MAX_TITLE_CHARS - 1).collect();
+    // Prefer ending on a whole word when one ends past the halfway point.
+    let kept = match kept.rfind(' ') {
+        Some(space) if kept[..space].chars().count() > MAX_TITLE_CHARS / 2 => &kept[..space],
+        _ => kept.as_str(),
+    };
     format!("{}…", kept.trim_end())
 }
 
@@ -451,14 +630,12 @@ mod tests {
         assert_eq!(
             track_labels(
                 TrackRole::Subtitle,
-                &[watermark, file, tagged_file, commentary, sub(9, None, None)]
+                &[watermark, file, tagged_file, commentary, sub(9, None, None)],
+                None,
             ),
             [
                 label("English (India)", Some("Built-in")),
-                label(
-                    "Immortal 2026 720p 10bit DS4K AMZN WEBR…",
-                    Some("File · SRT")
-                ),
+                label("Immortal 2026 720p 10bit DS4K AMZN…", Some("File · SRT")),
                 label("English", Some("File · ASS")),
                 label("English · Commentary · Forced · SDH", Some("Built-in")),
                 label("Track 9", Some("Built-in")),
@@ -481,6 +658,7 @@ mod tests {
                 sdh,
                 sub(5, None, Some("fr")),
             ],
+            None,
         );
         let primaries: Vec<_> = labels.iter().map(|l| l.primary.as_str()).collect();
         assert_eq!(
@@ -491,6 +669,111 @@ mod tests {
                 "English 1 · SDH",
                 "English 2 · SDH",
                 "French"
+            ]
+        );
+    }
+
+    #[test]
+    fn release_details_drop_the_playing_title_year_and_episode() {
+        let movie = MediaNames {
+            title: "Immortal",
+            episode_name: None,
+        };
+        let details = |stem, names, lang| release_details(stem, names, lang);
+        assert_eq!(
+            details(
+                "Immortal 2026 720p 10bit DS4K AMZN WEBRip TAM-HIN AAC5.1 x26",
+                movie,
+                None
+            )
+            .as_deref(),
+            Some("720p 10bit DS4K AMZN WEBRip TAM-HIN AAC5.1 x26")
+        );
+        assert_eq!(
+            details(
+                "immortal.(2026).1080p.WEB-DL.DDP5.1.H.264.en",
+                movie,
+                Some("en")
+            )
+            .as_deref(),
+            Some("1080p WEB-DL DDP5.1 H.264")
+        );
+        assert_eq!(
+            details("Immortal_2026_720p.10bit", movie, None).as_deref(),
+            Some("720p 10bit")
+        );
+        let episode = MediaNames {
+            title: "The Outsider",
+            episode_name: Some("Que Viene el Coco"),
+        };
+        for stem in [
+            "The.Outsider.S01E04.Que.Viene.el.Coco.1080p.AMZN",
+            "the outsider - s01.e04 - 1080p AMZN",
+            "The Outsider 1x04 1080p.AMZN",
+            "The.Outsider.2020.S01E04E05.1080p.AMZN",
+        ] {
+            assert_eq!(
+                details(stem, episode, None).as_deref(),
+                Some("1080p AMZN"),
+                "{stem}"
+            );
+        }
+        // Names with punctuation match their dotted file-name form.
+        let marvel = MediaNames {
+            title: "Spider-Man: No Way Home",
+            episode_name: None,
+        };
+        assert_eq!(
+            details("Spider.Man.No.Way.Home.2021.2160p", marvel, None).as_deref(),
+            Some("2160p")
+        );
+        // No match, a partial word, or nothing left: keep the original name.
+        for stem in [
+            "Outsider.S01E04.1080p",
+            "Immortals.2011.720p",
+            "Immortal.2026",
+            "Immortal.2026.en",
+        ] {
+            assert_eq!(details(stem, movie, Some("en")), None, "{stem}");
+        }
+        assert_eq!(details("The.Outsider.S01E04", episode, None), None);
+    }
+
+    #[test]
+    fn added_files_show_release_details_after_the_language() {
+        let names = Some(MediaNames {
+            title: "Immortal",
+            episode_name: None,
+        });
+        let file = |id, name, lang| TrackFacts {
+            external: true,
+            codec: Some("subrip"),
+            ..sub(id, Some(name), lang)
+        };
+        let labels = track_labels(
+            TrackRole::Subtitle,
+            &[
+                file(
+                    1,
+                    "Immortal 2026 720p 10bit DS4K AMZN WEBRip TAM-HIN AAC5.1 x26.srt",
+                    None,
+                ),
+                file(2, "Immortal.2026.1080p.WEB-DL.en.srt", Some("en")),
+                file(3, "Immortal.2026.en.srt", Some("en")),
+                file(4, "Unrelated.Release.srt", None),
+                sub(5, Some("www.x.site"), Some("en")),
+            ],
+            names,
+        );
+        let primaries: Vec<_> = labels.iter().map(|l| l.primary.as_str()).collect();
+        assert_eq!(
+            primaries,
+            [
+                "720p 10bit DS4K AMZN WEBRip TAM-HIN…",
+                "English · 1080p WEB-DL",
+                "English 1",
+                "Unrelated Release",
+                "English 2",
             ]
         );
     }
@@ -513,7 +796,7 @@ mod tests {
             ..sub(3, None, None)
         };
         assert_eq!(
-            track_labels(TrackRole::Audio, &[surround, stereo, odd]),
+            track_labels(TrackRole::Audio, &[surround, stereo, odd], None,),
             [
                 label("Tamil · 5.1", Some("E-AC-3")),
                 label("English · Stereo", Some("AAC")),

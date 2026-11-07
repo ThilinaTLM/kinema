@@ -83,7 +83,11 @@ impl PlayerWindow {
                     .iter()
                     .filter(|t| t.kind == wanted)
                     .collect();
-                let labels = track_labels(wanted, &tracks);
+                let names = kinema_core::tracks::MediaNames {
+                    title: &self.title.name,
+                    episode_name: self.title.episode_name.as_deref(),
+                };
+                let labels = track_labels(wanted, &tracks, Some(names));
                 let mut items = Vec::new();
                 if subtitles {
                     let none_selected = !self
