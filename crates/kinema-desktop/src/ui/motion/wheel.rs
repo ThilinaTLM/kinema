@@ -7,23 +7,27 @@
 //! tracks the handle, and paint its [`SmoothWheel::probe`] in the same frame.
 //! The probe records the offset before GPUI's own scroll handler applies the
 //! event; the listener runs right after that handler, reverts the jump it
-//! made, and glides to the destination instead. Measuring the applied jump,
-//! rather than recomputing it, keeps GPUI's line height and axis mapping.
+//! made, and glides to the destination instead.
+//!
+//! A notch travels [`WHEEL_LINE`] per reported line (100 px for the usual
+//! three lines, like Chrome on Windows), whatever the scroller's text line
+//! height: GPUI's jump uses the painting element's line height, so it varies
+//! by view and is short on Linux.
 //!
 //! Precise (touchpad/pixel) deltas already arrive per frame and pass through
 //! untouched, as do keyboard, scrollbar and programmatic scrolling. Any of
 //! them, or a layout clamp, moving the offset mid-glide makes the glide yield.
-//! Reduced motion keeps GPUI's instant jump.
+//! Reduced motion applies the same distance at once.
 
 use std::{cell::RefCell, rc::Rc, time::Instant};
 
 use gpui::{
-    App, DispatchPhase, EntityId, IntoElement, Pixels, Point, ScrollHandle, ScrollWheelEvent,
-    Styled, Window, canvas, px,
+    App, DispatchPhase, EntityId, IntoElement, Pixels, Point, ScrollDelta, ScrollHandle,
+    ScrollWheelEvent, Styled, Window, canvas, px,
 };
 
 use super::{Tween, resolve, transition::Axis, transition::WHEEL};
-use crate::ui::theme::size;
+use crate::ui::theme::{layout::controls::WHEEL_LINE, size};
 
 /// Pure glide state along one axis. Offsets are GPUI scroll offsets: `0` at
 /// the start, `-max` at the end. Times are milliseconds on a caller clock.
@@ -164,17 +168,17 @@ impl SmoothWheel {
             let Some(before) = state.borrow_mut().before.take() else {
                 return;
             };
-            if event.delta.precise() || duration <= 0. {
+            let ScrollDelta::Lines(lines) = event.delta else {
                 return;
-            }
-            // GPUI's own handler already jumped; undo it and glide instead.
+            };
+            // GPUI's own handler already jumped; undo it and travel our distance.
             let current = get(before, axis);
-            let delta = get(handle.offset(), axis) - current;
-            if delta == Pixels::ZERO {
+            if get(handle.offset(), axis) == current {
                 return;
             }
+            let delta = WHEEL_LINE * notch_lines(lines, axis);
             let max = get(handle.max_offset(), axis);
-            {
+            let (value, active) = {
                 let mut s = state.borrow_mut();
                 let now = s.epoch.elapsed().as_secs_f32() * 1000.;
                 s.glide.wheel(
@@ -184,11 +188,26 @@ impl SmoothWheel {
                     f32::from(max),
                     duration,
                 );
+                // Zero duration (reduced motion) settles on this tick.
+                let value = s.glide.tick(now, f32::from(current));
+                (value, s.glide.active())
+            };
+            set(&handle, axis, value.map_or(current, px));
+            if active {
+                schedule(state.clone(), handle.clone(), axis, view, window);
             }
-            set(&handle, axis, current);
-            schedule(state.clone(), handle.clone(), axis, view, window);
         }
     }
+}
+
+/// Lines a wheel event scrolls along `axis` of a single-axis scroller,
+/// mirroring GPUI's mapping of the other axis when this one is zero.
+fn notch_lines(lines: Point<f32>, axis: Axis) -> f32 {
+    let (along, across) = match axis {
+        Axis::X => (lines.x, lines.y),
+        Axis::Y => (lines.y, lines.x),
+    };
+    if along == 0. { across } else { along }
 }
 
 fn schedule(
@@ -297,5 +316,21 @@ mod tests {
         // A stale pending destination does not leak into the next notch.
         g.wheel(90., -300., -60., 1000., D);
         assert_eq!(g.tick(90. + D, -300.), Some(-360.));
+    }
+
+    #[test]
+    fn zero_duration_settles_on_the_first_tick() {
+        let mut g = Glide::default();
+        g.wheel(0., -100., -60., 1000., 0.);
+        assert_eq!(g.tick(0., -100.), Some(-160.));
+        assert!(!g.active());
+    }
+
+    #[test]
+    fn notch_lines_follow_gpui_axis_mapping() {
+        assert_eq!(notch_lines(Point { x: 0., y: -3. }, Axis::Y), -3.);
+        assert_eq!(notch_lines(Point { x: 0., y: -3. }, Axis::X), -3.);
+        assert_eq!(notch_lines(Point { x: 2., y: 0. }, Axis::X), 2.);
+        assert_eq!(notch_lines(Point { x: 2., y: -1. }, Axis::Y), -1.);
     }
 }

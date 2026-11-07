@@ -324,11 +324,14 @@ preset to the test's `ALL` list.**
   handle, attaches `listener(handle, axis, ..)` with `on_scroll_wheel` on the
   element that tracks the handle, and paints `probe(handle)` in the same frame.
   The probe records the offset before GPUI scrolls. The listener runs right
-  after GPUI's handler, undoes the jump and glides there with `WHEEL`. Notches in
-  one direction stack onto the destination, a reversal starts from the current
-  offset, and destinations clamp to the scroll range. Touchpad (pixel) deltas,
-  keyboard, scrollbar and programmatic scrolling stay direct; any of them moving
-  the offset mid-glide makes the glide yield. Reduced motion keeps the jump.
+  after GPUI's handler, undoes the jump and glides with `WHEEL`. Each reported
+  line travels `layout::controls::WHEEL_LINE` (100 px per usual three-line
+  notch, like Chrome on Windows) in every view; GPUI's own jump depends on the
+  painting element's line height. Notches in one direction stack onto the
+  destination, a reversal starts from the current offset, and destinations
+  clamp to the scroll range. Touchpad (pixel) deltas, keyboard, scrollbar and
+  programmatic scrolling stay direct; any of them moving the offset mid-glide
+  makes the glide yield. Reduced motion applies the same distance at once.
   `ScrollArea`, `Carousel`, `Menu`, the Browse grid and Settings use it; new
   scrollers should too.
 - Reduced motion comes from Settings (`theme::apply_preferences`). GPUI does not

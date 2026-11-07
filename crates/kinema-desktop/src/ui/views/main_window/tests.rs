@@ -567,7 +567,8 @@ fn a_wheel_notch_glides_the_browse_grid(cx: &mut TestAppContext) {
             "glide never settled"
         );
     }
-    assert!(last > Pixels::ZERO, "the grid scrolled");
+    // The same distance as any other scroller, whatever the grid's line height.
+    assert_eq!(last, theme::layout::controls::WHEEL_LINE * 3.);
 }
 
 #[gpui::test]

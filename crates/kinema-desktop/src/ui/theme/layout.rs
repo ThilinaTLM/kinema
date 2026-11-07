@@ -138,6 +138,9 @@ pub mod controls {
     pub const CAROUSEL_EDGE_SLOP: Pixels = px(1.0);
     /// Scrollbar hit area while hovered (rest is `space::S6`).
     pub const SCROLLBAR_HOVER_WIDTH: Pixels = px(10.);
+    /// Mouse-wheel travel per reported line: 100 px for a usual three-line
+    /// notch, independent of the scroller's text line height.
+    pub const WHEEL_LINE: Pixels = px(100. / 3.);
     /// Minimum width of a menu panel.
     pub const MENU_MIN_WIDTH: Pixels = px(200.);
     /// Active-tab underline: distance from the bottom edge and thickness.

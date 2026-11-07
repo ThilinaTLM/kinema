@@ -286,7 +286,7 @@ mod tests {
 #[allow(clippy::unwrap_used)]
 mod wheel_tests {
     use super::ScrollArea;
-    use crate::ui::theme;
+    use crate::ui::theme::{self, layout::controls};
     use ::core::prelude::v1::test;
     use gpui::{prelude::*, *};
     use std::time::{Duration, Instant};
@@ -335,15 +335,10 @@ mod wheel_tests {
         });
     }
 
-    fn line_height(window: WindowHandle<Fixture>, cx: &mut TestAppContext) -> Pixels {
-        cx.update_window(window.into(), |_, window, _| window.line_height())
-            .unwrap()
-    }
-
     #[gpui::test]
     fn a_wheel_notch_glides_instead_of_jumping(cx: &mut TestAppContext) {
         let (handle, window, mut visual) = setup(false, cx);
-        let expected = line_height(window, cx) * -3.;
+        let expected = controls::WHEEL_LINE * -3.;
         wheel(&mut visual, ScrollDelta::Lines(point(0., -3.)));
         assert_eq!(handle.offset().y, Pixels::ZERO, "no jump on the event");
         let start = Instant::now();
@@ -366,13 +361,13 @@ mod wheel_tests {
     }
 
     #[gpui::test]
-    fn touchpad_and_reduced_motion_scroll_at_once(cx: &mut TestAppContext) {
+    fn touchpad_and_reduced_motion_scroll_at_once_by_the_notch_distance(cx: &mut TestAppContext) {
         let (handle, _, mut visual) = setup(false, cx);
         wheel(&mut visual, ScrollDelta::Pixels(point(px(0.), px(-40.))));
         assert_eq!(handle.offset().y, px(-40.));
 
-        let (handle, window, mut visual) = setup(true, cx);
-        let expected = line_height(window, cx) * -3.;
+        let (handle, _, mut visual) = setup(true, cx);
+        let expected = controls::WHEEL_LINE * -3.;
         wheel(&mut visual, ScrollDelta::Lines(point(0., -3.)));
         assert_eq!(handle.offset().y, expected);
     }
