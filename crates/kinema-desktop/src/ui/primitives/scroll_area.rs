@@ -102,6 +102,14 @@ impl RenderOnce for ScrollArea {
             .read(cx)
             .clone();
         let fade_drag = drag.clone();
+        let smooth = window
+            .use_keyed_state((self.id.clone(), "wheel"), cx, |_, _| {
+                motion::SmoothWheel::new()
+            })
+            .read(cx)
+            .clone();
+        let wheel = smooth.listener(&self.handle, motion::Axis::Y, window, cx);
+        let probe = smooth.probe(&self.handle);
         let fade = motion::resolve(CROSSFADE, cx);
         let reduced = motion::reduced(cx);
         div()
@@ -125,6 +133,7 @@ impl RenderOnce for ScrollArea {
             })
             .on_mouse_up(MouseButton::Left, move |_, _, _| release_drag.set(None))
             .on_mouse_up_out(MouseButton::Left, move |_, _, _| release_outside.set(None))
+            .child(probe)
             .child(
                 div()
                     .id("viewport")
@@ -134,6 +143,7 @@ impl RenderOnce for ScrollArea {
                     .pr(self.gutter)
                     .overflow_y_scroll()
                     .track_scroll(&self.handle)
+                    .on_scroll_wheel(wheel)
                     .focusable()
                     .tab_stop(true)
                     .focus_visible(move |s| s.border(size::FOCUS_RING).border_color(p.ring))
@@ -269,5 +279,96 @@ mod tests {
         assert_eq!(key_target("a", px(0.0), view, max), None);
         // No overflow: nothing to scroll.
         assert_eq!(key_target("end", px(0.0), view, px(0.0)), Some(px(0.0)));
+    }
+}
+
+#[cfg(all(test, feature = "ui-probe-test"))]
+#[allow(clippy::unwrap_used)]
+mod wheel_tests {
+    use super::ScrollArea;
+    use crate::ui::theme::{self, layout::controls};
+    use ::core::prelude::v1::test;
+    use gpui::{prelude::*, *};
+    use std::time::{Duration, Instant};
+
+    struct Fixture(ScrollHandle);
+    impl Render for Fixture {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(
+                ScrollArea::new("wheel-area", self.0.clone())
+                    .children((0..200).map(|i| div().child(format!("Row {i}")))),
+            )
+        }
+    }
+
+    fn setup(
+        reduced: bool,
+        cx: &mut TestAppContext,
+    ) -> (ScrollHandle, WindowHandle<Fixture>, VisualTestContext) {
+        cx.update(|cx| {
+            theme::init(cx);
+            theme::set_reduce_motion(reduced, cx);
+        });
+        let handle = ScrollHandle::new();
+        let window = cx.add_window({
+            let handle = handle.clone();
+            move |_, _| Fixture(handle)
+        });
+        let visual = VisualTestContext::from_window(window.into(), cx);
+        visual.simulate_resize(size(px(400.), px(300.)));
+        draw(window, cx);
+        assert!(handle.max_offset().y > Pixels::ZERO);
+        (handle, window, visual)
+    }
+
+    fn draw(window: WindowHandle<Fixture>, cx: &mut TestAppContext) {
+        cx.run_until_parked();
+        cx.update_window(window.into(), |_, window, cx| window.draw(cx).clear(cx))
+            .unwrap();
+    }
+
+    fn wheel(visual: &mut VisualTestContext, delta: ScrollDelta) {
+        visual.simulate_event(ScrollWheelEvent {
+            position: point(px(200.), px(150.)),
+            delta,
+            ..Default::default()
+        });
+    }
+
+    #[gpui::test]
+    fn a_wheel_notch_glides_instead_of_jumping(cx: &mut TestAppContext) {
+        let (handle, window, mut visual) = setup(false, cx);
+        let expected = controls::WHEEL_LINE * -3.;
+        wheel(&mut visual, ScrollDelta::Lines(point(0., -3.)));
+        assert_eq!(handle.offset().y, Pixels::ZERO, "no jump on the event");
+        let start = Instant::now();
+        let mut intermediate = false;
+        while handle.offset().y != expected {
+            assert!(
+                start.elapsed() < Duration::from_secs(2),
+                "glide never settled"
+            );
+            std::thread::sleep(Duration::from_millis(8));
+            cx.update_window(window.into(), |_, window, cx| {
+                window.simulate_next_frame(cx)
+            })
+            .unwrap();
+            let y = handle.offset().y;
+            intermediate |= y < Pixels::ZERO && y > expected;
+            assert!(y <= Pixels::ZERO && y >= expected, "{y:?}");
+        }
+        assert!(intermediate, "the notch passed through in-between offsets");
+    }
+
+    #[gpui::test]
+    fn touchpad_and_reduced_motion_scroll_at_once_by_the_notch_distance(cx: &mut TestAppContext) {
+        let (handle, _, mut visual) = setup(false, cx);
+        wheel(&mut visual, ScrollDelta::Pixels(point(px(0.), px(-40.))));
+        assert_eq!(handle.offset().y, px(-40.));
+
+        let (handle, _, mut visual) = setup(true, cx);
+        let expected = controls::WHEEL_LINE * -3.;
+        wheel(&mut visual, ScrollDelta::Lines(point(0., -3.)));
+        assert_eq!(handle.offset().y, expected);
     }
 }

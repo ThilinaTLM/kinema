@@ -27,6 +27,7 @@ mod storage;
 #[cfg(test)]
 mod tests;
 
+use crate::ui::motion::{Axis, SmoothWheel};
 use accounts::*;
 use gpui::{prelude::*, *};
 use kinema_core::provider::{ProviderId, ProviderPriority};
@@ -274,6 +275,8 @@ pub struct SettingsWindow {
     save_pending: bool,
     fixture: bool,
     subscriptions: Vec<Subscription>,
+    scroll: ScrollHandle,
+    wheel: SmoothWheel,
 }
 impl SettingsWindow {
     pub fn new(
@@ -373,6 +376,8 @@ impl SettingsWindow {
             save_pending: false,
             fixture: false,
             subscriptions,
+            scroll: ScrollHandle::new(),
+            wheel: SmoothWheel::new(),
         };
         this.sync(cx);
         this.sidebar.focus(window, cx);
@@ -561,6 +566,8 @@ impl Render for SettingsWindow {
         let sidebar_focus = self.sidebar.is_focused(window) && window.last_input_was_keyboard();
         let _ = self.subscriptions.len(); // Own all subscriptions for the view lifetime.
         let selected = self.section;
+        let wheel = self.wheel.listener(&self.scroll, Axis::Y, window, cx);
+        let probe = self.wheel.probe(&self.scroll);
         div()
             .key_context("KinemaSettings")
             .on_action(|_: &NextFocus, window, cx| window.focus_next(cx))
@@ -629,6 +636,9 @@ impl Render for SettingsWindow {
                     .h_full()
                     .min_w_0()
                     .overflow_y_scroll()
+                    .track_scroll(&self.scroll)
+                    .on_scroll_wheel(wheel)
+                    .child(probe)
                     .p(s::S32)
                     .child(self.content(cx)),
             )

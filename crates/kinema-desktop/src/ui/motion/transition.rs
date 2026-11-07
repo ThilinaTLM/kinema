@@ -141,9 +141,12 @@ pub const CARD_OVERLAY_OUT: Transition = preset(
     Effect::Rise(distance::MD),
 );
 
+/// One mouse-wheel notch gliding to its destination; geometry is caller-driven.
+pub const WHEEL: Transition = preset(duration::NORMAL, Ease::Out, Duration::ZERO, Effect::None);
+
 /// Every preset by name, for enumeration in tests.
 #[cfg(test)]
-pub(crate) const ALL: [(&str, Transition); 12] = [
+pub(crate) const ALL: [(&str, Transition); 13] = [
     ("FEEDBACK", FEEDBACK),
     ("HOVER", HOVER),
     ("DISCLOSE", DISCLOSE),
@@ -156,6 +159,7 @@ pub(crate) const ALL: [(&str, Transition); 12] = [
     ("FLIGHT", FLIGHT),
     ("CARD_OVERLAY", CARD_OVERLAY),
     ("CARD_OVERLAY_OUT", CARD_OVERLAY_OUT),
+    ("WHEEL", WHEEL),
 ];
 
 /// A preset with the reduced-motion preference applied.

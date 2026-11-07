@@ -295,6 +295,7 @@ of `None` (the caller drives the visual), `Fade`, `Rise(d)`, `Slide(axis, d)` or
 | `SHEET` | SLOW · Out | Rise(LG) | Modal sheet and scrim |
 | `FLIGHT` | SLOW · InOut | None | Shared poster flight (geometry driven by the caller) |
 | `CARD_OVERLAY` / `_OUT` | SLOW · Out · INTENT / NORMAL · Out | Rise(MD) | Poster-card scrim and rows |
+| `WHEEL` | NORMAL · Out | None | One mouse-wheel notch gliding to its destination |
 
 Under reduced motion, `motion::resolve(preset, cx)` returns zero duration and
 zero delay. A test enumerates every preset to check this, so **add every new
@@ -318,6 +319,21 @@ preset to the test's `ALL` list.**
   and `lerp_shadows`.
 - **`Tween`** is one interruptible eased value for frame-driven animation.
   **`CardHover`** is the poster-card choreography.
+- **`SmoothWheel`** smooths notched mouse wheels (`ScrollDelta::Lines`). GPUI
+  applies each wheel event as one jump. A scroller keeps one `SmoothWheel` per
+  handle, attaches `listener(handle, axis, ..)` with `on_scroll_wheel` on the
+  element that tracks the handle, and paints `probe(handle)` in the same frame.
+  The probe records the offset before GPUI scrolls. The listener runs right
+  after GPUI's handler, undoes the jump and glides with `WHEEL`. Each reported
+  line travels `layout::controls::WHEEL_LINE` (100 px per usual three-line
+  notch, like Chrome on Windows) in every view; GPUI's own jump depends on the
+  painting element's line height. Notches in one direction stack onto the
+  destination, a reversal starts from the current offset, and destinations
+  clamp to the scroll range. Touchpad (pixel) deltas, keyboard, scrollbar and
+  programmatic scrolling stay direct; any of them moving the offset mid-glide
+  makes the glide yield. Reduced motion applies the same distance at once.
+  `ScrollArea`, `Carousel`, `Menu`, the Browse grid and Settings use it; new
+  scrollers should too.
 - Reduced motion comes from Settings (`theme::apply_preferences`). GPUI does not
   expose the OS preference, so `System` currently means "not reduced". Do not
   claim OS-level support.

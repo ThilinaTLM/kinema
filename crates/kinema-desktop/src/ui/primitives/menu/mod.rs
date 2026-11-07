@@ -19,7 +19,7 @@
 use crate::ui::theme::layout::controls;
 use crate::{
     ui::motion::{
-        Closed, Presence,
+        Axis, Closed, Presence, SmoothWheel,
         transition::{POPUP_IN, POPUP_OUT},
     },
     ui::primitives::icon::{Icon, IconName},
@@ -156,6 +156,8 @@ pub struct Menu {
     presence: Entity<Presence>,
     scroll: ScrollHandle,
     child_scroll: ScrollHandle,
+    wheel: SmoothWheel,
+    child_wheel: SmoothWheel,
     _window_subscriptions: Vec<Subscription>,
 }
 impl EventEmitter<DismissEvent> for Menu {}
@@ -224,6 +226,8 @@ impl Menu {
             presence: presence.clone(),
             scroll: ScrollHandle::new(),
             child_scroll: ScrollHandle::new(),
+            wheel: SmoothWheel::new(),
+            child_wheel: SmoothWheel::new(),
             _window_subscriptions: vec![
                 cx.observe(&presence, |_, _, cx| cx.notify()),
                 cx.subscribe(&presence, |_, _, _: &Closed, cx| cx.emit(DismissEvent)),
@@ -357,17 +361,22 @@ impl Menu {
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let p = *palette(cx);
+        let (scroll, wheel) = if child {
+            (&self.child_scroll, &self.child_wheel)
+        } else {
+            (&self.scroll, &self.wheel)
+        };
+        let probe = wheel.probe(scroll);
+        let wheel = wheel.listener(scroll, Axis::Y, window, cx);
         let mut panel = div()
             .id(if child { "submenu-panel" } else { "menu-panel" })
             .min_w(controls::MENU_MIN_WIDTH)
             .max_w(window.viewport_size().width - space::S16)
             .max_h((window.viewport_size().height - space::S16).max(size::ROW))
             .overflow_y_scroll()
-            .track_scroll(if child {
-                &self.child_scroll
-            } else {
-                &self.scroll
-            })
+            .track_scroll(scroll)
+            .on_scroll_wheel(wheel)
+            .child(probe)
             .occlude()
             .role(Role::Menu)
             .aria_label(self.label.clone())
