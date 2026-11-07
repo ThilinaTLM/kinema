@@ -24,9 +24,8 @@ video. Subtitle clearance moves `sub-pos`, which styled ASS subtitles may ignore
    non-US layouts. Ctrl+arrow conflicts with macOS system shortcuts, and symbol
    keys are logical, not physical.
 3. **Hide the pointer** over the video while the chrome is hidden.
-4. **External subtitles,** for example OpenSubtitles. Search, download and load
-   them into the player. Credentials go in the keyring, and only safe metadata
-   is logged.
+4. **External subtitles:** local files and online search. See
+   [external subtitles](external-subtitles.md).
 5. **Minimize and occlusion suppression.** Stop rendering while the window is
    hidden. This must not imply that the download is suspended (see
    [media storage options](media-storage-options.md)).
