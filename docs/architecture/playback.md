@@ -139,6 +139,63 @@ The chrome is a **Cinema Dock** built from design-system tokens on
   text-only (time and chapter); thumbnails are a
   [proposal](../proposals/player-enhancements.md).
 
+### External subtitles
+
+The embedded player can add subtitle files the user already has. Online search
+is a [proposal](../proposals/external-subtitles.md).
+
+- **Two entry points:** **Add file** in the subtitle menu (native dialog,
+  several files allowed) and dropping files anywhere on the player window. The
+  subtitle menu opens whenever track metadata is known, even with no tracks,
+  so **Add file** is always reachable once the media is loaded.
+- **Admission** (`kinema_core::subtitles`) runs off the UI thread: a supported
+  extension (SRT, ASS, SSA, VTT, SUB, SUP), a regular non-empty file up to
+  64 MiB, and an absolute UTF-8 path. At most `MAX_SUBTITLE_FILES` (8) per
+  request; the rest are counted as skipped. The dialog has no type filter on
+  any platform, so admission is the filter.
+- **MUST: files are read in place.** Kinema never copies, moves or deletes a
+  user's subtitle file, and never logs its path or name; logs carry counts and
+  outcome categories only.
+- **Loading** is one generation-tagged `Player::add_subtitles` operation
+  (`sub-add … auto` for each file, `select` for the last). A racing load makes
+  it stale. mpv may load the files concurrently, so track order need not follow
+  request order; the last requested file is still the one selected. External tracks belong to one load: mpv drops them on reload or
+  replay, and they are not remembered across sessions.
+- **Outcome is observed, not assumed.** Success is a new track with
+  `Track::external`; an mpv error, or no new track within
+  `SUBTITLE_LOAD_TIMEOUT`, reports "Subtitle failed". Each outcome is a short
+  dock status for `PLAYER_NOTICE` ("Subtitle added", "Not a subtitle",
+  "Player not ready" …), with the full wording in the status tooltip.
+- While files are dragged over the window a full-window hint names what a drop
+  will do: "Drop to add", "Not a subtitle" (judged by name only) or "Player not
+  ready". Drop support is code-read for X11, Wayland, Windows and macOS and
+  tested through GPUI dispatch, not yet by hand on each platform.
+
+### Track labels
+
+Audio and subtitle menus use `kinema_core::tracks`, never raw metadata:
+
+- **Language first**, as a name: `en-IN` → "English (India)", `eng` →
+  "English". Unknown codes fall back to the code in capitals; `und`/`mul` mean
+  no language.
+- **Titles only when meaningful.** Web addresses and watermarks
+  ("www.…", "site.org"), and titles that repeat the language, are dropped.
+  Real titles stay ("English · Commentary").
+- **Added files drop what is playing from their name.** A leading title
+  (catalog name, or the playing file's stem), then any year, episode tag
+  (`S01E04`, `1x04`) and episode name are removed, as is a trailing language
+  tag: "Immortal.2026.1080p.WEB-DL.en.srt" reads "English · 1080p WEB-DL".
+  Matching ignores case and punctuation and stops at word boundaries; if
+  nothing matches or nothing is left, the whole name is kept. This is display
+  only and never identity. Dots become spaces except in "5.1" and "H.264";
+  names longer than 40 characters end at a word with "…".
+- **Tags** from observed track flags: Forced, SDH; audio adds the layout
+  (Mono, Stereo, 5.1, 7.1).
+- **Source in the dimmed right column:** "Built-in" or "File · SRT" for
+  subtitles, the codec (AAC, E-AC-3 …) for audio.
+- Rows that would read the same are numbered in order ("English 1",
+  "English 2"). Identity is still the mpv track ID; labels never select.
+
 **Shortcuts** come from one catalog, `player_shortcuts.rs`. The player's `?`
 help, Settings → Keyboard & Mouse, and the tooltips all read from it, so add or
 change a binding there; it is the authority for the binding list.

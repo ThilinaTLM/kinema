@@ -9,6 +9,7 @@ struct PlayerProbeArgs {
     light: bool,
     dimensions: [f32; 2],
     stress_resize: bool,
+    subtitles: Option<player::SubtitleScene>,
 }
 
 fn parse_player_probe(args: &[String]) -> Result<Option<PlayerProbeArgs>, &'static str> {
@@ -24,7 +25,12 @@ fn parse_player_probe(args: &[String]) -> Result<Option<PlayerProbeArgs>, &'stat
     // not as a player choice or settings compatibility alias.
     let experimental = scene == "player-experimental";
     let native = experimental || scene == "player-native";
-    if !native && scene != "player" {
+    let subtitles = match scene.as_str() {
+        "player-subtitles" => Some(player::SubtitleScene::Drop),
+        "player-tracks" => Some(player::SubtitleScene::Menu),
+        _ => None,
+    };
+    if !native && scene != "player" && subtitles.is_none() {
         return Ok(None);
     }
     if native && !cfg!(feature = "gpu-surface") {
@@ -67,6 +73,7 @@ fn parse_player_probe(args: &[String]) -> Result<Option<PlayerProbeArgs>, &'stat
         light: args.iter().any(|arg| arg == "--light"),
         dimensions,
         stress_resize,
+        subtitles,
     }))
 }
 
@@ -118,7 +125,9 @@ fn main() {
     if tracing::subscriber::set_global_default(probe_subscriber(filter)).is_err() {
         eprintln!("player probe: category=tracing-subscriber-already-set");
     }
-    let successful = if probe.native {
+    let successful = if let Some(scene) = probe.subtitles {
+        player::run_subtitle_probe(scene, probe.seconds, probe.light, probe.dimensions)
+    } else if probe.native {
         player::run_probe_mode(
             probe.media,
             probe.seconds,
@@ -181,6 +190,14 @@ mod tests {
     #[test]
     fn native_gpu_probe_requires_feature_and_media() {
         assert!(parse_player_probe(&args(&["--scene", "player-experimental"])).is_err());
+        assert!(matches!(
+            parse_player_probe(&args(&["--scene", "player-subtitles"])),
+            Ok(Some(PlayerProbeArgs {
+                native: false,
+                subtitles: Some(player::SubtitleScene::Drop),
+                ..
+            }))
+        ));
         let parsed = parse_player_probe(&args(&[
             "--scene",
             "player-experimental",

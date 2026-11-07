@@ -81,6 +81,15 @@ pub struct Track {
     pub title: Option<String>,
     pub lang: Option<String>,
     pub selected: bool,
+    /// Loaded from a separate file (`sub-add`), not demuxed from the media.
+    pub external: bool,
+    /// Container disposition flags, as observed.
+    pub forced: bool,
+    pub hearing_impaired: bool,
+    /// mpv/FFmpeg codec name, e.g. `subrip`, `hdmv_pgs_subtitle`, `eac3`.
+    pub codec: Option<String>,
+    /// Demuxer-reported audio channel count; None when unknown.
+    pub channels: Option<u32>,
 }
 
 /// An actual demuxer-cache seekable interval, in seconds (not a download estimate).
