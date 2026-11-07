@@ -81,6 +81,8 @@ pub struct Track {
     pub title: Option<String>,
     pub lang: Option<String>,
     pub selected: bool,
+    /// Loaded from a separate file (`sub-add`), not demuxed from the media.
+    pub external: bool,
 }
 
 /// An actual demuxer-cache seekable interval, in seconds (not a download estimate).

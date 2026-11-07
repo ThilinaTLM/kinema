@@ -222,6 +222,46 @@ pub fn run_probe_mode(
     mode: PlayerChoice,
     stress_resize: bool,
 ) -> bool {
+    run_probe_inner(
+        media,
+        seconds,
+        light,
+        dimensions,
+        mode,
+        stress_resize,
+        false,
+    )
+}
+
+/// Fixture with an added external subtitle, its status notice and the
+/// drop hint held on screen (lab scene `player-subtitles`).
+#[cfg(feature = "ui-probe")]
+pub fn run_subtitle_probe(seconds: u64, light: bool, dimensions: [f32; 2]) -> bool {
+    run_probe_inner(
+        None,
+        seconds,
+        light,
+        dimensions,
+        PlayerChoice::Embedded,
+        false,
+        true,
+    )
+}
+
+#[cfg(feature = "ui-probe")]
+fn run_probe_inner(
+    media: Option<std::path::PathBuf>,
+    seconds: u64,
+    light: bool,
+    dimensions: [f32; 2],
+    mode: PlayerChoice,
+    stress_resize: bool,
+    subtitles: bool,
+) -> bool {
+    if subtitles && media.is_some() {
+        eprintln!("player probe: category=invalid-probe-capability");
+        return false;
+    }
     use std::{cell::Cell, rc::Rc, sync::atomic::Ordering};
     let gpu_playback = media.is_some();
     let native = media.is_some();
@@ -265,12 +305,16 @@ pub fn run_probe_mode(
             if gpu_playback { cx.defer_in(window, |_, _, _| install_probe_gpu_guard()); }
             if !native {
                 let chapter = |time, title: &str| kinema_mpv::Chapter { time, title: Some(title.into()) };
-                let track = |id, kind, title: &str, lang: &str, selected| kinema_mpv::Track { id, kind, title: Some(title.into()), lang: Some(lang.into()), selected };
+                let track = |id, kind, title: &str, lang: &str, selected| kinema_mpv::Track { id, kind, title: Some(title.into()), lang: Some(lang.into()), selected, external: false };
                 view.state = PlaybackState {
                     position: 1837., duration: Some(6840.), paused: true, volume: 80.,
                     chapters_available: true, tracks_available: true,
                     chapters: vec![chapter(0., "Opening"), chapter(821., "The long road"), chapter(1586., "First light"), chapter(2899., "The other shore"), chapter(4868., "Homeward")],
-                    tracks: vec![track(1, TrackKind::Audio, "Stereo", "en", true), track(2, TrackKind::Subtitle, "English", "en", true), track(3, TrackKind::Subtitle, "Français", "fr", false)],
+                    tracks: if subtitles {
+                        vec![track(1, TrackKind::Audio, "Stereo", "en", true), track(2, TrackKind::Subtitle, "English", "en", false), kinema_mpv::Track { external: true, ..track(4, TrackKind::Subtitle, "The.Outsider.S01E04.es.srt", "", true) }]
+                    } else {
+                        vec![track(1, TrackKind::Audio, "Stereo", "en", true), track(2, TrackKind::Subtitle, "English", "en", true), track(3, TrackKind::Subtitle, "Français", "fr", false)]
+                    },
                     speed: 1.25,
                     buffered_ranges: Some(vec![kinema_mpv::BufferedRange { start: 0., end: 2600. }]),
                     ..Default::default()
@@ -281,6 +325,11 @@ pub fn run_probe_mode(
                     let glow = ((1. - ((x as f32 - 610.) / 600.).abs()).max(0.) * (1. - ((y as f32 - 260.) / 210.).abs()).max(0.) * 40.) as u8;
                     pixels.extend_from_slice(&[8 + glow / 2, 16 + glow, 23 + glow, 255]);
                 }}
+                if subtitles {
+                    view.fixture_subtitles = true;
+                    view.drop_hover = Some(true);
+                    view.subtitle_notice = Some((SubtitleNotice::Added { skipped: 1 }, Instant::now()));
+                }
                 view.fixture_image = image::RgbaImage::from_raw(960, 540, pixels)
                     .map(|buffer| Arc::new(RenderImage::new([image::Frame::new(buffer)])));
             }

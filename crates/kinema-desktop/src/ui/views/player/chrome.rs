@@ -67,10 +67,22 @@ impl PlayerWindow {
         );
         let dock_entity = cx.entity();
         // (compact item, full wording for the tooltip)
+        let subtitle_full = self.subtitle_notice.map(|(notice, _)| notice.full());
         let notice = if self.progress.as_ref().is_some_and(|p| p.notice) {
             Some((
                 StatusItem::warning("Not saved"),
                 "Progress could not be saved",
+            ))
+        } else if let (Some((notice, _)), Some(full)) =
+            (self.subtitle_notice, subtitle_full.as_deref())
+        {
+            Some((
+                if notice.warn() {
+                    StatusItem::warning(notice.short())
+                } else {
+                    StatusItem::text(notice.short())
+                },
+                full,
             ))
         } else if self.state.paused_for_cache {
             Some((StatusItem::text("Buffering…"), "Buffering…"))

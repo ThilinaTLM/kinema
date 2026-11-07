@@ -328,6 +328,7 @@ mod tests {
             title: title.map(Into::into),
             lang: lang.map(Into::into),
             selected: false,
+            external: false,
         };
         assert_eq!(
             track_label(&track(Some("Stereo"), Some("en"))),
@@ -443,6 +444,7 @@ mod shortcut_tests {
             selected,
             title: None,
             lang: None,
+            external: false,
         };
         let tracks = [
             track(42, TrackKind::Subtitle, true),

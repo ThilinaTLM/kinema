@@ -169,8 +169,9 @@ Shutdown pause `enqueued=true` is explicitly a request only, not proof of silenc
 ## Cinema Dock observations and commands
 
 `PlaybackState.chapters` contains ordered `Chapter { time, title }` values;
-`tracks` contains `Track { id, kind, title, lang, selected }`, where `TrackKind`
-is Video, Audio, or Subtitle. `chapters_available` and `tracks_available` are true
+`tracks` contains `Track { id, kind, title, lang, selected, external }`, where
+`TrackKind` is Video, Audio, or Subtitle and `external` marks a track loaded
+from a separate file. `chapters_available` and `tracks_available` are true
 only for successfully parsed observations, including empty lists. Both default
 and reset to false; unavailable/malformed properties clear the corresponding Vec
 and availability flag. Hosts must check availability before presenting a definitive
@@ -198,6 +199,12 @@ accepts finite −60..=60 seconds; positive means later. Observed
 `subtitle_visibility: Option<bool>` and `subtitle_delay: Option<f64>` remain
 unavailable until sampled for loaded media. Explicit subtitle selection enables
 visibility; replacement loads reset visibility to true and delay to zero.
+`add_subtitles(&[path])` loads 1..=`MAX_SUBTITLE_FILES` absolute local
+subtitle files into the loaded media as one generation-tagged operation
+(`sub-add … auto` for each, `select` for the last, then visibility on). It
+requires a loaded file and never adds tracks optimistically: success is a new
+`external` track, failure an error in state. Reloads drop external tracks.
+Paths are user data; never log them.
 Generation-scoped operations/errors cannot overwrite a newer queued load.
 Acceptance is queue submission, not proof of frame advancement or property change.
 Seek chapters by their time; no thumbnail extraction is implemented.

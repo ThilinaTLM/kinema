@@ -92,6 +92,10 @@ pub mod timing {
     /// A requested value (seek, speed, subtitle delay) stays authoritative
     /// until the player confirms it or this long passes.
     pub const REQUEST_PENDING: Duration = Duration::from_millis(1200);
+    /// How long a player status notice (such as "Subtitle added") stays.
+    pub const PLAYER_NOTICE: Duration = Duration::from_secs(4);
+    /// An external subtitle that has not appeared as a track by now failed.
+    pub const SUBTITLE_LOAD_TIMEOUT: Duration = Duration::from_secs(5);
     /// Rolling window for the recent download speed.
     pub const RATE_WINDOW: Duration = Duration::from_secs(5);
     /// Shortest observed span that yields a speed rather than noise.

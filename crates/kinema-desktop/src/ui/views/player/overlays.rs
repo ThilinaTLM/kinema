@@ -107,6 +107,15 @@ impl PlayerWindow {
                         }),
                     ));
                 }
+                if subtitles {
+                    items.push(MenuItem::Separator);
+                    items.push(action(
+                        "Add file".into(),
+                        None,
+                        false,
+                        Rc::new(|view, cx| view.request_subtitle_files(cx)),
+                    ));
+                }
                 items
             }
             MenuKind::Speed => SPEEDS

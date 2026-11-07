@@ -237,3 +237,66 @@ fn real_dispatch_repeat_help_focus_and_surface_hit_testing()
     })??;
     Ok(())
 }
+#[test]
+fn file_drops_reach_the_player_over_the_video_surface() -> Result<(), Box<dyn std::error::Error>> {
+    let mut cx = TestAppContext::single();
+    cx.update(crate::ui::theme::init);
+    cx.update(bind_keys);
+    let window = cx.add_window(|window, cx| {
+        let mut view = PlayerWindow::new_mode(
+            kinema_core::media::playback_title("Fixture", None),
+            None,
+            PlayerChoice::Embedded,
+            window,
+            cx,
+        );
+        view.startup_cancel
+            .store(true, std::sync::atomic::Ordering::Release);
+        view.state.loading = false;
+        view._updates = Task::ready(());
+        view
+    });
+    cx.update_window(window.into(), |view, window, cx| {
+        let view = view
+            .downcast::<PlayerWindow>()
+            .map_err(|_| "expected player fixture")?;
+        window.draw(cx).clear(cx);
+        let center = point(
+            window.viewport_size().width / 2.,
+            window.viewport_size().height / 2.,
+        );
+        let enter = |window: &mut Window, cx: &mut App, name: &str| {
+            window.dispatch_event(
+                FileDropEvent::Entered {
+                    position: center,
+                    paths: ExternalPaths(vec![std::path::PathBuf::from(name)].into()),
+                }
+                .to_platform_input(),
+                cx,
+            );
+        };
+        enter(window, cx, "movie.mkv");
+        view.update(cx, |view, _| assert_eq!(view.drop_hover, Some(false)));
+        window.dispatch_event(FileDropEvent::Exited.to_platform_input(), cx);
+        view.update(cx, |view, _| assert_eq!(view.drop_hover, None));
+        enter(window, cx, "movie.en.srt");
+        view.update(cx, |view, _| assert_eq!(view.drop_hover, Some(true)));
+        window.draw(cx).clear(cx);
+        window.dispatch_event(
+            FileDropEvent::Submit { position: center }.to_platform_input(),
+            cx,
+        );
+        // The drop reaches the root over the video; with no media loaded it is
+        // refused explicitly rather than queued.
+        view.update(cx, |view, _| {
+            assert_eq!(view.drop_hover, None);
+            assert!(matches!(
+                view.subtitle_notice,
+                Some((SubtitleNotice::NotReady, _))
+            ));
+            assert!(view.subtitle_pending.is_none());
+        });
+        Ok::<_, Box<dyn std::error::Error>>(())
+    })??;
+    Ok(())
+}

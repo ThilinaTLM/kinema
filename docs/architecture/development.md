@@ -111,7 +111,8 @@ cargo run -p kinema-desktop --bin ui-probe --features ui-probe --locked -- --lab
 
 The scenes include `components`, `browse`, `menus`, `sheet`, `detail`,
 `series`, `series-streams`, `states`, `tokens` and `motion`, plus `detail-live-*`
-fixtures and `player`/`player-native` (real libmpv on supplied media,
+fixtures, `player-subtitles` (drop hint and subtitle notice held on screen),
+and `player`/`player-native` (real libmpv on supplied media,
 `--smoke-seconds` 1–15). The full list is in `design_lab.rs` and
 `bin/ui-probe.rs`. **Add a scene or row for every new component or visual
 token.**

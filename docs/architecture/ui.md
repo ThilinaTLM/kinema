@@ -214,7 +214,10 @@ over it), aligned with the header's right edge, newest on top.
 - **Only one menu can be open at a time.** A menu opened with the pointer starts
   with nothing highlighted. A menu opened with the keyboard highlights the first
   enabled row. If any row has a leading icon, every row gets one.
-- **Action labels never end in "…".** Status text such as "Loading…" keeps it.
+- **Action labels are short and meaningful, and never end in "…".** Name the
+  action in a word or two (**Add file**, **Search online**) and let the
+  surrounding menu or panel supply the context. Status text such as
+  "Loading…" keeps its ellipsis.
 - **Context menus** exist on cards, episodes, streams, transfer rows and text
   inputs. Copied values never include credentials or debrid links.
 - **Never shrink text to fit.** Wrap it, clamp it with `clamp_lines`, or

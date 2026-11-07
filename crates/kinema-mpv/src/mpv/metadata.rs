@@ -105,14 +105,15 @@ pub(super) unsafe fn tracks(property: &Property) -> Option<Vec<Track>> {
         };
         let title = unsafe { field(node, "title").and_then(|n| string(n)) };
         let lang = unsafe { field(node, "lang").and_then(|n| string(n)) };
-        let selected =
-            unsafe { field(node, "selected").is_some_and(|n| n.format == 3 && n.value.flag != 0) };
+        let flag =
+            |name| unsafe { field(node, name).is_some_and(|n| n.format == 3 && n.value.flag != 0) };
         result.push(Track {
             id,
             kind,
             title,
             lang,
-            selected,
+            selected: flag("selected"),
+            external: flag("external"),
         });
     }
     Some(result)
@@ -209,7 +210,7 @@ mod tests {
         });
     }
     #[test]
-    fn tracks_preserve_ids_language_and_selection() {
+    fn tracks_preserve_ids_language_selection_and_origin() {
         let parsed = with_map(
             vec![
                 (
@@ -228,6 +229,13 @@ mod tests {
                         value: NodeValue { flag: 1 },
                     },
                 ),
+                (
+                    "external",
+                    Node {
+                        format: 3,
+                        value: NodeValue { flag: 1 },
+                    },
+                ),
             ],
             |node| with_array(vec![node], |p| unsafe { tracks(&p) }.unwrap()),
         );
@@ -238,7 +246,8 @@ mod tests {
                 kind: TrackKind::Subtitle,
                 title: None,
                 lang: Some("eng".into()),
-                selected: true
+                selected: true,
+                external: true
             }]
         );
     }

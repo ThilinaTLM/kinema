@@ -11,6 +11,7 @@ pub mod library;
 pub mod media;
 pub mod provider;
 pub mod sources;
+pub mod subtitles;
 pub mod transfer_rate;
 pub mod watch_progress;
 
