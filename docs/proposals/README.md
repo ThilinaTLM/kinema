@@ -116,7 +116,6 @@ What exists today (link the architecture page), and the constraints that apply.
 | [Performance budgets](performance-budgets.md) | all | Draft |
 | [Cross-platform qualification](cross-platform-qualification.md) | platform | Draft |
 | [Desktop releases and distribution](desktop-releases.md) | platform | Draft |
-| [Keyring service name](keyring-service-name.md) | providers (debt) | Accepted |
 | [Player process isolation](player-process-isolation.md) | playback (debt) | Draft |
 | [Cancellable networking](cancellable-networking.md) | runtime (debt) | Draft |
 | [Mobile platforms](mobile-platforms.md) | platform | Draft |
@@ -157,8 +156,6 @@ design. Remove an item once it ships and its rules are in `architecture/`.
 
 **Engineering debt** (see the Known debt notes in architecture)
 
-- [ ] Rename the keyring service from `kinema-next` to `kinema` (accepted; do
-  it before the subtitle credentials): [keyring service name](keyring-service-name.md)
 - [ ] Isolate native playback crashes from the app: [player process isolation](player-process-isolation.md)
 - [ ] Make network requests interruptible: [cancellable networking](cancellable-networking.md)
 - [ ] Back up or export personal records: [watch history and portability](watch-history-and-portability.md)

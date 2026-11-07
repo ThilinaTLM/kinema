@@ -235,8 +235,10 @@ fn debrid_account(kind: DebridKind) -> &'static str {
     }
 }
 struct OsVault;
+/// Persisted contract: renaming orphans every stored credential.
+const SERVICE: &str = "kinema";
 fn entry(account: &str) -> Result<keyring::Entry, CredentialError> {
-    keyring::Entry::new("kinema-next", account).map_err(safe_error)
+    keyring::Entry::new(SERVICE, account).map_err(safe_error)
 }
 fn safe_error(error: keyring::Error) -> CredentialError {
     match error {

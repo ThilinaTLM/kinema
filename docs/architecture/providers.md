@@ -84,14 +84,14 @@ the same boundary.
 ## Credentials
 
 - Credentials are stored **only in the OS keyring** through the `keyring` crate,
-  under service name `kinema-next`, one entry per account (`credentials.rs`).
+  under service name `kinema`, one entry per account (`credentials.rs`).
   Linux needs a session D-Bus and an unlocked Secret Service. KDE is not
   required.
-
-  > **Known debt:** `kinema-next` is a leftover name from the rewrite. The
-  > service name is a persisted contract: renaming it orphans every stored token.
-  > Do not reuse the pattern for new entries. Fix:
-  > [keyring service name](../proposals/keyring-service-name.md).
+- **MUST: the service name and account names are a persisted contract.**
+  Renaming either orphans every stored credential. The service was renamed
+  from `kinema-next` once, before 1.0, with no copy step: users re-enter their
+  tokens, and old `kinema-next` entries are left untouched. Legacy C++ app
+  entries (KWallet folders) are never read or migrated.
 - Credential states are distinct: present, **missing** (normal for optional
   lookups and not logged as a warning), **access denied** and **store
   unavailable**. None of these is ever treated as a cached success.

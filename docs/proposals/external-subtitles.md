@@ -97,7 +97,7 @@ find one online for the title they are watching.
 - **Credentials:** the user supplies their own **API key** in Settings, like
   the TMDB key; nothing is bundled in the build. Without a key, **Search
   online** stays visible but disabled, and explains where to add one. Key,
-  username and password are separate keyring accounts under the renamed
+  username and password are separate keyring accounts under the
   `kinema` service. The login token stays in memory, is reused for 24 hours,
   and is never retried after a 401 with the same credentials. Because the key
   is the user's own, its "allow anonymous downloads" setting is theirs too:
@@ -130,8 +130,6 @@ find one online for the title they are watching.
 
 Each step is independently shippable and testable.
 
-0. **Keyring rename** to `kinema` ([keyring service name](keyring-service-name.md)),
-   so the new entries never land under the old name.
 1. **Settings:** `subtitle_languages` (default English) with a Settings
    control, and the OpenSubtitles API key plus optional login in the keyring,
    validated through `/infos/user` or `/login`.
@@ -171,7 +169,7 @@ Each step is independently shippable and testable.
   "AI translated" badge. They rank below human subtitles in the same language,
   so they matter mostly when no human subtitle exists. Machine-translated
   subtitles stay excluded (also the API default).
-- **Keyring:** rename the service to `kinema` first.
+- **Keyring:** the service was renamed to `kinema` first.
 - **Search runs only on request** (**Search online**), never automatically,
   because every download spends allowance.
 - **Languages:** chosen in Settings; default English.
