@@ -157,28 +157,4 @@ impl Detail {
         }
         specs
     }
-
-    /// Distance of the toast region from the window's right edge: aligned with
-    /// the page frame, and left of the Streams inspector while it is shown.
-    pub(crate) fn toast_right_inset(&self, viewport: Pixels, cx: &App) -> Pixels {
-        let right = page_inset(viewport);
-        let frame = content_width(viewport);
-        let inspector = self.page == Page::Streams
-            && frame >= geometry::STREAMS_INSPECTOR_MIN_FRAME
-            && self.selected.is_some_and(|i| {
-                self.coordinator
-                    .read(cx)
-                    .sources
-                    .value()
-                    .is_some_and(|s| i < s.candidates.len())
-            });
-        if !inspector {
-            return right;
-        }
-        let width = (frame * theme::layout::detail::STREAMS_INSPECTOR_FRACTION).clamp(
-            theme::layout::detail::STREAMS_INSPECTOR_MIN,
-            theme::layout::detail::STREAMS_INSPECTOR_MAX,
-        );
-        right + width + s::S8 + s::S24
-    }
 }

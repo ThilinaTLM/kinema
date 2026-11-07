@@ -377,13 +377,8 @@ impl Render for MainWindow {
             .child(toolbar)
             .child({
                 // One toast region per window: top-right, just below the header
-                // (never over it), and clear of the Streams inspector.
-                let right = match &self.route {
-                    Route::Browse => size::PAGE_INSET,
-                    Route::Detail(detail) => detail
-                        .read(cx)
-                        .toast_right_inset(window.viewport_size().width, cx),
-                };
+                // (never over it), aligned with the header's right edge.
+                let right = inset;
                 div()
                     .absolute()
                     .top(size::PAGE_TOP + s::S8)

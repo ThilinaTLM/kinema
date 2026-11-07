@@ -1228,8 +1228,19 @@ impl AppCoordinator {
                 self.apply_credential_status(status.clone(), cx);
             }
             AppOutcome::Failed { message } => {
-                tracing::warn!(message, "UI notice displayed");
-                self.set_notice(NoticeTopic::Action, message.clone());
+                // Stream preparation/play failures show in the play panel and
+                // cleanup failures in their own toast; a global notice would
+                // repeat them.
+                let owned = resolved.as_ref().is_some_and(|r| {
+                    matches!(
+                        r.pending,
+                        Some(Pending::Prepare | Pending::Play { remote: true } | Pending::Cleanup)
+                    )
+                });
+                if !owned {
+                    tracing::warn!(message, "UI notice displayed");
+                    self.set_notice(NoticeTopic::Action, message.clone());
+                }
                 if resolved
                     .as_ref()
                     .is_some_and(|r| r.pending == Some(Pending::Settings))
@@ -2380,6 +2391,44 @@ mod session_tests {
                 cx,
             );
             assert!(!c.needs_quit_confirmation());
+        });
+    }
+
+    #[test]
+    fn failures_with_their_own_display_do_not_repeat_as_the_global_notice() {
+        let mut cx = gpui::TestAppContext::single();
+        let coordinator = cx.new(|cx| AppCoordinator::fixture(vec![], None, cx));
+        coordinator.update(&mut cx, |c, cx| {
+            for pending in [
+                Pending::Prepare,
+                Pending::Play { remote: true },
+                Pending::Cleanup,
+            ] {
+                let generation = c.tracker.issue(pending);
+                c.apply_app(
+                    AppEvent {
+                        generation,
+                        outcome: AppOutcome::Failed {
+                            message: "Provider is still preparing this torrent.".into(),
+                        },
+                    },
+                    cx,
+                );
+                assert_eq!(c.notice, None, "{pending:?}");
+            }
+            // A local play has no panel of its own: it still becomes a notice.
+            let generation = c.tracker.issue(Pending::Play { remote: false });
+            c.apply_app(
+                AppEvent {
+                    generation,
+                    outcome: AppOutcome::Failed {
+                        message: "File not found.".into(),
+                    },
+                },
+                cx,
+            );
+            assert_eq!(c.notice.as_deref(), Some("File not found."));
+            assert_eq!(c.notice_topic, super::NoticeTopic::Action);
         });
     }
 }

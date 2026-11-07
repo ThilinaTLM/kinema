@@ -144,8 +144,7 @@ Show an unknown duration as `—`.
 
 Outcomes and page conditions never sit inline in the layout. They are toasts
 in one region per window, at the **top-right just below the header** (never
-over it), aligned with the page frame, newest on top. On Streams the region
-moves left of the inspector while it is shown.
+over it), aligned with the header's right edge, newest on top.
 
 - **Label and description.** Every toast has a short label naming what
   happened ("Added to Library", "Playback problem", "Couldn’t save change")
@@ -160,6 +159,9 @@ moves left of the inspector while it is shown.
   failed with Retry, cleanup finished or failed), app notices (playback or file
   chooser failed), and conditions of the page (stale results, title details or
   Library status unavailable, streams not available for a title).
+- **One place per failure.** A failure the screen already shows (stream
+  preparation or play in the play panel, cleanup in its own toast) never also
+  becomes the global notice.
 - **What stays inline:** loading skeletons, empty and full-failure state blocks
   (no content to keep, so the block *is* the page), confirmations that ask
   before acting (clear progress, stop serving), the play preparation panel, and
