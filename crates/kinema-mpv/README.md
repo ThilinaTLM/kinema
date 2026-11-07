@@ -44,7 +44,7 @@ Nothing downloads or bundles these DLLs automatically. Backend consumers may
 set `Config.egl_library_path` and `Config.gles_library_path` to trusted library
 filenames instead; these overrides apply to both GPU-surface and readback EGL.
 The desktop default still uses executable-adjacent ANGLE. See the [precise Windows requirements and open
-qualification checks](../../docs/validation/cross-platform.md#default-windows-gpu-surface-prerequisites).
+qualification checks](../../docs/architecture/development.md#prerequisites).
 Inspect diagnostics rather than assuming hardware decoding or zero-copy.
 
 ## Host lifecycle contract

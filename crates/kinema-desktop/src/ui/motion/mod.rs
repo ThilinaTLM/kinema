@@ -1,4 +1,4 @@
-//! Desktop v3 motion runtime (see `docs/design/desktop-v3.md` §2.6).
+//! Desktop v3 motion runtime (see `docs/architecture/design-system.md`).
 //!
 //! Values live in [`crate::ui::theme::motion`]; this module turns them into
 //! named [`transition`] presets, the shared [`presence`] lifecycle and the

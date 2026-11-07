@@ -7,7 +7,7 @@ use crate::controllers::coordinator::PlaybackIntent;
 use crate::{ui::blocks::state_toggle::ToggleStatus, ui::primitives::menu::MenuItem};
 
 /// A saved playback position as the UI needs it. Mirrors the checkpoint row in
-/// docs/design/playback-progress-desktop.md (`position_ms`, nullable `duration_ms`).
+/// docs/architecture/playback.md (`position_ms`, nullable `duration_ms`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct ResumePoint {
     pub position_ms: u64,

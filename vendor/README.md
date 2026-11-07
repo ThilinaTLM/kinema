@@ -64,9 +64,7 @@ compiles Metal shaders on the actual Apple runtime, not on a Linux build host.
 Promotion changes the supported build entry point, not native qualification.
 Windows/macOS runtime/linking/GPU behavior and HDR remain unqualified. Keep the
 detailed [API/synchronization constraints](patches/README.md) with these patches.
-The experimental harnesses are retired; their
-[historical qualification record](../docs/validation/gpu-surface-qualification.md)
-is not current root validation. Use the [root validation instructions](../docs/development.md#run-and-validate)
+The experimental harnesses are retired. Use the [root validation instructions](../docs/architecture/development.md#everyday-commands)
 and offline `ui-probe` fixture path for new checks, not retired wrapper commands.
 No desktop CPU readback fallback is introduced here.
 

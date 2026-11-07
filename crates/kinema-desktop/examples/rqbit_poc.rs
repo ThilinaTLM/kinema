@@ -1,4 +1,4 @@
-//! Controlled localhost streaming/seek experiment. See docs/development/rqbit-poc.md.
+//! Controlled localhost streaming/seek experiment. See docs/proposals/torrent-engine.md.
 #[path = "rqbit_poc/fixture.rs"]
 mod fixture;
 

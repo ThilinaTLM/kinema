@@ -1,6 +1,6 @@
 //! Desktop v3 UI: in-house components built directly on GPUI (`gpui-pre`).
 //!
-//! Spec: `docs/design/desktop-v3.md`. Code here must use `gpui::*` directly,
+//! Spec: `docs/architecture/ui.md` and `docs/architecture/design-system.md`. Code here must use `gpui::*` directly,
 //! never `gpui_kit`.
 //!
 //! Layers, from lowest to highest; a layer may depend only on layers listed

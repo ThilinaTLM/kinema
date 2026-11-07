@@ -8,8 +8,8 @@ authenticated exact-release sources. The current root entry point is
 `gpu-surface`, with no experiment preparation or wrapper. Never modify registry
 sources or global Cargo configuration. Optional zero-fuzz reproduction uses
 `python3 -B vendor/verify.py --reproduce NEW_DIRECTORY` from the repository root.
-Historical qualification is archived [here](../../docs/validation/gpu-surface-qualification.md);
-it does not qualify native Windows/macOS runtime or HDR. Internal patched API
+Architecture context is in [playback](../../docs/architecture/playback.md#gpu-surface-rendering);
+prior Linux evidence does not qualify native Windows/macOS runtime or HDR. Internal patched API
 names retain `experimental`/`gpu-video-experiment`; these are not separate app
 settings. The contracts and historical findings below are retained, not newly
 remeasured by retirement.

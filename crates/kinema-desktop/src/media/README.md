@@ -136,60 +136,9 @@ Tests use actual loopback HTTP byte fixtures and temporary storage. Windows/macO
 build/runtime and power-loss filesystem behavior are not established by Linux
 fixture tests. No real provider account or external-player playback was tested.
 
-## Historical startup investigation / documentation handoff (2026-10-25)
+Architecture overview: [media storage and serving](../../../../docs/architecture/media.md).
 
-The following records the former serial implementation. The adaptive contract
-above and [current validation](../../../../docs/validation/adaptive-http.md)
-supersede its scheduling, range-size, and retry descriptions. Historical results
-are not new qualification of the adaptive implementation.
-
-Source evidence, not a native performance measurement:
-
-1. Registration reserves/prepares storage on the service worker, then starts one
-   acquisition owner per asset. Loopback GET sends response headers before its
-   body worker waits for data. A successful/fast loopback `send()` alone therefore
-   says nothing about first playable bytes.
-2. Each upstream request selects one missing range, at most 4 MiB. Header timing
-   includes connection setup and upstream response latency; it does not separate
-   DNS, TCP, TLS, provider processing, or network scheduling. The body must finish
-   and validate before payload write/sync and manifest checkpoint. Only then are
-   ranges published and readers notified. This is the documented durability and
-   latency tradeoff, **not a newly demonstrated reader bug**. Even a 64 KiB reader
-   can wait for a complete 4 MiB upstream response. No parallel range fetch or
-   partial-range publication was introduced in this investigation.
-3. Missing reader offsets outrank sequential acquisition at the next cycle only.
-   In-flight work is not interrupted by a head/tail seek. Actual container probing
-   can request the tail, but these fixture tests do not show which probes a real
-   demuxer performs or how long native decoder startup/presentation takes.
-4. A demonstrated scheduling defect was fixed: readers repeatedly leave a priority
-   while its range is in flight. Once that offset became durable, the old selection
-   scanned forward from the stale offset into a *later* gap, skipping earlier
-   background holes for another entire cycle. Selection now honors only an
-   actually missing priority byte; otherwise it returns to the earliest gap.
-   Reader hints now point to the first actually missing byte within the requested
-   64 KiB buffer, not blindly its starting offset. This matters when a buffer
-   begins in a durable seek range but crosses its end: rejecting the durable
-   starting byte must not suppress the missing suffix's interactive priority.
-   The deterministic overlapping-boundary regression uses durable ranges
-   `[0, CHUNK)` and `[16*CHUNK, 17*CHUNK)`, with a reader spanning 32 KiB on either
-   side of `17*CHUNK`; its suffix is selected before the early background hole.
-   After the window becomes durable, stale hints again fall back correctly.
-   A real stream-worker regression additionally checks the priority actually
-   published by `server.rs`, not just the scheduler/helper composition.
-   Scheduler regressions also cover missing, satisfied and out-of-bounds hints. This can affect a middle seek with later gaps; an EOF-tail seek
-   with no later gap already fell back correctly. No universal startup-speedup or
-   fair arbitration among simultaneous readers is claimed; priority remains a
-   single last-writer-wins offset, not an owned/cancelable demand queue.
-5. Release wakes readers independently of an upstream blocked header/body. The
-   synchronous HTTP call itself cannot be forcibly interrupted: cancellation is
-   checked after I/O returns, bounded by the existing 20 s whole-request deadline
-   (10 s connect deadline), except caller renewal closures must bound themselves.
-   The loopback missing-buffer wait is 45 s, polled every 200 ms; expiration and
-   disconnection both currently use the fixed `Canceled` category. Cancellation
-   does not promise zero bytes already queued to a socket. An error after loopback
-   response headers aborts the body, rather than changing that response status.
-
-### Opt-in observations
+## Opt-in diagnostics
 
 Exact `KINEMA_PLAYER_DIAGNOSTICS=1` enables the new observations on target
 `kinema_desktop::media_performance`. Disabled means no timer owners or startup
@@ -233,69 +182,3 @@ snapshot, no history. Timer ownership is inside `storage::acquire` or the blocki
 HTTP stream worker, and Drop signals/joins only there, never from UI/service Drop.
 Timer spawn failure disables that observation without failing playback. Existing
 five-second acquisition summaries remain separate and are not lifetime-capped.
-
-### Fixtures, optimization and remaining qualification
-
-Local TCP gates hold before headers or after headers plus the first 64 KiB. Tests
-prove no sparse/partial bytes become visible until durability, normal ranged
-recovery after opening the gate, and failed body reads on lease release or HTTP
-200/no-range failure. Both blocked-header and blocked-body cancellation preserve
-zero downloaded bytes. Existing fixtures cover malformed Content-Range/length,
-encoding, redirects, truncation, renewal exhaustion, missing-tail prioritization,
-restart and request counts. Assertions use gates/request shape, not throughput or
-host-sensitive latency thresholds. Observer tests cover exact opt-in parsing,
-12-event cap, numeric correlations, fixed failure categories, wait totals, first-
-event deduplication, privacy exclusions and interruptible owned timer teardown.
-
-Read-only root `Cargo.toml` review: dev workspace code uses default opt-level 0
-with debug=1; third-party packages use opt-level 2; `kinema-mpv` explicitly uses
-opt-level 2. This is intentional existing configuration. No manifest/lock/vendor
-change is needed to explain the durable-range wait. A release-vs-dev native A/B
-might distinguish CPU/build effects, but cannot infer network/header/body delays
-from configuration alone.
-
-No native/GUI/GPU probes, provider access, user configuration, credentials, user
-DB or user media were used. Focused commands (Rust 1.97.1, from repository root):
-
-```sh
-cargo test -p kinema-desktop --locked media:: -- --test-threads=4
-KINEMA_PLAYER_DIAGNOSTICS=1 cargo test -p kinema-desktop --locked media:: -- --test-threads=4
-cargo clippy -p kinema-desktop --all-targets --locked -- -D warnings
-rustfmt --edition 2024 --check crates/kinema-desktop/src/media/{diagnostics,mod,storage,server,remote_tests,tests}.rs
-git diff --check -- crates/kinema-desktop/src/media
-```
-
-Final focused validation (including overlapping-boundary QA correction): **41
-media tests passed with diagnostics disabled and 41 passed with diagnostics enabled**, strict all-targets locked desktop Clippy
-passed, owned-file rustfmt check passed, and owned-path diff check passed. Initial
-attempts were temporarily blocked by concurrent backend edits; no workaround or
-out-of-scope correction was made. Full workspace checks/native probes were not
-run by this owner.
-
-For the policy/documentation owner: reconcile the opt-in section of
-`docs/development.md` with these new first/end/pending observations; retain the
-completed-only aggregation limitations. No changes outside `src/media/` were
-made by this owner. Before native qualification, the lead should schedule the
-existing **offline PlayerWindow fixture** command from `docs/development.md`,
-first disabled then with `KINEMA_PLAYER_DIAGNOSTICS=1` and info tracing, optionally
-repeat release profile. Do not start ordinary Kinema: changing CWD is not account
-or credential isolation. The direct local-file native probe bypasses acquisition,
-so it cannot qualify these HTTP wait timings; a lead-approved synthetic local
-upstream-to-loopback fixture driver is still needed for native end-to-end head/
-tail probing comparisons. No such native acquisition command is claimed here.
-
-Recommended **lead-authorized only**, Linux/offline native command sequence (not
-run by this owner; requires native prerequisites and an isolated fixture session):
-
-```sh
-cargo build -p kinema-desktop --bin ui-probe --features ui-probe --locked
-mkdir -p target/playback-startup-fixture
-ffmpeg -n -f lavfi -i testsrc2=size=1280x720:rate=30 -t 10 -c:v mpeg4 -q:v 5 -an target/playback-startup-fixture/generated.mp4
-# Baseline: leave KINEMA_PLAYER_DIAGNOSTICS unset.
-target/debug/ui-probe --scene player-native --media target/playback-startup-fixture/generated.mp4 --smoke-seconds 8
-# Opt-in comparison; do not share unreviewed native/application output.
-KINEMA_PLAYER_DIAGNOSTICS=1 RUST_LOG=kinema_desktop=info target/debug/ui-probe --scene player-native --media target/playback-startup-fixture/generated.mp4 --smoke-seconds 8
-```
-
-This qualifies only the supplied offline player path, **not acquisition**. Native
-acquisition comparison remains gated on a separately approved fixture driver.

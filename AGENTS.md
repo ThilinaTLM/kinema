@@ -1,3 +1,10 @@
+- Read `docs/architecture/README.md` (principles, change risk) and
+  `docs/architecture/glossary.md` before design changes, then the page for the area
+  you touch. Take extra care with High-risk areas: the SQLite schema, migrations and
+  personal records; credentials and logging; GPU-surface interop and vendored patches.
+- New ideas and unbuilt work go in `docs/proposals/`. Once a proposal is implemented,
+  move its lasting rules into `docs/architecture/` and delete it. Update the
+  affected architecture pages in the same change when behavior or rules change.
 - Prefer clean designs over compatibility shims. Do not migrate old
   `~/.config/kinemarc`, `kinema.db`, or keyring entries.
 - Use Rust 1.97.1, edition 2024, resolver 3. Keep shared dependency versions in the
@@ -6,8 +13,8 @@
   presentation in `kinema-desktop`. Do not add unused framework layers or subsystems.
 - Use direct `gpui` (package `gpui-pre =0.3.9`) and `gpui_platform`, with in-house
   components under `kinema-desktop/src/ui/{theme,motion,primitives,blocks,views}`
-  and orchestration in `src/controllers`; see `docs/design/design-system.md` and
-  `docs/design/desktop-v3.md`.
+  and orchestration in `src/controllers`; see `docs/architecture/design-system.md` and
+  `docs/architecture/ui.md`.
   V3 is the sole/default UI; do not restore legacy UI, version switches, or
   `gpui-kit`.
 - No raw style literals (`px(..)`, colors, opacity, durations, GPUI shorthand sizing)
@@ -30,4 +37,4 @@
   `cargo fmt --all -- --check`,
   `cargo clippy --workspace --all-targets --locked -- -D warnings`, and
   `cargo test --workspace --locked`.
-  See `docs/development.md` for prerequisites and core-only checks.
+  See `docs/architecture/development.md` for prerequisites and core-only checks.
