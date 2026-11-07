@@ -1,5 +1,5 @@
 //! Application-owned playback intent and durable progress coordination.
-use super::{AppCoordinator, EpisodeRef, TitleRef};
+use super::{AppCoordinator, EpisodeRef, NoticeTopic, TitleRef};
 use crate::ui::views::player::{self, PlayerCheckpoint};
 use crate::{
     catalog::{
@@ -145,7 +145,7 @@ impl AppCoordinator {
             }]),
         };
         if let Err(error) = self.submit_progress(operation, PendingProgress::Open(pending)) {
-            self.notice = Some(error);
+            self.set_notice(NoticeTopic::Progress, error);
         }
     }
 
@@ -197,7 +197,10 @@ impl AppCoordinator {
         )
         .is_err()
         {
-            self.notice = Some("Embedded player could not be opened.".into());
+            self.set_notice(
+                NoticeTopic::Playback,
+                "Embedded player could not be opened.",
+            );
             self.queue_embedded_release(pending.session, cx);
         }
     }
@@ -247,7 +250,7 @@ impl AppCoordinator {
                     if let Some(run) = self.playback.runs.get_mut(&session) {
                         run.in_flight = false;
                     }
-                    self.notice = Some("Progress could not be initialized. Retry in the player or play without saving.".into());
+                    self.set_notice(NoticeTopic::Progress, "Progress could not be initialized. Retry in the player or play without saving.");
                     player::progress_notice(&session, generation, true, cx);
                 }
             },
@@ -307,8 +310,10 @@ impl AppCoordinator {
                         run.retries = run.retries.saturating_add(1);
                         run.retry_at = (run.retries <= 3)
                             .then(|| Instant::now() + Duration::from_secs(1 << (run.retries - 1)));
-                        self.notice =
-                            Some("Progress could not be saved. Playback can continue.".into());
+                        self.set_notice(
+                            NoticeTopic::Progress,
+                            "Progress could not be saved. Playback can continue.",
+                        );
                         player::progress_notice(&session, sample.generation, true, cx);
                         self.send_pending_ready(&session, cx);
                     }
@@ -340,7 +345,7 @@ impl AppCoordinator {
                 match result {
                     Ok(snapshot) => self.finish_progress_open(pending, snapshot, cx),
                     Err(error) => {
-                        self.notice = Some(error.clone());
+                        self.set_notice(NoticeTopic::Progress, error.clone());
                         self.session_error(&pending.session, &error);
                     }
                 }
@@ -393,7 +398,7 @@ impl AppCoordinator {
             if let Some(run) = self.playback.runs.get_mut(&session) {
                 run.in_flight = false;
             }
-            self.notice = Some(error);
+            self.set_notice(NoticeTopic::Progress, error);
             cx.defer(move |cx| player::progress_notice(&session, generation, true, cx));
         }
     }
@@ -417,7 +422,7 @@ impl AppCoordinator {
             }
         }
         if duplicate {
-            self.notice = Some("The newest player now owns saved progress for this title. Older playback continues without updating its resume point.".into());
+            self.set_notice(NoticeTopic::ProgressHandoff, "The newest player now owns saved progress for this title. Older playback continues without updating its resume point.");
         }
     }
 
@@ -493,7 +498,7 @@ impl AppCoordinator {
                 run.retry_at = (run.retries <= 3)
                     .then(|| Instant::now() + Duration::from_secs(1 << (run.retries - 1)));
             }
-            self.notice = Some(error);
+            self.set_notice(NoticeTopic::Progress, error);
             let session = session.to_owned();
             cx.defer(move |cx| player::progress_notice(&session, sample.generation, true, cx));
         }

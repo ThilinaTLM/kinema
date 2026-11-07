@@ -126,13 +126,24 @@ impl MainWindow {
     /// and the current route's conditions. See `ui::primitives::toast`.
     pub(super) fn toast_specs(&self, cx: &mut Context<Self>) -> Vec<ToastSpec> {
         let mut specs = Vec::new();
-        if let Some(message) = self.coordinator.read(cx).notice.clone() {
+        let (notice, topic) = {
+            let c = self.coordinator.read(cx);
+            (c.notice.clone(), c.notice_topic)
+        };
+        if let Some(message) = notice {
             let coordinator = self.coordinator.downgrade();
             let seen = message.clone();
+            let tone = if topic.is_info() {
+                AlertTone::Info
+            } else {
+                AlertTone::Warning
+            };
             specs.push(
-                ToastSpec::new("app-notice", AlertTone::Warning, message).on_close(move |cx| {
-                    let _ = coordinator.update(cx, |c, cx| c.dismiss_notice(&seen, cx));
-                }),
+                ToastSpec::new("app-notice", tone, topic.label())
+                    .body(message)
+                    .on_close(move |cx| {
+                        let _ = coordinator.update(cx, |c, cx| c.dismiss_notice(&seen, cx));
+                    }),
             );
         }
         specs.extend(self.personal_toast(cx));
@@ -156,11 +167,12 @@ impl MainWindow {
     /// Only confirmations expire; every failure (retryable or not) stays until
     /// Retry, the close button or a newer outcome replaces it.
     fn personal_toast(&self, cx: &mut Context<Self>) -> Option<ToastSpec> {
-        let (message, failed, retry, undo) = {
+        let (message, label, failed, retry, undo) = {
             let c = self.coordinator.read(cx);
             let failed = c.personal_notice_failed();
             (
                 c.personal_notice.clone()?,
+                c.personal_notice_label,
                 failed,
                 failed && c.can_retry_personal_write(),
                 !failed && c.can_undo_membership(),
@@ -182,7 +194,13 @@ impl MainWindow {
                 });
             }
         };
-        let mut spec = ToastSpec::new("personal-notice", tone, message).on_close(close);
+        let label = label.unwrap_or(match tone {
+            AlertTone::Error => "Couldn’t save change",
+            _ => "Library updated",
+        });
+        let mut spec = ToastSpec::new("personal-notice", tone, label)
+            .body(message)
+            .on_close(close);
         if retry || undo {
             let coordinator = self.coordinator.downgrade();
             spec = spec.action(if retry { "Retry" } else { "Undo" }, move |_, cx| {
@@ -233,7 +251,10 @@ impl MainWindow {
                             category = "file_chooser",
                             "The local file chooser could not be opened"
                         );
-                        c.notice = Some("The local file chooser could not be opened.".into());
+                        c.set_notice(
+                            crate::controllers::coordinator::NoticeTopic::Files,
+                            "The local file chooser could not be opened.",
+                        );
                         cx.notify();
                     });
                 }

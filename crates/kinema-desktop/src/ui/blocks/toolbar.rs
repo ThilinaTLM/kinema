@@ -12,6 +12,7 @@
 //!   buttons (back, transfers, settings, overflow).
 //! - [`ToolbarChip`]: the visual face of a popover trigger — icon, label,
 //!   optional count and chevron — that collapses to icon-only when narrow.
+//! - [`NotificationBell`]: the bell trigger face with an unread-count badge.
 //!
 //! Every control is [`size::TOOLBAR_CONTROL`] tall with [`radius::LG`] corners.
 use crate::ui::theme::layout::{
@@ -317,6 +318,81 @@ impl RenderOnce for ToolbarChip {
                     })
                     .size(space::S12)
                     .color(p.muted_foreground),
+                )
+            })
+    }
+}
+
+/// Header notifications trigger face: a bell with an unread-count badge.
+/// Not focusable by itself; the owning popover provides focus and clicks.
+#[derive(IntoElement)]
+pub struct NotificationBell {
+    unread: usize,
+    open: bool,
+}
+impl NotificationBell {
+    pub fn new(unread: usize, open: bool) -> Self {
+        Self { unread, open }
+    }
+    /// Accessible name and tooltip.
+    pub fn description(unread: usize) -> String {
+        match unread {
+            0 => "Notifications".to_owned(),
+            1 => "Notifications · 1 unread".to_owned(),
+            n => format!("Notifications · {n} unread"),
+        }
+    }
+    /// Badge text; large counts collapse so the badge stays compact.
+    pub fn badge_text(unread: usize) -> Option<String> {
+        match unread {
+            0 => None,
+            1..=9 => Some(unread.to_string()),
+            _ => Some("9+".to_owned()),
+        }
+    }
+}
+impl RenderOnce for NotificationBell {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let p = *palette(cx);
+        let (_, hover, _) = p.glass();
+        let description = Self::description(self.unread);
+        div()
+            .id("notifications-bell")
+            .relative()
+            .size(size::ICON_TARGET)
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(radius::MD)
+            .cursor_pointer()
+            .when(self.open, |el| el.bg(hover))
+            .when(!self.open, |el| el.hover(move |s| s.bg(hover)))
+            .tooltip(crate::ui::primitives::tooltip::tooltip(description))
+            .child(Icon::new(IconName::Bell).color(if self.unread > 0 {
+                p.foreground
+            } else {
+                p.muted_foreground
+            }))
+            .when_some(Self::badge_text(self.unread), |el, text| {
+                el.child(
+                    div()
+                        .absolute()
+                        .top(-space::S2)
+                        .right(-space::S2)
+                        .min_w(controls::COUNT_BADGE)
+                        .h(controls::COUNT_BADGE)
+                        .px(space::S2)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(radius::FULL)
+                        .bg(p.primary)
+                        .text(TextSize::Xs)
+                        .weight(Weight::Semibold)
+                        .tabular()
+                        .text_color(p.primary_foreground)
+                        .child(text),
                 )
             })
     }

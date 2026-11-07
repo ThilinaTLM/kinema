@@ -865,25 +865,32 @@ fn notices_are_toasts_and_closing_clears_only_that_notice(cx: &mut TestAppContex
     let (coordinator, main) = fixture_window(cx);
     let toasts = main.read_with(cx, |v, _| v.toasts.clone()).unwrap();
     coordinator.update(cx, |c, cx| {
-        c.notice = Some("Embedded playback failed.".into());
-        c.personal_notice = Some("Updated “Dune”.".into());
+        c.set_notice(
+            crate::controllers::coordinator::NoticeTopic::Playback,
+            "Embedded playback failed.",
+        );
+        c.personal_notice = Some("Dune".into());
+        c.personal_notice_label = Some("Added to Library");
         cx.notify();
     });
     draw(main, cx);
+    // Labels name what happened; the notice text is the description.
     let titles = toasts.read_with(cx, |h, _| h.visible_titles());
-    assert_eq!(titles, ["Embedded playback failed.", "Updated “Dune”."]);
+    assert_eq!(titles, ["Playback problem", "Added to Library"]);
     // Failures are sticky; the close button clears exactly that notice.
     cx.background_executor
         .advance_clock(Duration::from_secs(60));
     draw(main, cx);
     let titles = toasts.read_with(cx, |h, _| h.visible_titles());
-    assert_eq!(
-        titles,
-        ["Embedded playback failed."],
-        "the confirmation expired"
-    );
+    assert_eq!(titles, ["Playback problem"], "the confirmation expired");
     toasts.update(cx, |h, cx| h.dismiss_key("app-notice", cx));
     draw(main, cx);
     coordinator.read_with(cx, |c, _| assert!(c.notice.is_none()));
     assert!(toasts.read_with(cx, |h, _| h.visible_titles().is_empty()));
+    // Both stay in the notification log; the expired confirmation is unread,
+    // the closed failure was read on its toast.
+    toasts.read_with(cx, |h, _| {
+        assert_eq!(h.log().count(), 2);
+        assert_eq!(h.unread_count(), 1);
+    });
 }

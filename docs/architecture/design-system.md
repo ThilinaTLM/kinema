@@ -256,7 +256,7 @@ are not allowed. Write derived values as arithmetic of other tokens, for example
 | `layout::browse` | Search widths, scrim ramp, compact breakpoint |
 | `layout::settings`, `layout::transfers` | Window and popover sizes |
 | `layout::player` | Window, dock, top bar, timeline, volume, help and diagnostics metrics |
-| `layout::controls` | Primitive metrics that are not component sizes (choice tile, carousel slop, scrollbar, menu min width, indicator, toast width, accent and visible limit) |
+| `layout::controls` | Primitive metrics that are not component sizes (choice tile, carousel slop, scrollbar, menu min width, indicator, toast width, accent, visible and log limits, count badge, notification list height) |
 
 ### Motion values: `theme::motion`
 
@@ -352,7 +352,8 @@ preset to the test's `ALL` list.**
 | `Button` | `Primary`, `Secondary`, `Ghost`, `Outline`, `Destructive`; sizes `Sm` (28), `Md` (32), `Icon`; `.square(true)` gives the icon form; `.selected(bool)` gives the toggled state (`selection`); busy keeps its width and label and blocks repeats |
 | `Badge` | `Neutral`, `Primary`, `Success`, `Warning`, `Destructive`, `OnArt`; `.strong(true)` gives the info look |
 | `Alert` | `Info`, `Success`, `Warning`, `Error`, `Empty`; each tone is paired with a distinct icon; at most one action. Inline only, for content that belongs on the page (confirmations, workflow phases) |
-| `Toast` | `AlertTone` tones on a `popover` card with `lg` elevation, a tone accent bar and icon, at most one action and a close button. `ToastHost` (one per window) takes derived `ToastSpec`s; enters with `POPUP_IN`, leaves with `POPUP_OUT`. Product rules are in [UI › Toasts](ui.md#toasts) |
+| `Toast` | `AlertTone` tones on a `popover` card (radius `XL`, `lg` elevation, like the header panels): the tone icon on a `BADGE_WASH` circle, a semibold label, a muted description clamped to three lines, at most one action under the text, and a close button. The notification panel reuses the same tone mark. `ToastHost` (one per window) takes derived `ToastSpec`s, enters with `POPUP_IN`, leaves with `POPUP_OUT`, and keeps the session's activity log (`log`, `unread_count`, `open_log`). The header `NotificationBell` block shows the unread badge. Product rules are in [UI › Toasts](ui.md#toasts) |
+| `Popover` | `on_open` runs each time the panel opens (click, key or handle) |
 
 - Every component implements all of its states: rest, hover, pressed,
   focus-visible and disabled, plus busy where relevant.

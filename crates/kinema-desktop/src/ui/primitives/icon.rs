@@ -61,6 +61,7 @@ pub enum IconName {
     Sort,
     Keyboard,
     Timer,
+    Bell,
 }
 
 impl IconName {
@@ -119,6 +120,7 @@ impl IconName {
             IconName::Sort => "icons/arrow-down-wide-narrow.svg",
             IconName::Keyboard => "icons/keyboard.svg",
             IconName::Timer => "icons/timer.svg",
+            IconName::Bell => "icons/bell.svg",
         }
     }
 
@@ -175,6 +177,7 @@ impl IconName {
         IconName::Sort,
         IconName::Keyboard,
         IconName::Timer,
+        IconName::Bell,
     ];
 }
 

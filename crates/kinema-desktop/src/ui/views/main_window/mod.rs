@@ -10,7 +10,9 @@ use crate::controllers::coordinator::{AppCoordinator, BrowseTitle, CoordinatorEv
 use crate::ui::theme::layout::browse::{SCRIM_RAMP, SEARCH_MIN_WIDTH, SEARCH_WIDTH};
 use crate::ui::theme::{motion::timing, opacity};
 use crate::{
-    ui::blocks::toolbar::{Toolbar, ToolbarChip, ToolbarGroup, TransferStatus, icon_cell},
+    ui::blocks::toolbar::{
+        NotificationBell, Toolbar, ToolbarChip, ToolbarGroup, TransferStatus, icon_cell,
+    },
     ui::motion::{AnimateExt, transition::DISCLOSE},
     ui::primitives::alert::AlertTone,
     ui::primitives::button::Button,
@@ -374,18 +376,18 @@ impl Render for MainWindow {
             .child(scroll_scrim(scrolled, p.background))
             .child(toolbar)
             .child({
-                // One toast region per window, bottom-right, clear of the
-                // Streams inspector and play dock.
-                let (right, bottom) = match &self.route {
-                    Route::Browse => (size::PAGE_INSET, size::PAGE_INSET),
+                // One toast region per window: top-right, just below the header
+                // (never over it), and clear of the Streams inspector.
+                let right = match &self.route {
+                    Route::Browse => size::PAGE_INSET,
                     Route::Detail(detail) => detail
                         .read(cx)
-                        .toast_insets(window.viewport_size().width, cx),
+                        .toast_right_inset(window.viewport_size().width, cx),
                 };
                 div()
                     .absolute()
+                    .top(size::PAGE_TOP + s::S8)
                     .right(right)
-                    .bottom(bottom)
                     .child(self.toasts.clone())
             })
             .when_some(self.menu.clone(), |el, menu| {

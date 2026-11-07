@@ -9,9 +9,9 @@ finishing or failing while the main window is hidden.
 
 ## Current state
 
-In-app messages are toasts in the main window (see
-[UI › Toasts](../architecture/ui.md#toasts)). They are only seen while the
-window is visible. The only native notification is the one-time "Kinema is
+In-app messages are toasts in the main window, and the header bell keeps a
+session log of them (see [UI › Toasts](../architecture/ui.md#toasts)). Both are
+only seen while the window is visible, and the log is not persisted. The only native notification is the one-time "Kinema is
 still running" message when Main hides to the tray
 ([runtime](../architecture/runtime.md)), sent through GPUI's
 `show_system_notification`.

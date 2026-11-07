@@ -16,8 +16,16 @@
 //! * **Lifetime.** Specs are sticky unless given a timeout. Hovering the region
 //!   pauses every timer; leaving restarts them with their full duration.
 //! * **Limit.** At most `TOAST_MAX_VISIBLE` open toasts are shown, newest
-//!   nearest the corner. Older open ones wait for a free slot, and their timers
-//!   only start once they are visible.
+//!   nearest the corner (on top). Older open ones wait for a free slot, and their
+//!   timers only start once they are visible.
+//! * **Activity log.** Every new occurrence is also recorded in the host's log
+//!   (newest `TOAST_LOG_LIMIT`, this session only), so it can be read after its
+//!   toast is gone. An entry is unread until the user closes its toast, uses its
+//!   action or opens the log ([`ToastHost::open_log`]). Expiry is not reading.
+//!
+//! Look: a `popover` card (radius `XL`, `lg` elevation) like the header panels,
+//! with the tone icon on a soft status wash, a semibold label and a muted
+//! description.
 //!
 //! Accessibility: a card exposes `Role::Alert` for warnings and errors and
 //! `Role::Status` otherwise, named by its title and body. The tone is paired with
@@ -27,7 +35,7 @@ use std::{
     collections::{HashMap, HashSet},
     hash::{DefaultHasher, Hash, Hasher},
     rc::Rc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use gpui::{prelude::*, *};
@@ -40,12 +48,16 @@ use crate::{
     ui::primitives::alert::AlertTone,
     ui::primitives::button::Button,
     ui::primitives::{Icon, IconName},
-    ui::theme::layout::controls::{TOAST_ACCENT, TOAST_MAX_VISIBLE, TOAST_WIDTH},
+    ui::theme::layout::controls::{TOAST_LOG_LIMIT, TOAST_MAX_VISIBLE, TOAST_WIDTH},
     ui::theme::typography::{TextSize, TypeExt, Weight},
-    ui::theme::{elevation, palette, radius, size, space},
+    ui::theme::{elevation, opacity, palette, radius, size, space},
 };
 
 type Run = Rc<dyn Fn(&mut Window, &mut App)>;
+
+/// Descriptions longer than this end in an ellipsis (the full text is in the
+/// accessible name and the notification panel).
+const DESCRIPTION_LINES: usize = 3;
 type OnClose = Rc<dyn Fn(&mut App)>;
 
 /// One button on a toast.
@@ -152,14 +164,21 @@ struct Queue {
 }
 
 impl Queue {
+    #[cfg(test)]
     /// Record what is requested now and return the visible occurrences, oldest
     /// first. Occurrences no longer requested are forgotten.
     fn present(&mut self, requested: &[ToastId], max: usize) -> Vec<ToastId> {
+        self.present_fresh(requested, max).0
+    }
+    /// [`Self::present`] plus the occurrences seen for the first time.
+    fn present_fresh(&mut self, requested: &[ToastId], max: usize) -> (Vec<ToastId>, Vec<ToastId>) {
         self.seen.retain(|id| requested.contains(id));
         self.closed.retain(|id| requested.contains(id));
+        let mut fresh = Vec::new();
         for id in requested {
             if !self.seen.contains(id) {
                 self.seen.push(id.clone());
+                fresh.push(id.clone());
             }
         }
         let open: Vec<ToastId> = self
@@ -169,7 +188,7 @@ impl Queue {
             .cloned()
             .collect();
         let skip = open.len().saturating_sub(max);
-        open[skip..].to_vec()
+        (open[skip..].to_vec(), fresh)
     }
     /// Close a requested, open occurrence. False when there was nothing to close.
     fn close(&mut self, id: &ToastId) -> bool {
@@ -195,13 +214,31 @@ struct Shown {
     leaving: Option<Task<()>>,
 }
 
-/// Stateful toast region. Render it once per window, bottom-right.
+/// One recorded occurrence in the activity log.
+#[derive(Clone, Debug)]
+pub struct LogEntry {
+    pub id: u64,
+    pub tone: AlertTone,
+    pub title: SharedString,
+    pub body: Option<SharedString>,
+    pub at: Instant,
+    pub read: bool,
+    occurrence: ToastId,
+}
+
+/// Stateful toast region plus the session's activity log. Render it once per
+/// window, top-right below the header.
 pub struct ToastHost {
     queue: Queue,
     specs: Vec<ToastSpec>,
     shown: Vec<Shown>,
     timers: HashMap<ToastId, Task<()>>,
     hovered: bool,
+    /// Oldest first, at most `TOAST_LOG_LIMIT`.
+    log: Vec<LogEntry>,
+    next_log_id: u64,
+    /// Entries that were unread when the log was last opened.
+    fresh_at_open: HashSet<u64>,
 }
 
 impl Default for ToastHost {
@@ -218,6 +255,60 @@ impl ToastHost {
             shown: Vec::new(),
             timers: HashMap::new(),
             hovered: false,
+            log: Vec::new(),
+            next_log_id: 0,
+            fresh_at_open: HashSet::new(),
+        }
+    }
+
+    /// The activity log, newest first.
+    pub fn log(&self) -> impl Iterator<Item = &LogEntry> {
+        self.log.iter().rev()
+    }
+
+    pub fn unread_count(&self) -> usize {
+        self.log.iter().filter(|e| !e.read).count()
+    }
+
+    /// Whether `entry` was unread when the log was last opened (shown as new).
+    pub fn is_new(&self, entry: &LogEntry) -> bool {
+        self.fresh_at_open.contains(&entry.id)
+    }
+
+    /// The user opened the log: everything in it is now read.
+    pub fn open_log(&mut self, cx: &mut Context<Self>) {
+        self.fresh_at_open = self.log.iter().filter(|e| !e.read).map(|e| e.id).collect();
+        for entry in &mut self.log {
+            entry.read = true;
+        }
+        cx.notify();
+    }
+
+    pub fn clear_log(&mut self, cx: &mut Context<Self>) {
+        self.log.clear();
+        self.fresh_at_open.clear();
+        cx.notify();
+    }
+
+    fn record(&mut self, spec: &ToastSpec) {
+        self.next_log_id += 1;
+        self.log.push(LogEntry {
+            id: self.next_log_id,
+            tone: spec.tone,
+            title: spec.title.clone(),
+            body: spec.body.clone(),
+            at: Instant::now(),
+            read: false,
+            occurrence: spec.id(),
+        });
+        let excess = self.log.len().saturating_sub(TOAST_LOG_LIMIT);
+        self.log.drain(..excess);
+    }
+
+    /// The user acknowledged this occurrence on its toast.
+    fn mark_read(&mut self, id: &ToastId) {
+        if let Some(entry) = self.log.iter_mut().rev().find(|e| &e.occurrence == id) {
+            entry.read = true;
         }
     }
 
@@ -245,13 +336,19 @@ impl ToastHost {
             .find(|s| s.leaving.is_none() && s.id.key.as_ref() == key)
             .map(|s| s.id.clone());
         if let Some(id) = id {
+            self.mark_read(&id);
             self.close(&id, cx);
         }
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let ids: Vec<ToastId> = self.specs.iter().map(ToastSpec::id).collect();
-        let visible = self.queue.present(&ids, TOAST_MAX_VISIBLE);
+        let (visible, fresh) = self.queue.present_fresh(&ids, TOAST_MAX_VISIBLE);
+        for id in &fresh {
+            if let Some(spec) = self.specs.iter().find(|s| &s.id() == id).cloned() {
+                self.record(&spec);
+            }
+        }
         self.timers.retain(|id, _| visible.contains(id));
         let instant_exit = motion::duration(POPUP_OUT, cx).is_zero();
         let exit = motion::duration(POPUP_OUT, cx);
@@ -344,9 +441,11 @@ impl ToastHost {
 impl Render for ToastHost {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let host = cx.entity().downgrade();
+        // Newest nearest the corner: the region grows downwards from the top.
         let cards: Vec<AnyElement> = self
             .shown
             .iter()
+            .rev()
             .map(|shown| {
                 let leaving = shown.leaving.is_some();
                 let spec = &shown.spec;
@@ -358,18 +457,26 @@ impl Render for ToastHost {
                 toast.body = spec.body.clone();
                 if !leaving {
                     if let Some(action) = spec.action.clone() {
+                        let host = host.clone();
+                        let id = shown.id.clone();
                         toast.action = Some(
                             Button::new(
                                 ElementId::NamedInteger("toast-action".into(), shown.hash),
                                 action.label,
                             )
-                            .on_click(move |_, window, cx| (action.run)(window, cx)),
+                            .on_click(move |_, window, cx| {
+                                let _ = host.update(cx, |h, _| h.mark_read(&id));
+                                (action.run)(window, cx)
+                            }),
                         );
                     }
                     let host = host.clone();
                     let id = shown.id.clone();
                     toast.close = Some(Rc::new(move |_, cx| {
-                        let _ = host.update(cx, |h, cx| h.close(&id, cx));
+                        let _ = host.update(cx, |h, cx| {
+                            h.mark_read(&id);
+                            h.close(&id, cx)
+                        });
                     }));
                 }
                 let card = div().w_full().child(toast);
@@ -435,6 +542,25 @@ impl Toast {
     }
 }
 
+/// The tone icon on its own soft status wash, like a Badge. Shared with the
+/// notification panel so a logged entry looks like its toast.
+pub fn tone_mark_for(tone: AlertTone, cx: &App) -> Div {
+    let (icon, ink) = tone_style(tone, palette(cx));
+    tone_mark(icon, ink)
+}
+
+fn tone_mark(icon: IconName, ink: Hsla) -> Div {
+    div()
+        .flex_none()
+        .size(size::ICON_TARGET)
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(radius::FULL)
+        .bg(ink.opacity(opacity::BADGE_WASH))
+        .child(Icon::new(icon).color(ink))
+}
+
 /// Icon and ink for a tone; neutral tones use muted ink.
 fn tone_style(tone: AlertTone, p: &crate::ui::theme::Palette) -> (IconName, Hsla) {
     match tone {
@@ -466,35 +592,17 @@ impl RenderOnce for Toast {
                 _ => Role::Status,
             })
             .aria_label(name)
-            .relative()
             .w_full()
             .flex()
             .items_start()
             .gap(space::S12)
-            .pl(space::S16)
-            .pr(space::S8)
-            .py(space::S12)
-            .rounded(radius::LG)
+            .p(space::S12)
+            .rounded(radius::XL)
             .bg(p.popover)
             .border(size::HAIRLINE)
             .border_color(p.border)
             .shadow(elevation::lg(&p))
-            .child(
-                div()
-                    .absolute()
-                    .left(space::S6)
-                    .top(space::S12)
-                    .bottom(space::S12)
-                    .w(TOAST_ACCENT)
-                    .rounded(radius::FULL)
-                    .bg(ink),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .pt(space::S2)
-                    .child(Icon::new(icon).color(ink)),
-            )
+            .child(tone_mark(icon, ink))
             .child(
                 div()
                     .flex()
@@ -502,7 +610,7 @@ impl RenderOnce for Toast {
                     .flex_1()
                     .min_w_0()
                     .gap(space::S2)
-                    .pt(space::S2)
+                    .pt(space::S4)
                     .child(
                         div()
                             .text(TextSize::Base)
@@ -515,13 +623,14 @@ impl RenderOnce for Toast {
                             div()
                                 .text(TextSize::Sm)
                                 .text_color(p.muted_foreground)
+                                .clamp_lines(DESCRIPTION_LINES)
                                 .child(body),
                         )
+                    })
+                    .when_some(self.action, |el, action| {
+                        el.child(div().flex().pt(space::S6).child(action))
                     }),
             )
-            .when_some(self.action, |el, action| {
-                el.child(div().flex_none().child(action))
-            })
             .when_some(self.close, |el, close| {
                 el.child(
                     div().flex_none().child(
@@ -647,6 +756,43 @@ mod timer_tests {
         cx.executor().advance_clock(Duration::from_millis(20));
         cx.run_until_parked();
         assert_eq!(closed.get(), 1);
+    }
+
+    #[gpui::test]
+    fn log_keeps_occurrences_and_tracks_reading(cx: &mut TestAppContext) {
+        let (host, closed) = setup(cx);
+        // A timed toast that expires stays in the log, unread.
+        host.update(cx, |h, cx| h.sync(vec![spec(&closed, true)], cx));
+        cx.executor().advance_clock(TIMEOUT * 2);
+        cx.run_until_parked();
+        // Re-requesting the same closed occurrence is not a new entry.
+        host.update(cx, |h, cx| h.sync(vec![spec(&closed, true)], cx));
+        host.read_with(cx, |h, _| {
+            assert_eq!(h.log().count(), 1);
+            assert_eq!(h.unread_count(), 1, "expiry is not reading");
+        });
+        // A new sticky occurrence closed by the user is read.
+        let sticky = ToastSpec::new("other", AlertTone::Error, "Failed");
+        host.update(cx, |h, cx| h.sync(vec![sticky.clone()], cx));
+        host.update(cx, |h, cx| h.dismiss_key("other", cx));
+        host.read_with(cx, |h, _| {
+            let titles: Vec<_> = h.log().map(|e| e.title.to_string()).collect();
+            assert_eq!(titles, ["Failed", "Saved"], "newest first");
+            assert_eq!(h.unread_count(), 1);
+        });
+        // Opening the log reads everything and remembers what was new.
+        host.update(cx, |h, cx| h.open_log(cx));
+        host.read_with(cx, |h, _| {
+            assert_eq!(h.unread_count(), 0);
+            let new: Vec<_> = h
+                .log()
+                .filter(|e| h.is_new(e))
+                .map(|e| e.title.to_string())
+                .collect();
+            assert_eq!(new, ["Saved"]);
+        });
+        host.update(cx, |h, cx| h.clear_log(cx));
+        assert_eq!(host.read_with(cx, |h, _| h.log().count()), 0);
     }
 
     #[gpui::test]

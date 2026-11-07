@@ -227,6 +227,48 @@ struct DetailEnrichment {
     overlay: Option<TitleDetails>,
 }
 
+/// What the global notice is about. The UI turns it into a toast label and tone.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum NoticeTopic {
+    /// A background worker stopped or the application service is busy.
+    #[default]
+    Service,
+    /// A requested application action failed.
+    Action,
+    /// Settings were saved with a warning.
+    Settings,
+    /// Embedded playback could not open or failed.
+    Playback,
+    /// Resume progress could not be read, initialized or saved.
+    Progress,
+    /// A newer player took over saving progress (informational).
+    ProgressHandoff,
+    /// Screen locking could not be prevented during playback.
+    Power,
+    /// The file chooser could not be opened.
+    Files,
+}
+
+impl NoticeTopic {
+    /// Short toast label; the notice text is the description.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Service => "Kinema service unavailable",
+            Self::Action => "Couldn’t complete that",
+            Self::Settings => "Settings warning",
+            Self::Playback => "Playback problem",
+            Self::Progress => "Progress not saved",
+            Self::ProgressHandoff => "Resume point moved",
+            Self::Power => "Screen may lock",
+            Self::Files => "Couldn’t open file chooser",
+        }
+    }
+    /// Informational topics are not failures.
+    pub(crate) fn is_info(self) -> bool {
+        self == Self::ProgressHandoff
+    }
+}
+
 pub struct AppCoordinator {
     personal_state: PersonalStore,
     pub(crate) library: Resource<Vec<BrowseTitle>>,
@@ -235,6 +277,8 @@ pub struct AppCoordinator {
     pub(crate) local_details: Resource<LocalDetail>,
     pub(crate) season_snapshot: Resource<SeasonSnapshot>,
     pub(crate) personal_notice: Option<String>,
+    /// Short toast label for [`Self::personal_notice`] (its description).
+    pub(crate) personal_notice_label: Option<&'static str>,
     worker: Result<CatalogWorker, String>,
     app: Result<AppWorker, String>,
     tracker: Tracker,
@@ -258,6 +302,8 @@ pub struct AppCoordinator {
     pub query: String,
     discover_filters: DiscoverFilters,
     pub notice: Option<String>,
+    /// What [`Self::notice`] is about; its toast label and tone.
+    pub(crate) notice_topic: NoticeTopic,
     pub quit_requested: bool,
     generation: u64,
     offset: u32,
@@ -325,6 +371,7 @@ impl AppCoordinator {
             local_details: Resource::default(),
             season_snapshot: Resource::default(),
             personal_notice: None,
+            personal_notice_label: None,
             // ── sessions ──
             session_identity: Default::default(),
             playback: Default::default(),
@@ -350,6 +397,7 @@ impl AppCoordinator {
             query: String::new(),
             discover_filters: DiscoverFilters::default(),
             notice: None,
+            notice_topic: NoticeTopic::Service,
             quit_requested: false,
             generation: 0,
             offset: 0,
@@ -416,6 +464,7 @@ impl AppCoordinator {
             local_details: Resource::default(),
             season_snapshot: Resource::default(),
             personal_notice: None,
+            personal_notice_label: None,
             // ── sessions ──
             session_identity: Default::default(),
             playback: Default::default(),
@@ -441,6 +490,7 @@ impl AppCoordinator {
             query: String::new(),
             discover_filters: DiscoverFilters::default(),
             notice: None,
+            notice_topic: NoticeTopic::Service,
             quit_requested: false,
             generation: 0,
             offset: 0,
@@ -934,7 +984,7 @@ impl AppCoordinator {
             if self.notice.as_deref() != Some(message) {
                 tracing::warn!(message, "UI notice displayed");
             }
-            self.notice = Some(message.into());
+            self.set_notice(NoticeTopic::Service, message);
         }
         let events: Vec<_> = self
             .app
@@ -1179,7 +1229,7 @@ impl AppCoordinator {
             }
             AppOutcome::Failed { message } => {
                 tracing::warn!(message, "UI notice displayed");
-                self.notice = Some(message.clone());
+                self.set_notice(NoticeTopic::Action, message.clone());
                 if resolved
                     .as_ref()
                     .is_some_and(|r| r.pending == Some(Pending::Settings))
@@ -1205,7 +1255,7 @@ impl AppCoordinator {
         }
         if let AppOutcome::SettingsWarning { message, .. } = &event.outcome {
             tracing::warn!(message, "UI notice displayed");
-            self.notice = Some(message.clone());
+            self.set_notice(NoticeTopic::Settings, message.clone());
         }
         cx.emit(CoordinatorEvent::App(event));
     }
@@ -1251,14 +1301,14 @@ impl AppCoordinator {
             .cloned()
             .collect::<Vec<_>>()
         {
-            let notice = self.notice.clone();
+            let notice = (self.notice.clone(), self.notice_topic);
             let accepted = self
                 .command(AppAction::ReleaseSession(id.clone()), cx)
                 .is_some();
             // Retrying terminal cleanup must not replace a useful fatal-player
             // notice with a transient mailbox-busy warning.
-            if notice.is_some() {
-                self.notice = notice;
+            if notice.0.is_some() {
+                (self.notice, self.notice_topic) = notice;
             }
             if accepted {
                 self.pending_embedded_releases.remove(&id);
@@ -1278,6 +1328,12 @@ impl AppCoordinator {
         cx.notify();
     }
 
+    /// Show `message` as the global notice (user-safe text only).
+    pub(crate) fn set_notice(&mut self, topic: NoticeTopic, message: impl Into<String>) {
+        self.notice = Some(message.into());
+        self.notice_topic = topic;
+    }
+
     /// The user closed the global notice toast. A newer notice is kept.
     pub(crate) fn dismiss_notice(&mut self, message: &str, cx: &mut Context<Self>) {
         if self.notice.as_deref() == Some(message) {
@@ -1293,7 +1349,10 @@ impl AppCoordinator {
             return;
         }
         self.embedded_player_closed(session_id, cx);
-        self.notice = Some("Embedded playback failed. Try another player in Settings.".into());
+        self.set_notice(
+            NoticeTopic::Playback,
+            "Embedded playback failed. Try another player in Settings.",
+        );
         cx.notify();
     }
 
@@ -1366,7 +1425,7 @@ impl AppCoordinator {
             if self.notice.as_deref() != Some(message) {
                 tracing::warn!(message, "UI notice displayed");
             }
-            self.notice = Some(message.into());
+            self.set_notice(NoticeTopic::Service, message);
             if pending == Pending::Load {
                 let g = self.collection.generation();
                 apply_stage(

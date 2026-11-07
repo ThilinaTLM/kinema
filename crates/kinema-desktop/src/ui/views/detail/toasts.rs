@@ -158,34 +158,27 @@ impl Detail {
         specs
     }
 
-    /// Distance of the toast region from the window's right and bottom edges:
-    /// aligned with the page frame, and clear of the Streams inspector (wide)
-    /// or play dock (narrow) while a release is selected.
-    pub(crate) fn toast_insets(&self, viewport: Pixels, cx: &App) -> (Pixels, Pixels) {
+    /// Distance of the toast region from the window's right edge: aligned with
+    /// the page frame, and left of the Streams inspector while it is shown.
+    pub(crate) fn toast_right_inset(&self, viewport: Pixels, cx: &App) -> Pixels {
         let right = page_inset(viewport);
-        let bottom = size::PAGE_INSET;
-        if self.page != Page::Streams {
-            return (right, bottom);
-        }
-        let selected = self.selected.is_some_and(|i| {
-            self.coordinator
-                .read(cx)
-                .sources
-                .value()
-                .is_some_and(|s| i < s.candidates.len())
-        });
-        if !selected {
-            return (right, bottom);
-        }
         let frame = content_width(viewport);
-        if frame >= geometry::STREAMS_INSPECTOR_MIN_FRAME {
-            let inspector = (frame * theme::layout::detail::STREAMS_INSPECTOR_FRACTION).clamp(
-                theme::layout::detail::STREAMS_INSPECTOR_MIN,
-                theme::layout::detail::STREAMS_INSPECTOR_MAX,
-            );
-            (right + inspector + s::S8 + s::S24, bottom)
-        } else {
-            (right, theme::layout::detail::STREAMS_DOCK_CLEARANCE)
+        let inspector = self.page == Page::Streams
+            && frame >= geometry::STREAMS_INSPECTOR_MIN_FRAME
+            && self.selected.is_some_and(|i| {
+                self.coordinator
+                    .read(cx)
+                    .sources
+                    .value()
+                    .is_some_and(|s| i < s.candidates.len())
+            });
+        if !inspector {
+            return right;
         }
+        let width = (frame * theme::layout::detail::STREAMS_INSPECTOR_FRACTION).clamp(
+            theme::layout::detail::STREAMS_INSPECTOR_MIN,
+            theme::layout::detail::STREAMS_INSPECTOR_MAX,
+        );
+        right + width + s::S8 + s::S24
     }
 }

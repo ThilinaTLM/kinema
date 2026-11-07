@@ -19,8 +19,10 @@ struct PopoverState {
     presence: Entity<Presence>,
     focus: FocusHandle,
     trigger: FocusHandle,
+    on_open: Option<OnOpen>,
     _presence: Subscription,
 }
+type OnOpen = std::rc::Rc<dyn Fn(&mut Window, &mut App)>;
 impl PopoverState {
     fn is_open(&self, cx: &App) -> bool {
         self.presence.read(cx).is_open()
@@ -33,6 +35,9 @@ impl PopoverState {
         self.presence.update(cx, |presence, cx| presence.open(cx));
         self.focus.focus(window, cx);
         cx.notify();
+        if let Some(on_open) = self.on_open.clone() {
+            on_open(window, cx);
+        }
     }
 
     fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -87,6 +92,7 @@ pub struct Popover {
     align: PopoverAlign,
     label: Option<SharedString>,
     on_handle: Option<Box<dyn FnOnce(PopoverHandle)>>,
+    on_open: Option<OnOpen>,
 }
 impl Popover {
     pub fn new(id: impl Into<ElementId>) -> Self {
@@ -97,6 +103,7 @@ impl Popover {
             align: PopoverAlign::Start,
             label: None,
             on_handle: None,
+            on_open: None,
         }
     }
     pub fn trigger(mut self, trigger: impl IntoElement + 'static) -> Self {
@@ -129,6 +136,12 @@ impl Popover {
         self
     }
 
+    /// Runs each time the panel opens (by click, key or handle).
+    pub fn on_open(mut self, on_open: impl Fn(&mut Window, &mut App) + 'static) -> Self {
+        self.on_open = Some(std::rc::Rc::new(on_open));
+        self
+    }
+
     pub fn align(mut self, align: PopoverAlign) -> Self {
         self.align = align;
         self
@@ -140,7 +153,7 @@ impl Popover {
     }
 }
 impl RenderOnce for Popover {
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(mut self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let state = window.use_keyed_state(self.id.clone(), cx, |_, cx| {
             let presence = cx.new(|_| Presence::new(POPUP_IN, POPUP_OUT));
             PopoverState {
@@ -148,8 +161,11 @@ impl RenderOnce for Popover {
                 presence,
                 focus: cx.focus_handle(),
                 trigger: cx.focus_handle().tab_stop(true),
+                on_open: None,
             }
         });
+        let on_open = self.on_open.take();
+        state.update(cx, |state, _| state.on_open = on_open);
         if let Some(callback) = self.on_handle {
             callback(PopoverHandle(state.clone()));
         }

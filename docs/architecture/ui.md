@@ -54,8 +54,9 @@ in.
 | Center | Search, 180–440 px | — |
 | Trailing | **Filters** chip with an active-count badge, then the global capsule | Global capsule |
 
-The global capsule holds the transfers status, Settings and the overflow menu
-(Open local file, Refresh, About, Quit). **Filters** is the only home for
+The global capsule holds Open local file, Refresh, the transfers status, the
+[notifications](#toasts) bell, Settings and the overflow menu (Open local file,
+Refresh, About, Quit). **Filters** is the only home for
 advanced options, so the header never grows. Facets are never faked: if the
 primary provider can't filter server-side, Kinema offers only "sort loaded
 results" and says why. Below 1100 px, chips become icon-only and keep their
@@ -142,10 +143,15 @@ Show an unknown duration as `—`.
 ### Toasts
 
 Outcomes and page conditions never sit inline in the layout. They are toasts
-in one region per window, at the **bottom-right**, aligned with the page frame.
-On Streams the region moves left of the inspector or above the play dock
-while a release is selected.
+in one region per window, at the **top-right just below the header** (never
+over it), aligned with the page frame, newest on top. On Streams the region
+moves left of the inspector while it is shown.
 
+- **Label and description.** Every toast has a short label naming what
+  happened ("Added to Library", "Playback problem", "Couldn’t save change")
+  and a description with the specifics (the title, the reason). Global notices
+  carry a topic that supplies the label and tone; the personal-state notice
+  carries its own label.
 - **Derived, not pushed.** The main window builds the toasts that should exist
   now from state, every render: the global notice, the personal-state notice,
   the Transfers cleanup result and the current route's conditions. A condition
@@ -164,7 +170,16 @@ while a release is selected.
 - **Identity:** one toast per slot key; changed text is a new occurrence. A
   closed condition stays closed while it persists and shows again when it
   comes back.
-- At most three are visible, newest nearest the corner.
+- At most three are visible.
+- **Notification panel.** Every toast occurrence is also logged, so it can be
+  read after the toast is gone. The header **bell** opens the log (newest
+  first, with tone icon, text and age) and shows an unread-count badge (`9+`
+  above nine). An entry is read once the user closes its toast, uses its
+  action or opens the panel; a toast that expires stays unread. Opening the
+  panel marks all read, and entries that were unread keep a "New" marker while
+  it is open. Entries carry no actions (Retry or Undo belong to the live
+  toast). The log keeps the newest 50 entries for this session only; it is not
+  persisted. **Clear all** empties it.
 - A failure toast **never replaces** the honest state: unknown personal state
   still disables its controls, and a collection that failed with nothing saved
   still shows its inline failure block.
