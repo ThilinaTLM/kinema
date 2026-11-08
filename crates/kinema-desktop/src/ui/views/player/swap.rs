@@ -16,8 +16,8 @@
 //! After step 5 the window watches the new media. When it is ready, or failed,
 //! it reports once ([`PlayerWindow::observe_swap`]) and the coordinator decides
 //! which lease to release.
-use super::track_carryover::{TrackCarry, TrackPlan};
 use super::*;
+use kinema_core::tracks::{CarryTrack, TrackCarry, TrackPlan, TrackRole};
 
 /// Why a swap step was not taken. Nothing has changed when a step is refused.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -187,7 +187,7 @@ impl PlayerWindow {
         if let Some(player) = self.player.as_ref().and_then(|owner| owner.player.as_ref()) {
             self.state = player.state();
         }
-        let carry = TrackCarry::capture(&self.state.tracks);
+        let carry = TrackCarry::capture(&carry_tracks(&self.state.tracks));
         let generation = self.state.media_generation;
         // A tracked episode loads paused and plays when progress is ready; an
         // untracked one just plays.
@@ -311,7 +311,7 @@ impl PlayerWindow {
         {
             return;
         }
-        let plan = carry.tracks.plan(&self.state.tracks);
+        let plan = carry.tracks.plan(&carry_tracks(&self.state.tracks));
         self.carry = None;
         self.apply_track_plan(plan, cx);
     }
@@ -339,4 +339,27 @@ impl PlayerWindow {
             cx,
         );
     }
+}
+
+/// The audio and subtitle tracks of the player state, for the carry-over policy
+/// in `kinema_core::tracks`. Video tracks are never carried.
+fn carry_tracks(tracks: &[kinema_mpv::Track]) -> Vec<CarryTrack<'_>> {
+    tracks
+        .iter()
+        .filter_map(|track| {
+            Some(CarryTrack {
+                id: track.id,
+                role: match track.kind {
+                    TrackKind::Audio => TrackRole::Audio,
+                    TrackKind::Subtitle => TrackRole::Subtitle,
+                    _ => return None,
+                },
+                lang: track.lang.as_deref(),
+                selected: track.selected,
+                external: track.external,
+                forced: track.forced,
+                hearing_impaired: track.hearing_impaired,
+            })
+        })
+        .collect()
 }

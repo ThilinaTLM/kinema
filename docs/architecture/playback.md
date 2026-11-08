@@ -142,7 +142,7 @@ while that happens. Closing the window mid-swap releases both leases, once each.
 
 After the new file's tracks are observed, the previous audio and subtitle choice
 is restored by **language and flags** (forced, SDH), never by track ID
-(`ui/views/player/track_carryover.rs`; it may move to `kinema-core::tracks`). With
+(`kinema_core::tracks::TrackCarry`; the window maps its observed tracks and applies the plan). With
 no match mpv's default stays. Sidecar subtitles are not carried.
 
 **The kept preparation.** A debrid preparation started for an episode in the
