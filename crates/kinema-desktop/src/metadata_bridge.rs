@@ -11,7 +11,7 @@ use crate::{
     app_state::Stage,
     catalog_worker::{
         CatalogWorker, MetadataAction, MetadataEvent, MetadataRequest, MetadataSnapshot, Mode,
-        Submit,
+        SourceLane, Submit,
     },
 };
 
@@ -67,7 +67,11 @@ fn action_of(ask: Ask) -> MetadataAction {
     match ask {
         Ask::Browse { kind, offset } => MetadataAction::Browse { kind, offset },
         Ask::Details { kind, id } => MetadataAction::Details { kind, id },
-        Ask::Sources { indexer, target } => MetadataAction::Sources { indexer, target },
+        Ask::Sources { indexer, target } => MetadataAction::Sources {
+            indexer,
+            target,
+            lane: SourceLane::Detail,
+        },
     }
 }
 

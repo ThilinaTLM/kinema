@@ -1237,7 +1237,9 @@ impl CatalogService {
                         result
                     })
                 }
-                A::Sources { indexer, target } => {
+                A::Sources {
+                    indexer, target, ..
+                } => {
                     target_key(target)?;
                     normalized_source_target(&self.connection, target)?
                         .ok_or(CatalogError::MissingIdentityMapping)?;
@@ -1331,7 +1333,9 @@ impl CatalogService {
                     }
                     (Ok(RemoteData::Sources(results)), Work::Metadata(request)) => {
                         match &request.action {
-                            A::Sources { indexer, target } => service
+                            A::Sources {
+                                indexer, target, ..
+                            } => service
                                 .save_sources(*indexer, target, results)
                                 .map(|s| R::metadata(S::Sources(s))),
                             _ => Err(CatalogError::InvalidResponse),

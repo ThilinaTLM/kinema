@@ -11,6 +11,7 @@
 mod continuity;
 mod personal;
 mod playback;
+mod resolver;
 #[cfg(all(test, feature = "ui-probe-test"))]
 pub(crate) use continuity::{SessionProbe, SwapStep};
 // Phase 2 (neighbour resolution) is the consumer of these.
