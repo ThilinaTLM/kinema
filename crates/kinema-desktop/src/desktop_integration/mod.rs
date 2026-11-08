@@ -37,6 +37,10 @@ pub enum Transport {
     SetVolume(f64),
     ChangeVolume(f64),
     ToggleMute,
+    /// The next or previous episode: the same request as the dock buttons,
+    /// honored only while the dock offers it.
+    Next,
+    Previous,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -119,6 +123,9 @@ pub struct PlayerSnapshot {
     pub duration: Option<Duration>,
     pub volume: f64,
     pub seekable: bool,
+    /// The dock offers Next / Previous right now. Advertised to the OS only then.
+    pub can_next: bool,
+    pub can_previous: bool,
 }
 
 /// Desktop routing only, not playback ownership. Progress publication must not

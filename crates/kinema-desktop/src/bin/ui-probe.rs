@@ -35,6 +35,10 @@ fn parse_player_probe(args: &[String]) -> Result<Option<PlayerProbeArgs>, &'stat
         "player-search-no-key" => Some(player::SubtitleScene::SearchNoKey),
         "player-search-key" => Some(player::SubtitleScene::SearchKeyRejected),
         "player-search-text" => Some(player::SubtitleScene::SearchText),
+        "player-dock" => Some(player::SubtitleScene::DockNeighbours),
+        "player-dock-busy" => Some(player::SubtitleScene::DockBusy),
+        "player-dock-failure" => Some(player::SubtitleScene::DockFailure),
+        "player-up-next" => Some(player::SubtitleScene::UpNext),
         _ => None,
     };
     if !native && scene != "player" && subtitles.is_none() {

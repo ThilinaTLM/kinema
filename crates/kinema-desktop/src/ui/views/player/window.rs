@@ -39,13 +39,22 @@ impl PlayerWindow {
                 self.activity(cx);
             }
             Sid::Escape => {
-                if !self.cancel_drag(cx) && window.is_fullscreen() {
+                // Escape dismisses the Up next card before it leaves fullscreen.
+                if self.cancel_up_next() {
+                    cx.notify();
+                } else if !self.cancel_drag(cx) && window.is_fullscreen() {
                     window.toggle_fullscreen();
                 }
                 self.activity(cx);
             }
             Sid::NextControl => self.focus_control(false, window, cx),
             Sid::PreviousControl => self.focus_control(true, window, cx),
+            Sid::NextEpisode => {
+                self.request_neighbour(NeighbourDirection::Next, cx);
+            }
+            Sid::PreviousEpisode => {
+                self.request_neighbour(NeighbourDirection::Previous, cx);
+            }
             Sid::ShowHelp => self.open_help(window, cx),
             Sid::SpeedUp | Sid::SpeedDown | Sid::ResetSpeed => {
                 if !self.backend_available() {
@@ -188,7 +197,14 @@ impl PlayerWindow {
         // symbols need not match keydown (X11 emits "?" down and "/" up).
         let shortcut_keystrokes = cx.intercept_keystrokes(move |event, window, cx| {
             if window.window_handle() == player_window {
-                let _ = weak.update(cx, |view, _| view.shortcut_held = event.is_held);
+                let _ = weak.update(cx, |view, cx| {
+                    view.shortcut_held = event.is_held;
+                    // Any key ends the Up next countdown; Escape is handled as
+                    // its own shortcut so it does not also leave fullscreen.
+                    if event.keystroke.key != "escape" {
+                        view.user_input(cx);
+                    }
+                });
             }
         });
         let view = Self {
@@ -197,6 +213,16 @@ impl PlayerWindow {
             progress_owner: None,
             subtitle_target: None,
             lease: None,
+            neighbour_requests: None,
+            neighbours: Neighbours::default(),
+            neighbour_notice: None,
+            up_next: None,
+            up_next_dismissed: false,
+            swap: None,
+            carry: None,
+            rollback_after: None,
+            #[cfg(all(test, feature = "ui-probe-test"))]
+            fixture_backend: None,
             #[cfg(any(feature = "gpu-surface", feature = "ui-probe"))]
             frames_presented: 0,
             cadence: diagnostics
@@ -390,6 +416,20 @@ impl PlayerWindow {
         {
             self.deliver_checkpoint(sample, cx);
         }
+    }
+    /// Like [`Self::flush_progress`], but hands the sample to the caller so a
+    /// swap can submit it and wait for the save to be acknowledged.
+    pub(super) fn final_checkpoint(&mut self) -> Option<PlayerCheckpoint> {
+        if let Some(player) = self.player.as_ref().and_then(|owner| owner.player.as_ref()) {
+            self.state = player.state();
+        }
+        let generation = self.lease.as_ref()?.1;
+        let mut sample = self
+            .progress
+            .as_mut()?
+            .sample(&self.state, Instant::now(), true)?;
+        sample.generation = generation;
+        Some(sample)
     }
     pub(super) fn sample_progress(&mut self, cx: &mut Context<Self>) {
         let Some(mut p) = self.progress.take() else {
@@ -591,13 +631,13 @@ impl PlayerWindow {
         #[cfg(not(feature = "gpu-surface"))]
         let frame_received = false;
         #[cfg(feature = "gpu-surface")]
-        if terminal_failure(self.error.is_some(), &self.state) {
+        if self.failed() {
             frame_received |= self.gpu_frame.take().is_some();
         }
-        if terminal_failure(self.error.is_some(), &self.state) {
+        if self.failed() {
             self.flush_progress(cx);
         }
-        if terminal_failure(self.error.is_some(), &self.state)
+        if self.failed()
             && let Some((session, generation)) = self.lease.take()
         {
             // Fatal startup/runtime errors release the download/serve lease once,
@@ -610,7 +650,7 @@ impl PlayerWindow {
             self.state = player.state();
             #[cfg(feature = "gpu-surface")]
             if self.mode == PlayerChoice::Embedded
-                && !terminal_failure(self.error.is_some(), &self.state)
+                && !self.failed()
                 && let Some(frame) = player.take_gpu_frame()
             {
                 match video_surface(frame) {
@@ -629,6 +669,9 @@ impl PlayerWindow {
             }
             state_changed |= self.state != previous;
         }
+        // A failed incoming episode must be seen before the failure handling
+        // below, so the coordinator can roll back instead of the window closing.
+        self.observe_swap(cx);
         let hold = false;
         #[cfg(feature = "ui-probe")]
         let hold = hold || self.fixture_subtitles;
@@ -643,14 +686,11 @@ impl PlayerWindow {
         // A fresh state snapshot or surface-validation error can become fatal
         // within this sample. Probes have no lease but must also release frames.
         #[cfg(feature = "gpu-surface")]
-        if terminal_failure(self.error.is_some(), &self.state) {
+        if self.failed() {
             frame_received |= self.gpu_frame.take().is_some();
         }
         if self.mode == PlayerChoice::Embedded
-            && failure_transition(
-                terminal_failure(self.error.is_some(), &self.state),
-                &mut self.failure_reported,
-            )
+            && failure_transition(self.failed(), &mut self.failure_reported)
         {
             let reason = failure_reason(&self.state, self.failure_reason);
             tracing::warn!(
@@ -661,6 +701,10 @@ impl PlayerWindow {
             );
         }
         self.sample_progress(cx);
+        self.observe_swap(cx);
+        self.observe_carry(cx);
+        self.observe_up_next(cx);
+        state_changed |= self.observe_neighbour_notice(Instant::now());
         self.sync_subtitle_position(window, cx);
         let now = Instant::now();
         // Bounded in-memory read (~1 Hz, by reference, no session clones). The
@@ -841,6 +885,11 @@ impl PlayerWindow {
                 self.presentation_command(|player| player.set_volume(volume * 100.0), cx);
             }
             Transport::ToggleMute => self.presentation_command(Player::toggle_mute, cx),
+            // The same command as the dock button: only offered while it is enabled.
+            Transport::Next => return self.request_neighbour(NeighbourDirection::Next, cx),
+            Transport::Previous => {
+                return self.request_neighbour(NeighbourDirection::Previous, cx);
+            }
         }
         cx.notify();
         true
@@ -960,6 +1009,9 @@ impl PlayerWindow {
     pub(super) fn availability(&self) -> Availability {
         let has = |kind| self.state.tracks.iter().any(|track| track.kind == kind);
         Availability {
+            previous_episode: self.neighbours.previous,
+            next_episode: self.neighbours.next,
+            up_next: self.up_next.is_some(),
             backend: self.backend_available(),
             seekable: self.can_seek(),
             chapters: !self.state.chapters.is_empty(),
@@ -1036,7 +1088,14 @@ impl PlayerWindow {
         self.activity(cx);
     }
     pub(super) fn backend_available(&self) -> bool {
-        self.player.is_some() && !terminal_failure(self.error.is_some(), &self.state)
+        self.has_backend() && !self.failed()
+    }
+    fn has_backend(&self) -> bool {
+        #[cfg(all(test, feature = "ui-probe-test"))]
+        if self.fixture_backend.is_some() {
+            return true;
+        }
+        self.player.is_some()
     }
     pub(super) fn can_seek(&self) -> bool {
         self.backend_available() && desktop_can_seek(&self.state)
@@ -1048,12 +1107,15 @@ impl PlayerWindow {
             self.error.is_some()
                 || self.control_notice
                 || self.subtitle_notice.is_some()
+                || self.neighbour_notice.is_some()
                 || self.state.error.is_some()
                 || self.progress.as_ref().is_some_and(|p| p.notice),
             self.dock_hover
                 || self.scrub.is_some()
                 || self.volume_dragging
                 || self.menu_open()
+                // The countdown card never loses its dock to the idle timer.
+                || self.up_next.is_some()
                 || !self.surface_focus.is_focused(window),
             self.last_activity.elapsed(),
         )
@@ -1096,7 +1158,7 @@ impl Render for PlayerWindow {
         let p = Palette::cinema();
         let visible = self.chrome_visible(window);
         self.chrome_was_visible = visible;
-        let failed = terminal_failure(self.error.is_some(), &self.state);
+        let failed = self.failed();
         let entity = cx.weak_entity();
         let has_video = false;
         #[cfg(feature = "ui-probe")]
@@ -1127,7 +1189,12 @@ impl Render for PlayerWindow {
             .on_action(cx.listener(|view, _: &NextFrame, window, cx| view.shortcut(Sid::NextFrame, window, cx)))
             .on_action(cx.listener(|view, _: &PreviousChapter, window, cx| view.shortcut(Sid::PreviousChapter, window, cx)))
             .on_action(cx.listener(|view, _: &NextChapter, window, cx| view.shortcut(Sid::NextChapter, window, cx)))
+            .on_action(cx.listener(|view, _: &NextEpisode, window, cx| view.shortcut(Sid::NextEpisode, window, cx)))
+            .on_action(cx.listener(|view, _: &PreviousEpisode, window, cx| view.shortcut(Sid::PreviousEpisode, window, cx)))
             .on_action(cx.listener(|view, _: &ToggleFullscreen, window, cx| view.shortcut(Sid::ToggleFullscreen, window, cx)))
+            .on_scroll_wheel(cx.listener(|view, _: &ScrollWheelEvent, _, cx| view.user_input(cx)))
+            .on_mouse_down(MouseButton::Left, cx.listener(|view, _: &MouseDownEvent, _, cx| view.user_input(cx)))
+            .on_mouse_down(MouseButton::Right, cx.listener(|view, _: &MouseDownEvent, _, cx| view.user_input(cx)))
             .on_action(cx.listener(|view, _: &Escape, window, cx| view.shortcut(Sid::Escape, window, cx)))
             .on_action(cx.listener(|view, _: &ShowHelp, window, cx| view.shortcut(Sid::ShowHelp, window, cx)))
             .on_action(cx.listener(|view, _: &NextControl, window, cx| view.shortcut(Sid::NextControl, window, cx)))
@@ -1150,12 +1217,14 @@ impl Render for PlayerWindow {
             .child(div().id("player-surface").key_context("KinemaPlayerSurface").track_focus(&self.surface_focus).absolute().size_full()
                 .on_mouse_down(MouseButton::Left, cx.listener(|view, event: &MouseDownEvent, window, cx| {
                     view.surface_focus.focus(window, cx);
+                    view.user_input(cx);
                     if event.click_count == 2 { window.toggle_fullscreen(); }
                     view.activity(cx);
                     cx.stop_propagation();
                 }))
                 .on_mouse_down(MouseButton::Right, cx.listener(|view, _, window, cx| {
                     view.surface_focus.focus(window, cx);
+                    view.user_input(cx);
                     view.toggle_playback(cx);
                     cx.stop_propagation();
                 }))
@@ -1202,6 +1271,7 @@ impl Render for PlayerWindow {
                     .child(Button::new("progress-retry-saving", "Retry saving").on_click(cx.listener(|view, _, _, cx| view.retry_progress_ready(cx))))
                     .child(Button::new("progress-untracked", "Play without saving").on_click(cx.listener(|view, _, _, cx| view.play_without_saving(cx)))))
             })
+            .children(self.up_next_card(cx))
             .when(self.help_focus.is_some(), |el| el.child(self.shortcut_help(window, cx)))
             .children(self.drop_hint())
             .children(self.search_sheet(window, cx))

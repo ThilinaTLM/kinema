@@ -68,11 +68,44 @@ impl PlayerWindow {
         let dock_entity = cx.entity();
         // (compact item, full wording for the tooltip)
         let subtitle_full = self.subtitle_notice.map(|(notice, _)| notice.full());
+        let neighbour_text = self.neighbour_notice_text();
+        // Hidden outside episodes, untracked and external playback; otherwise
+        // disabled, enabled or busy. Built here so the row below borrows nothing.
+        let neighbour_button = |direction: NeighbourDirection,
+                                index: usize,
+                                id: &'static str,
+                                icon: IconName,
+                                shortcut: Sid| {
+            let state = self.neighbour_state(direction);
+            neighbour_visible(state).then(|| {
+                self.control(index, id, icon, shortcuts::tooltip(shortcut))
+                    .busy(state == NeighbourState::Busy)
+                    .on_click(cx.listener(move |view, _, _, cx| {
+                        view.request_neighbour(direction, cx);
+                    }))
+            })
+        };
+        let previous_episode = neighbour_button(
+            NeighbourDirection::Previous,
+            PREVIOUS_EPISODE,
+            "player-previous-episode",
+            IconName::SkipBack,
+            Sid::PreviousEpisode,
+        );
+        let next_episode = neighbour_button(
+            NeighbourDirection::Next,
+            NEXT_EPISODE,
+            "player-next-episode",
+            IconName::SkipForward,
+            Sid::NextEpisode,
+        );
         let notice = if self.progress.as_ref().is_some_and(|p| p.notice) {
             Some((
                 StatusItem::warning("Not saved"),
                 "Progress could not be saved",
             ))
+        } else if let Some(text) = neighbour_text.as_deref() {
+            Some((StatusItem::warning(text), text))
         } else if let (Some((notice, _)), Some(full)) =
             (self.subtitle_notice, subtitle_full.as_deref())
         {
@@ -376,6 +409,7 @@ impl PlayerWindow {
                                             cx.listener(|view, _, _, cx| view.toggle_playback(cx)),
                                         ),
                                     )
+                                    .children(previous_episode)
                                     .child(
                                         self.control(
                                             BACK,
@@ -396,6 +430,7 @@ impl PlayerWindow {
                                         )
                                         .on_click(cx.listener(|view, _, _, cx| view.seek(10., cx))),
                                     )
+                                    .children(next_episode)
                                     .child(status)
                                     .child(utilities),
                             )

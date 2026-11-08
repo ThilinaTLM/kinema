@@ -68,6 +68,17 @@ pub enum AppAction {
     PlayFile {
         preparation: u64,
         file_id: String,
+        /// Keep the preparation after an embedded start, so a later episode of the
+        /// same pack can be unlocked into the same window ([`Self::PlayKeptFile`]).
+        keep: bool,
+    },
+    /// Unlocks another file of a **kept** preparation and starts it as an
+    /// embedded lease, for a source swap in an open window. The caller chose the
+    /// file by policy; this does not re-run the selection. Never launches an
+    /// external player.
+    PlayKeptFile {
+        preparation: u64,
+        file_id: String,
     },
     PlayLocal {
         path: PathBuf,
@@ -120,6 +131,7 @@ impl AppAction {
             Self::EditOpenSubtitles(_) => "edit_opensubtitles",
             Self::Prepare { .. } => "prepare",
             Self::PlayFile { .. } => "play_file",
+            Self::PlayKeptFile { .. } => "play_kept_file",
             Self::PlayLocal { .. } => "play_local",
             Self::ReleaseSession(_) => "release_session",
             Self::CleanupUnused => "cleanup_unused",
@@ -289,7 +301,8 @@ struct Mailbox {
     active: Option<Arc<AtomicBool>>,
     active_generation: Option<u64>,
     discarded_preparations: Vec<u64>,
-    prepared_generation: Option<u64>,
+    /// Preparations the worker still holds: the current one and kept ones.
+    retained_preparations: Vec<u64>,
     // Identity belongs to `account`, not to a potentially unfinished settings
     // save. Publish identity + fresh flag together under this mailbox lock.
     scope_provider: Option<DebridKind>,
@@ -343,7 +356,7 @@ fn new_shared() -> Arc<Shared> {
             active: None,
             active_generation: None,
             discarded_preparations: Vec::new(),
-            prepared_generation: None,
+            retained_preparations: Vec::new(),
             scope_provider: None,
             account_epoch: 0,
             credential_revisions: [0; 2],
@@ -500,7 +513,7 @@ impl AppWorker {
         // At most the bounded queue, one active command, and one retained preparation
         // may own cancellation controls. Unknown generations never allocate controls.
         if mail.active_generation != Some(generation)
-            && mail.prepared_generation != Some(generation)
+            && !mail.retained_preparations.contains(&generation)
             && !mail
                 .requests
                 .iter()
@@ -559,7 +572,9 @@ fn family(action: &AppAction) -> Option<u8> {
     match action {
         AppAction::LoadSettings => Some(0),
         AppAction::Prepare { .. } => Some(1),
-        AppAction::PlayFile { .. } | AppAction::PlayLocal { .. } => Some(2),
+        AppAction::PlayFile { .. }
+        | AppAction::PlayKeptFile { .. }
+        | AppAction::PlayLocal { .. } => Some(2),
         AppAction::TestCredential(DebridKind::RealDebrid) => Some(3),
         AppAction::TestCredential(DebridKind::AllDebrid) => Some(4),
         AppAction::TestTmdbCredential => Some(5),
@@ -573,6 +588,7 @@ fn pipeline(action: &AppAction) -> bool {
         action,
         AppAction::Prepare { .. }
             | AppAction::PlayFile { .. }
+            | AppAction::PlayKeptFile { .. }
             | AppAction::PlayLocal { .. }
             | AppAction::TestCredential(_)
     )
@@ -712,6 +728,10 @@ impl Default for PlaybackIo {
     }
 }
 
+/// The most preparations kept for open windows at once.
+const MAX_KEPT: usize = 8;
+
+#[derive(Clone)]
 struct Preparation {
     id: u64,
     selected_file_id: String,
@@ -726,6 +746,9 @@ struct Application {
     settings: Option<Settings>,
     media: Option<MediaService>,
     prepared: Option<Preparation>,
+    /// Preparations that belong to open player windows, so another file of the
+    /// pack can be unlocked later. Cancelled with the window or the account.
+    kept: Vec<Preparation>,
     sessions: Vec<SessionRecord>,
     children: Vec<std::process::Child>,
 }
@@ -760,6 +783,29 @@ impl Application {
             .clone()
             .ok_or_else(|| "Settings unavailable".into())
     }
+    fn retained_ids(&self) -> Vec<u64> {
+        let mut ids: Vec<u64> = self
+            .prepared
+            .iter()
+            .chain(&self.kept)
+            .map(|preparation| preparation.id)
+            .collect();
+        ids.dedup();
+        ids
+    }
+    /// Moves a preparation into the kept set. Full means the window just has no
+    /// kept pack; playback is unaffected.
+    fn keep_preparation(&mut self, preparation: Preparation) {
+        self.kept.retain(|kept| kept.id != preparation.id);
+        if self.kept.len() < MAX_KEPT {
+            self.kept.push(preparation);
+        } else {
+            tracing::warn!(
+                category = "kept_preparation_limit",
+                "Too many kept preparations; this window will not resolve neighbours from its pack"
+            );
+        }
+    }
     fn media(&mut self) -> Result<&MediaService, String> {
         let settings = self.settings()?;
         if self.media.is_none() {
@@ -775,6 +821,7 @@ impl Application {
     }
     fn invalidate(&mut self) -> Vec<String> {
         self.prepared = None;
+        self.kept.clear();
         let mut released = Vec::new();
         release_remote(&mut self.sessions, |id| {
             released.push(id.to_owned());
@@ -856,6 +903,7 @@ impl Application {
             command.action,
             AppAction::Prepare { .. }
                 | AppAction::PlayFile { .. }
+                | AppAction::PlayKeptFile { .. }
                 | AppAction::PlayLocal { .. }
                 | AppAction::ReplaySession { .. }
         ) {
@@ -1007,6 +1055,7 @@ impl Application {
                 AppAction::PlayFile {
                     preparation,
                     file_id,
+                    keep,
                 } => {
                     let current = self
                         .prepared
@@ -1019,56 +1068,20 @@ impl Application {
                                 .into(),
                         );
                     }
-                    tracing::debug!("Playing policy-selected torrent file");
-                    tracing::Span::current()
-                        .record("provider", tracing::field::debug(current.prepared.provider));
-                    validate(current.prepared.provider)?;
-                    let prepared = current.prepared.clone();
-                    let client = current.client.clone();
-                    let file = prepared
-                        .files
+                    let current = current.clone();
+                    self.play_prepared(current, file_id, false, keep, &cancel, account, &validate)
+                }
+                AppAction::PlayKeptFile {
+                    preparation,
+                    file_id,
+                } => {
+                    let current = self
+                        .kept
                         .iter()
-                        .find(|f| f.id == file_id)
-                        .cloned()
-                        .ok_or("File no longer exists")?;
-                    check(&account)?;
-                    let resolved = client
-                        .resolve_file(&prepared, &file_id, &cancel)
-                        .map_err(|e| e.to_string())?;
-                    check(&cancel)?;
-                    check(&account)?;
-                    validate(prepared.provider)?;
-                    let file_name = resolved.file_name.clone();
-                    let renew = Arc::new(move || {
-                        if account.load(Ordering::Acquire) {
-                            return Err(MediaError::Canceled);
-                        }
-                        match client.resolve_file(&prepared, &file.id, &account) {
-                            Ok(resolved) => Ok(resolved),
-                            Err(DebridError::FileNotFound | DebridError::Failed) => {
-                                let refreshed = client
-                                    .prepare(&prepared.source, &account)
-                                    .map_err(|_| MediaError::Upstream)?;
-                                let matches: Vec<_> = refreshed
-                                    .files
-                                    .iter()
-                                    .filter(|f| f.path == file.path && f.size == file.size)
-                                    .collect();
-                                if matches.len() != 1 {
-                                    return Err(MediaError::IdentityMismatch);
-                                }
-                                client
-                                    .resolve_file(&refreshed, &matches[0].id, &account)
-                                    .map_err(|_| MediaError::Upstream)
-                            }
-                            Err(_) => Err(MediaError::Upstream),
-                        }
-                    });
-                    let session = match self.media()?.register_remote(resolved, renew) {
-                        Ok(session) => session,
-                        Err(error) => return Ok(media_outcome(error)),
-                    };
-                    self.launch(session, file_name, &cancel, true)
+                        .find(|p| p.id == preparation)
+                        .ok_or("The pack is no longer kept; play the episode from its streams")?
+                        .clone();
+                    self.play_prepared(current, file_id, true, true, &cancel, account, &validate)
                 }
                 AppAction::PlayLocal { path } => {
                     let name = path
@@ -1079,7 +1092,7 @@ impl Application {
                         .media()?
                         .register_local(&path)
                         .map_err(|e| e.to_string())?;
-                    self.launch(session, name, &cancel, false)
+                    self.launch(session, name, &cancel, false, false)
                 }
                 AppAction::ReleaseSession(id) => {
                     if let Some(media) = &self.media {
@@ -1143,12 +1156,82 @@ impl Application {
         log_operation_result(&result, cancel.load(Ordering::Acquire), started);
         result
     }
+    /// Unlocks `file_id` of `current` and starts it. `embedded` forces the embedded
+    /// player (a window swap never opens an external one); `keep` retains the
+    /// preparation for that window after an embedded start.
+    #[allow(clippy::too_many_arguments)]
+    fn play_prepared(
+        &mut self,
+        current: Preparation,
+        file_id: String,
+        embedded: bool,
+        keep: bool,
+        cancel: &Arc<AtomicBool>,
+        account: Arc<AtomicBool>,
+        validate: &impl Fn(DebridKind) -> Result<(), String>,
+    ) -> Result<AppOutcome, String> {
+        tracing::debug!("Playing policy-selected torrent file");
+        tracing::Span::current()
+            .record("provider", tracing::field::debug(current.prepared.provider));
+        validate(current.prepared.provider)?;
+        let prepared = current.prepared.clone();
+        let client = current.client.clone();
+        let file = prepared
+            .files
+            .iter()
+            .find(|f| f.id == file_id)
+            .cloned()
+            .ok_or("File no longer exists")?;
+        check(&account)?;
+        let resolved = client
+            .resolve_file(&prepared, &file_id, cancel)
+            .map_err(|e| e.to_string())?;
+        check(cancel)?;
+        check(&account)?;
+        validate(prepared.provider)?;
+        let file_name = resolved.file_name.clone();
+        let renew = Arc::new(move || {
+            if account.load(Ordering::Acquire) {
+                return Err(MediaError::Canceled);
+            }
+            match client.resolve_file(&prepared, &file.id, &account) {
+                Ok(resolved) => Ok(resolved),
+                Err(DebridError::FileNotFound | DebridError::Failed) => {
+                    let refreshed = client
+                        .prepare(&prepared.source, &account)
+                        .map_err(|_| MediaError::Upstream)?;
+                    let matches: Vec<_> = refreshed
+                        .files
+                        .iter()
+                        .filter(|f| f.path == file.path && f.size == file.size)
+                        .collect();
+                    if matches.len() != 1 {
+                        return Err(MediaError::IdentityMismatch);
+                    }
+                    client
+                        .resolve_file(&refreshed, &matches[0].id, &account)
+                        .map_err(|_| MediaError::Upstream)
+                }
+                Err(_) => Err(MediaError::Upstream),
+            }
+        });
+        let session = match self.media()?.register_remote(resolved, renew) {
+            Ok(session) => session,
+            Err(error) => return Ok(media_outcome(error)),
+        };
+        let outcome = self.launch(session, file_name, cancel, true, embedded)?;
+        if keep && matches!(outcome, AppOutcome::EmbeddedPlaybackStarted { .. }) {
+            self.keep_preparation(current);
+        }
+        Ok(outcome)
+    }
     fn launch(
         &mut self,
         session: PlaybackSession,
         file_name: String,
         cancel: &AtomicBool,
         remote: bool,
+        force_embedded: bool,
     ) -> Result<AppOutcome, String> {
         let mut child = None;
         let mut choice = player::PlayerChoice::Embedded;
@@ -1158,7 +1241,11 @@ impl Application {
             check(cancel)?;
             // A spawned child is not evidence of playing/completed. Retain it
             // only for nonblocking reaping; never terminate the external player.
-            choice = settings.player;
+            choice = if force_embedded {
+                player::PlayerChoice::Embedded
+            } else {
+                settings.player
+            };
             if !choice.is_managed() {
                 child = (self.io.launch)(&choice, &session.url).map_err(|e| e.to_string())?;
             }
@@ -1432,8 +1519,9 @@ fn run_application(shared: Arc<Shared>, mut app: Application) {
                 if app.prepared.as_ref().is_some_and(|p| p.id == generation) {
                     app.prepared = None;
                 }
+                app.kept.retain(|p| p.id != generation);
             }
-            mail.prepared_generation = app.prepared.as_ref().map(|preparation| preparation.id);
+            mail.retained_preparations = app.retained_ids();
             let request = mail.requests.pop_front();
             mail.active = request.as_ref().map(|r| r.cancel.clone());
             mail.active_generation = request.as_ref().map(|r| r.command.generation);
@@ -1519,7 +1607,7 @@ fn run_application(shared: Arc<Shared>, mut app: Application) {
                 }
                 mail.active = None;
                 mail.active_generation = None;
-                mail.prepared_generation = app.prepared.as_ref().map(|preparation| preparation.id);
+                mail.retained_preparations = app.retained_ids();
                 mail.pipeline
                     .retain(|flag| !Arc::ptr_eq(flag, &request.cancel));
                 mail.metadata_pipeline
@@ -1675,6 +1763,7 @@ mod tests {
                 action: AppAction::PlayFile {
                     preparation: 1,
                     file_id: "x".into(),
+                    keep: false,
                 },
             },
             Arc::new(AtomicBool::new(false)),
@@ -2428,6 +2517,30 @@ mod tests {
         missing: bool,
         launch_fails: bool,
     ) -> io::Result<AppWorker> {
+        let app = composed_application(
+            root,
+            upstream,
+            trace,
+            missing,
+            launch_fails,
+            player::PlayerChoice::Mpv,
+        );
+        AppWorker::spawn_task(move |shared| {
+            {
+                let mut mail = shared.mailbox.lock().unwrap_or_else(|e| e.into_inner());
+                reconcile_account(&mut mail, DebridKind::RealDebrid);
+            }
+            run_application(shared, app);
+        })
+    }
+    fn composed_application(
+        root: &std::path::Path,
+        upstream: String,
+        trace: Arc<PlaybackTrace>,
+        missing: bool,
+        launch_fails: bool,
+        player: player::PlayerChoice,
+    ) -> Application {
         let provider_trace = trace.clone();
         let launch_trace = trace;
         let io = PlaybackIo {
@@ -2458,7 +2571,7 @@ mod tests {
                 }
             }),
         };
-        let app = Application {
+        Application {
             io,
             paths: Some(AppPaths {
                 config: root.into(),
@@ -2467,18 +2580,11 @@ mod tests {
             }),
             settings: Some(Settings {
                 media_limit_bytes: 1024,
-                player: player::PlayerChoice::Mpv,
+                player,
                 ..Settings::default()
             }),
             ..Application::default()
-        };
-        AppWorker::spawn_task(move |shared| {
-            {
-                let mut mail = shared.mailbox.lock().unwrap_or_else(|e| e.into_inner());
-                reconcile_account(&mut mail, DebridKind::RealDebrid);
-            }
-            run_application(shared, app);
-        })
+        }
     }
     fn episode(number: u32) -> Result<PlaybackTarget, Box<dyn std::error::Error>> {
         Ok(PlaybackTarget::Episode {
@@ -2571,6 +2677,7 @@ mod tests {
                     AppAction::PlayFile {
                         preparation: generation,
                         file_id: "episode-2".into(),
+                        keep: false
                     }
                 )?,
                 AppOutcome::Failed { .. }
@@ -2590,6 +2697,280 @@ mod tests {
                 .unwrap_or_else(|e| e.into_inner())
                 .is_empty()
         );
+        Ok(())
+    }
+
+    fn execute_now(
+        app: &mut Application,
+        generation: u64,
+        action: AppAction,
+    ) -> Result<AppOutcome, String> {
+        app.execute(
+            AppCommand { generation, action },
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
+        )
+    }
+    fn prepare_episode_one(app: &mut Application) -> Result<(), Box<dyn std::error::Error>> {
+        let outcome = execute_now(
+            app,
+            1,
+            AppAction::Prepare {
+                target: episode(1)?,
+                candidate: fixture_candidate()?,
+            },
+        )?;
+        assert!(matches!(
+            outcome,
+            AppOutcome::Prepared {
+                selection: FileSelection::Unique(0),
+                ..
+            }
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn kept_preparation_plays_another_file_embedded_even_when_the_setting_is_external()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let upstream = HttpFixture::start()?;
+        let root = tempfile::tempdir()?;
+        let trace = Arc::new(PlaybackTrace::default());
+        let mut app = composed_application(
+            root.path(),
+            upstream.url.clone(),
+            trace.clone(),
+            false,
+            false,
+            player::PlayerChoice::Embedded,
+        );
+        prepare_episode_one(&mut app)?;
+        let first = execute_now(
+            &mut app,
+            2,
+            AppAction::PlayFile {
+                preparation: 1,
+                file_id: "episode-1".into(),
+                keep: true,
+            },
+        )?;
+        assert!(matches!(first, AppOutcome::EmbeddedPlaybackStarted { .. }));
+        assert_eq!(app.kept.iter().map(|p| p.id).collect::<Vec<_>>(), [1]);
+        // A newer preparation replaces the current one, never a window's pack.
+        app.prepared = None;
+        // Settings changed since the window opened: a swap is still embedded.
+        if let Some(settings) = app.settings.as_mut() {
+            settings.player = player::PlayerChoice::Mpv;
+        }
+        let swapped = execute_now(
+            &mut app,
+            3,
+            AppAction::PlayKeptFile {
+                preparation: 1,
+                file_id: "episode-2".into(),
+            },
+        )?;
+        let AppOutcome::EmbeddedPlaybackStarted {
+            session,
+            mode,
+            file_name,
+            ..
+        } = swapped
+        else {
+            return Err("a window swap must start an embedded lease".into());
+        };
+        assert_eq!(mode, player::PlayerChoice::Embedded);
+        assert_eq!(file_name, "Show.S01E02.mkv");
+        assert!(session.url.starts_with("http://127.0.0.1:"));
+        assert!(
+            trace
+                .launched
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_empty(),
+            "no external player is ever launched for a swap"
+        );
+        assert_eq!(
+            *trace.resolved.lock().unwrap_or_else(|e| e.into_inner()),
+            ["episode-1", "episode-2"]
+        );
+        // Two leases, one asset pack: both stay registered until released.
+        assert_eq!(app.sessions.len(), 2);
+        assert_eq!(app.kept.len(), 1, "the same pack is kept once");
+        Ok(())
+    }
+
+    #[test]
+    fn unkept_or_unknown_files_never_play_from_a_kept_request()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let upstream = HttpFixture::start()?;
+        let root = tempfile::tempdir()?;
+        let trace = Arc::new(PlaybackTrace::default());
+        let mut app = composed_application(
+            root.path(),
+            upstream.url.clone(),
+            trace.clone(),
+            false,
+            false,
+            player::PlayerChoice::Embedded,
+        );
+        prepare_episode_one(&mut app)?;
+        // Prepared but not kept: PlayKeptFile does not fall back to the current slot.
+        assert!(
+            execute_now(
+                &mut app,
+                2,
+                AppAction::PlayKeptFile {
+                    preparation: 1,
+                    file_id: "episode-2".into(),
+                },
+            )
+            .is_err()
+        );
+        execute_now(
+            &mut app,
+            3,
+            AppAction::PlayFile {
+                preparation: 1,
+                file_id: "episode-1".into(),
+                keep: true,
+            },
+        )?;
+        // A file the pack does not contain is refused, and nothing is resolved for it.
+        let resolved = trace
+            .resolved
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .len();
+        assert!(
+            execute_now(
+                &mut app,
+                4,
+                AppAction::PlayKeptFile {
+                    preparation: 1,
+                    file_id: "episode-9".into(),
+                },
+            )
+            .is_err()
+        );
+        assert_eq!(
+            trace
+                .resolved
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .len(),
+            resolved
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn external_start_does_not_keep_and_account_invalidation_drops_every_kept_pack()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let upstream = HttpFixture::start()?;
+        let root = tempfile::tempdir()?;
+        let trace = Arc::new(PlaybackTrace::default());
+        let mut external = composed_application(
+            root.path(),
+            upstream.url.clone(),
+            trace.clone(),
+            false,
+            false,
+            player::PlayerChoice::Mpv,
+        );
+        prepare_episode_one(&mut external)?;
+        let started = execute_now(
+            &mut external,
+            2,
+            AppAction::PlayFile {
+                preparation: 1,
+                file_id: "episode-1".into(),
+                keep: true,
+            },
+        )?;
+        assert!(matches!(started, AppOutcome::PlaybackStarted { .. }));
+        assert!(
+            external.kept.is_empty(),
+            "external players never keep a pack"
+        );
+
+        let root = tempfile::tempdir()?;
+        let mut app = composed_application(
+            root.path(),
+            upstream.url.clone(),
+            trace,
+            false,
+            false,
+            player::PlayerChoice::Embedded,
+        );
+        prepare_episode_one(&mut app)?;
+        execute_now(
+            &mut app,
+            2,
+            AppAction::PlayFile {
+                preparation: 1,
+                file_id: "episode-1".into(),
+                keep: true,
+            },
+        )?;
+        assert_eq!(app.retained_ids(), [1]);
+        let released = app.invalidate();
+        assert_eq!(released.len(), 1);
+        assert!(app.kept.is_empty() && app.prepared.is_none());
+        assert!(app.retained_ids().is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn a_window_close_cancels_its_kept_pack_through_the_worker()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let upstream = HttpFixture::start()?;
+        let root = tempfile::tempdir()?;
+        let trace = Arc::new(PlaybackTrace::default());
+        let app = composed_application(
+            root.path(),
+            upstream.url.clone(),
+            trace,
+            false,
+            false,
+            player::PlayerChoice::Embedded,
+        );
+        let worker = AppWorker::spawn_task(move |shared| {
+            {
+                let mut mail = shared.mailbox.lock().unwrap_or_else(|e| e.into_inner());
+                reconcile_account(&mut mail, DebridKind::RealDebrid);
+            }
+            run_application(shared, app);
+        })?;
+        command_result(
+            &worker,
+            1,
+            AppAction::Prepare {
+                target: episode(1)?,
+                candidate: fixture_candidate()?,
+            },
+        )?;
+        command_result(
+            &worker,
+            2,
+            AppAction::PlayFile {
+                preparation: 1,
+                file_id: "episode-1".into(),
+                keep: true,
+            },
+        )?;
+        assert!(worker.cancel_request(1), "a kept pack stays cancellable");
+        assert!(matches!(
+            command_result(
+                &worker,
+                3,
+                AppAction::PlayKeptFile {
+                    preparation: 1,
+                    file_id: "episode-2".into(),
+                },
+            )?,
+            AppOutcome::Failed { .. }
+        ));
         Ok(())
     }
 
@@ -2624,7 +3005,7 @@ mod tests {
             }
         ));
         assert!(matches!(command_result(&worker, 2, AppAction::PlayFile {
-            preparation: 1, file_id: "episode-1".into(),
+            preparation: 1, file_id: "episode-1".into(), keep: false
         })?, AppOutcome::Failed { message }
             if message == "Couldn't identify the file in this torrent — try another stream."));
         assert!(
@@ -2685,6 +3066,7 @@ mod tests {
             AppAction::PlayFile {
                 preparation: 1,
                 file_id: "episode-2".into(),
+                keep: false,
             },
         )?;
         let AppOutcome::PlaybackStarted { session, file_name } = started else {
@@ -2776,7 +3158,8 @@ mod tests {
                 2,
                 AppAction::PlayFile {
                     preparation: 1,
-                    file_id: "episode-2".into()
+                    file_id: "episode-2".into(),
+                    keep: false
                 }
             )?,
             AppOutcome::Failed { .. }
