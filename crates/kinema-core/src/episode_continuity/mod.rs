@@ -6,17 +6,31 @@
 //! personal data: callers persist the RAW strings, never parsed traits, and
 //! re-derive traits with [`ReleaseTraits::parse`], which is deterministic.
 
+mod listing;
 mod resolve;
 mod traits;
 
 use std::collections::BTreeSet;
 
+pub use listing::{SeasonListing, neighbours_in_listing};
 pub use resolve::{
-    ChoiceReason, IndexerFailed, KeptFiles, NeighbourChoice, NeighbourQuery, RankedCandidate,
-    ReferenceRelease, Similarity, candidate_traits, choose_neighbour_stream, rank_candidates,
-    similarity,
+    ChoiceReason, IndexerFailed, KeptFiles, MAX_PRESELECTED, NeighbourChoice, NeighbourQuery,
+    RankedCandidate, ReferenceRelease, Similarity, candidate_traits, choose_neighbour_stream,
+    preselected_count, rank_candidates, rank_order, similarity,
 };
 pub use traits::{AudioFormat, Codec, HdrFlags, ReleaseTraits, Resolution, Source};
+
+/// Fraction of a finite duration, in percent, after which the next episode may
+/// be resolved ahead of time ([`prefetch_due`]).
+pub const PREFETCH_PERCENT: i128 = 80;
+
+/// True once `observation` is at or past [`PREFETCH_PERCENT`] of a known, finite
+/// duration. An unknown duration never triggers it.
+pub fn prefetch_due(observation: crate::watch_progress::PlaybackObservation) -> bool {
+    observation.duration_ms().is_some_and(|duration| {
+        i128::from(observation.position_ms()) * 100 >= i128::from(duration) * PREFETCH_PERCENT
+    })
+}
 
 /// The regular episodes immediately before and after the current one.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -140,5 +154,23 @@ mod tests {
                 "{watched:?}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod prefetch_tests {
+    use super::*;
+    use crate::watch_progress::PlaybackObservation;
+
+    fn at(position: i64, duration: Option<i64>) -> PlaybackObservation {
+        PlaybackObservation::new(position, duration).expect("observation")
+    }
+
+    #[test]
+    fn prefetch_is_due_at_eighty_percent_of_a_finite_duration() {
+        assert!(!prefetch_due(at(799, Some(1000))));
+        assert!(prefetch_due(at(800, Some(1000))));
+        assert!(prefetch_due(at(1000, Some(1000))));
+        assert!(!prefetch_due(at(10_000_000, None)));
     }
 }

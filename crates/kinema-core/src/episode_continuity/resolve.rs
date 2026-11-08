@@ -98,36 +98,57 @@ pub fn rank_candidates(
     reference: &ReferenceRelease,
     candidates: &[SourceCandidate],
 ) -> Vec<RankedCandidate> {
+    rank_order(reference, candidates)
+        .into_iter()
+        .map(|(index, similarity)| RankedCandidate {
+            candidate: candidates[index].clone(),
+            similarity,
+        })
+        .collect()
+}
+
+/// [`rank_candidates`] as positions into `candidates`, best first, with each
+/// candidate's score. For callers that keep their own list and only need its
+/// order.
+pub fn rank_order(
+    reference: &ReferenceRelease,
+    candidates: &[SourceCandidate],
+) -> Vec<(usize, Similarity)> {
     let traits = reference.traits();
-    let mut ranked: Vec<(usize, RankedCandidate)> = candidates
+    let mut ranked: Vec<(usize, Similarity)> = candidates
         .iter()
         .enumerate()
-        .map(|(i, candidate)| {
-            let similarity = similarity_of(&traits, reference.size, candidate);
-            (
-                i,
-                RankedCandidate {
-                    candidate: candidate.clone(),
-                    similarity,
-                },
-            )
-        })
+        .map(|(i, candidate)| (i, similarity_of(&traits, reference.size, candidate)))
         .collect();
     ranked.sort_by(|(ia, a), (ib, b)| {
-        b.similarity
-            .cmp(&a.similarity)
-            .then_with(|| a.candidate.name.cmp(&b.candidate.name))
+        b.cmp(a)
+            .then_with(|| candidates[*ia].name.cmp(&candidates[*ib].name))
             .then_with(|| {
-                a.candidate
+                candidates[*ia]
                     .torrent
                     .hash
                     .as_str()
-                    .cmp(b.candidate.torrent.hash.as_str())
+                    .cmp(candidates[*ib].torrent.hash.as_str())
             })
             .then_with(|| ia.cmp(ib))
     });
-    ranked.into_iter().map(|(_, r)| r).collect()
+    ranked
 }
+
+/// How many leading entries of a ranked picker list are marked as preselected:
+/// every leading strong match (at most [`MAX_PRESELECTED`]), and always the
+/// first entry of a non-empty list.
+pub fn preselected_count(ranked: &[(usize, Similarity)]) -> usize {
+    let strong = ranked
+        .iter()
+        .take(MAX_PRESELECTED)
+        .take_while(|(_, similarity)| similarity.strong())
+        .count();
+    strong.max(usize::from(!ranked.is_empty()))
+}
+
+/// Upper bound of [`preselected_count`].
+pub const MAX_PRESELECTED: usize = 3;
 
 /// The indexer query for the neighbour failed (network, rate limit, parse).
 /// Distinct from a successful empty result.
@@ -887,5 +908,29 @@ mod tests {
         assert_eq!(t.group.as_deref(), Some("grp"));
         assert_eq!(t.resolution, Some(Resolution::P1080));
         assert_eq!(t.source, Some(Source::BluRay));
+    }
+
+    #[test]
+    fn rank_order_agrees_with_rank_candidates_and_preselects_strong_leaders() {
+        let r = reference(CURRENT);
+        let list = vec![
+            cand(1, "Show.S01E03.720p.WEB-DL.x265-OTHER", None, None, None),
+            cand(2, "Show.S01E03.1080p.WEB-DL.x265-GRP", None, None, None),
+            cand(3, "Show.S01E03.1080p.BluRay.x265-GRP", None, None, None),
+            cand(4, "Show.S01E03.1080p.WEB-DL.x264-OTHER", None, None, None),
+        ];
+        let order = rank_order(&r, &list);
+        let ranked = rank_candidates(&r, &list);
+        assert_eq!(order.len(), ranked.len());
+        for ((index, similarity), ranked) in order.iter().zip(&ranked) {
+            assert_eq!(&list[*index], &ranked.candidate);
+            assert_eq!(*similarity, ranked.similarity);
+        }
+        // Two leading strong matches are marked; the weaker rows are not.
+        assert_eq!(preselected_count(&order), 2);
+        // A list with no strong match still preselects its first entry.
+        let weak = rank_order(&r, &list[..1]);
+        assert_eq!(preselected_count(&weak), 1);
+        assert_eq!(preselected_count(&[]), 0);
     }
 }
