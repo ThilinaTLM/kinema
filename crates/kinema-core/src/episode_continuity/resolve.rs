@@ -250,8 +250,9 @@ impl NeighbourChoice {
 ///
 /// 1. Indexer failed: the strict marker rule on the kept files if it yields one
 ///    file ([`NeighbourChoice::KeptFile`]), else `Unavailable(IndexerFailed)`.
-/// 2. Indexer returned nothing: `Unavailable(NoStreams)`. This is deliberately
-///    not the failure fallback.
+/// 2. Indexer returned nothing: the same strict kept-file fallback, else
+///    `Unavailable(NoStreams)`. The reasons stay distinct: an empty result is
+///    not reported as a failure.
 /// 3. A row lists the playing torrent: with kept files, its hint is applied via
 ///    [`select_file_with_hint`] (including the index-only rule); one unique file
 ///    gives [`NeighbourChoice::SamePack`], otherwise the picker opens, without
@@ -265,9 +266,7 @@ pub fn choose_neighbour_stream(query: &NeighbourQuery<'_>) -> NeighbourChoice {
         Ok(candidates) => candidates,
     };
     if candidates.is_empty() {
-        return NeighbourChoice::Unavailable {
-            reason: ChoiceReason::NoStreams,
-        };
+        return kept_by_marker(query, ChoiceReason::NoStreams);
     }
     let same_hash: Vec<&SourceCandidate> = candidates
         .iter()
@@ -342,14 +341,17 @@ pub fn choose_neighbour_stream(query: &NeighbourQuery<'_>) -> NeighbourChoice {
 }
 
 fn indexer_failed(query: &NeighbourQuery<'_>) -> NeighbourChoice {
+    kept_by_marker(query, ChoiceReason::IndexerFailed)
+}
+
+/// Strict marker rule on the kept pack; never a hint, size or position guess.
+fn kept_by_marker(query: &NeighbourQuery<'_>, otherwise: ChoiceReason) -> NeighbourChoice {
     if let Some(kept) = query.kept
         && let FileSelection::Unique(file_index) = select_file(query.target, kept.files)
     {
         return NeighbourChoice::KeptFile { file_index };
     }
-    NeighbourChoice::Unavailable {
-        reason: ChoiceReason::IndexerFailed,
-    }
+    NeighbourChoice::Unavailable { reason: otherwise }
 }
 
 #[cfg(test)]
@@ -699,10 +701,19 @@ mod tests {
         let failed = choose_neighbour_stream(&query(&t, &cur, Some(kept), Err(IndexerFailed), &r));
         assert_eq!(failed, NeighbourChoice::KeptFile { file_index: 1 });
         let empty = choose_neighbour_stream(&query(&t, &cur, Some(kept), Ok(&[]), &r));
+        assert_eq!(empty, NeighbourChoice::KeptFile { file_index: 1 });
+        let none = choose_neighbour_stream(&query(&t, &cur, None, Ok(&[]), &r));
         assert_eq!(
-            empty,
+            none,
             NeighbourChoice::Unavailable {
                 reason: ChoiceReason::NoStreams
+            }
+        );
+        let none = choose_neighbour_stream(&query(&t, &cur, None, Err(IndexerFailed), &r));
+        assert_eq!(
+            none,
+            NeighbourChoice::Unavailable {
+                reason: ChoiceReason::IndexerFailed
             }
         );
     }
