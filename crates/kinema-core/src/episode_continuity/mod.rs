@@ -158,6 +158,7 @@ mod tests {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod prefetch_tests {
     use super::*;
     use crate::watch_progress::PlaybackObservation;
