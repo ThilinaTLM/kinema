@@ -88,7 +88,19 @@ jobs:
           )
           foreach ($asset in $assets) {
             $archive = Join-Path $root $asset.Name
-            Invoke-WebRequest "https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20261021/$($asset.Name)" -OutFile $archive
+            # GitHub release downloads intermittently fail with 5xx pages; retry
+            # a bounded number of times. The checksum below still gates the result.
+            $url = "https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20261021/$($asset.Name)"
+            for ($attempt = 1; ; $attempt++) {
+              try {
+                Invoke-WebRequest $url -OutFile $archive -TimeoutSec 300
+                break
+              } catch {
+                if ($attempt -ge 4) { throw }
+                Write-Warning "Download of $($asset.Name) failed (attempt $attempt): $($_.Exception.Message)"
+                Start-Sleep -Seconds (15 * $attempt)
+              }
+            }
             if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne $asset.Hash) {
               throw "Playback dependency checksum mismatch: $($asset.Name)"
             }

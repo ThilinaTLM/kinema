@@ -61,7 +61,8 @@ pub(crate) fn desktop_snapshots(cx: &mut App) -> Vec<ManagedPlayerSnapshot> {
                         .as_ref()
                         .and_then(|owner| owner.player.as_ref())
                         .map_or_else(|| view.state.clone(), Player::state);
-                    let failed = terminal_failure(view.error.is_some(), &state);
+                    let failed =
+                        !view.failure_masked() && terminal_failure(view.error.is_some(), &state);
                     let mut media = desktop_snapshot(
                         desktop_target(generation),
                         &view.title,
@@ -71,6 +72,11 @@ pub(crate) fn desktop_snapshots(cx: &mut App) -> Vec<ManagedPlayerSnapshot> {
                     if failed {
                         media.playback = DesktopPlayback::Stopped;
                         media.seekable = false;
+                    } else {
+                        // Advertise exactly what the dock offers, nothing more.
+                        media.can_next = view.neighbours.advertised(NeighbourDirection::Next);
+                        media.can_previous =
+                            view.neighbours.advertised(NeighbourDirection::Previous);
                     }
                     Some(ManagedPlayerSnapshot {
                         playing: media.playback == DesktopPlayback::Playing
@@ -119,6 +125,9 @@ pub(super) fn desktop_snapshot(
         duration: state.duration.and_then(media_time).filter(|v| !v.is_zero()),
         volume: normalized_volume(state.volume / 100.0).unwrap_or(0.0),
         seekable: desktop_can_seek(state),
+        // The window overrides these from its dock; a bare state has no neighbours.
+        can_next: false,
+        can_previous: false,
     }
 }
 pub(super) fn desktop_can_seek(state: &PlaybackState) -> bool {
@@ -225,18 +234,9 @@ pub struct SessionContext {
     pub subtitle_target: Option<PlaybackTarget>,
 }
 
-pub fn open(
-    session_id: String,
-    mode: PlayerChoice,
-    url: String,
-    title: PlaybackTitle,
-    context: SessionContext,
-    coordinator: Entity<AppCoordinator>,
-    cx: &mut App,
-) -> Result<(), String> {
-    if !mode.is_managed() {
-        return Err("External players cannot own a managed player window".into());
-    }
+/// The registry, created once, with its native-close hook: a window the user
+/// closes releases its lease through the coordinator.
+fn ensure_registry(cx: &mut App) {
     if !cx.has_global::<PlayerWindows>() {
         cx.set_global(PlayerWindows::default());
         cx.on_window_closed(|cx, id| {
@@ -252,6 +252,21 @@ pub fn open(
         })
         .detach();
     }
+}
+
+pub fn open(
+    session_id: String,
+    mode: PlayerChoice,
+    url: String,
+    title: PlaybackTitle,
+    context: SessionContext,
+    coordinator: Entity<AppCoordinator>,
+    cx: &mut App,
+) -> Result<(), String> {
+    if !mode.is_managed() {
+        return Err("External players cannot own a managed player window".into());
+    }
+    ensure_registry(cx);
     if cx
         .global::<PlayerWindows>()
         .entries
@@ -298,11 +313,34 @@ pub fn open(
             cx.new(|cx| PlayerWindow::new_mode(title, Some(url), mode.clone(), window, cx))
         })
         .map_err(|error| format!("Could not open embedded player window: {error}"))?;
+    install_window(
+        handle,
+        session_id,
+        generation,
+        mode,
+        context,
+        coordinator,
+        cx,
+    );
+    Ok(())
+}
+
+/// Binds an opened window to its lease and registers it.
+fn install_window(
+    handle: WindowHandle<PlayerWindow>,
+    session_id: String,
+    generation: u64,
+    mode: PlayerChoice,
+    context: SessionContext,
+    coordinator: Entity<AppCoordinator>,
+    cx: &mut App,
+) {
     let initially_active = handle
         .update(cx, |view, window, _| {
             view.lease = Some((session_id.clone(), generation));
             view.progress = context.progress.map(Progress::new);
             view.progress_owner = Some(coordinator.clone());
+            view.neighbour_requests = Some(Rc::new(coordinator.clone()));
             view.subtitle_target = context.subtitle_target;
             window.is_window_active()
         })
@@ -319,7 +357,52 @@ pub fn open(
     if initially_active {
         record_player_focus(generation, cx);
     }
-    Ok(())
+}
+
+/// A registered window with no media and an in-memory stand-in for the player,
+/// so tests and the lab can drive the real registry, swap and dock.
+#[cfg(all(test, feature = "ui-probe-test"))]
+pub(crate) fn open_fixture(
+    session_id: &str,
+    title: PlaybackTitle,
+    context: SessionContext,
+    coordinator: Entity<AppCoordinator>,
+    cx: &mut App,
+) -> Option<WindowHandle<PlayerWindow>> {
+    ensure_registry(cx);
+    let generation = {
+        let registry = cx.global_mut::<PlayerWindows>();
+        registry.next += 1;
+        registry.next
+    };
+    let handle = cx
+        .open_window(WindowOptions::default(), |window, cx| {
+            cx.new(|cx| {
+                let mut view =
+                    PlayerWindow::new_mode(title, None, PlayerChoice::Embedded, window, cx);
+                view.startup_cancel
+                    .store(true, std::sync::atomic::Ordering::Release);
+                view.state.loading = false;
+                view.state.file_loaded = true;
+                view.state.media_stopped = false;
+                view.state.media_generation = 1;
+                view.fixture_backend = Some(Default::default());
+                // The tests drive `sample` themselves.
+                view._updates = Task::ready(());
+                view
+            })
+        })
+        .ok()?;
+    install_window(
+        handle,
+        session_id.to_owned(),
+        generation,
+        PlayerChoice::Embedded,
+        context,
+        coordinator,
+        cx,
+    );
+    Some(handle)
 }
 
 pub(super) fn player_window_icon() -> Option<std::sync::Arc<image::RgbaImage>> {
@@ -470,6 +553,38 @@ pub fn authorize_progress(
         cx.notify();
     });
 }
+/// The old run's last observation for an acknowledged flush before a source
+/// swap, stamped with the window's generation. `None` when there is nothing to
+/// save (untracked, not yet active, or not authorized).
+pub(crate) fn final_checkpoint(session: &str, cx: &mut App) -> Option<PlayerCheckpoint> {
+    let mut sample = None;
+    update_progress_window(session, cx, |view, _| sample = view.final_checkpoint());
+    sample
+}
+
+/// What the dock offers for the next and previous episode.
+pub(crate) fn set_neighbours(session: &str, neighbours: Neighbours, cx: &mut App) {
+    update_progress_window(session, cx, |view, cx| {
+        view.apply_neighbours(neighbours, cx)
+    });
+}
+
+/// A neighbour request (or the swap it led to) failed: show the dock notice.
+pub(crate) fn neighbour_failed(session: &str, direction: Option<NeighbourDirection>, cx: &mut App) {
+    update_progress_window(session, cx, |view, cx| {
+        view.show_neighbour_failure(direction, cx)
+    });
+}
+
+/// Shows `text` in the window's dock status: the reason a neighbour request
+/// failed (`warning`), or how the next episode was chosen. Plain wording only.
+pub(crate) fn neighbour_note(session: &str, text: &str, warning: bool, cx: &mut App) {
+    let text = text.to_owned();
+    update_progress_window(session, cx, move |view, cx| {
+        view.show_neighbour_note(text, warning, cx)
+    });
+}
+
 pub fn progress_notice(session: &str, generation: u64, failed: bool, cx: &mut App) {
     update_progress_window(session, cx, |view, cx| {
         if view

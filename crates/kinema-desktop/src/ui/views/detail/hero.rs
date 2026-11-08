@@ -183,6 +183,17 @@ impl Detail {
         // Action row: primary, Watch, Library | Refresh, IMDb. All share one
         // Button face; Watch and Library collapse to icons when narrow.
         let compact = layout::compact_actions(viewport);
+        // Continue and Resume play without the stream list; this is the way back to it.
+        if let PrimaryAction::Continue(season, episode) = self.primary_action(cx) {
+            banner = banner.secondary(
+                Button::new("detail-choose-stream", "Choose stream")
+                    .size(ButtonSize::Md)
+                    .icon(IconName::Search)
+                    .on_click(
+                        cx.listener(move |this, _, _, cx| this.choose_stream(season, episode, cx)),
+                    ),
+            );
+        }
         banner = banner.secondary(if self.is_series() {
             self.series_watched_toggle(cx).compact(compact)
         } else {

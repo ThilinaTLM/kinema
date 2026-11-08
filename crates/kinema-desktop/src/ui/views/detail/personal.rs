@@ -361,10 +361,23 @@ impl Detail {
     /// Inline content below the hero: only the progress-clear confirmation.
     /// Failures here are toasts (see `toasts.rs`).
     pub(super) fn personal_notices(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let confirm = self.clear_confirmation(cx)?;
+        let confirm = self.clear_confirmation(cx);
+        let direct = self.direct_panel(cx);
+        if confirm.is_none() && direct.is_none() {
+            return None;
+        }
         Some(
-            hero::body_shell(div().w_full().flex().flex_col().pt(s::S12).child(confirm))
-                .into_any_element(),
+            hero::body_shell(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .gap(s::S8)
+                    .pt(s::S12)
+                    .children(confirm)
+                    .children(direct),
+            )
+            .into_any_element(),
         )
     }
 

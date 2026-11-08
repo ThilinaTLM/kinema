@@ -58,7 +58,7 @@ govern changes to it:
 | Identity | `title_identifiers`, `season_identifiers`, `episode_identifiers` | These stay separate tables because their collision domains, owner foreign keys and namespace constraints differ |
 | Facts | `ratings`, `field_provenance` | One provenance row per current non-NULL field. Ratings are kept per source, metric and supplier |
 | Provider state | `metadata_fetches`, `catalog_pages`, `catalog_page_items`, `indexer_snapshots` | Fetch state per provider, resource and locale. Saved query and page membership |
-| Personal | `library_entries`, `movie_watch_state`, `episode_watch_state`, `movie_playback_progress`, `episode_playback_progress` | Never cache. See [personal records](#personal-records) |
+| Personal | `library_entries`, `movie_watch_state`, `episode_watch_state`, `movie_playback_progress`, `episode_playback_progress`, `season_release_memory`, `episode_stream_memory` | Never cache. See [personal records](#personal-records) |
 
 The legacy `cinemeta_v3_*`, `indexer_sources_v1` and `tmdb_v1_cache` DDL exists
 only so that old databases can be migrated. New code must not read from or write
@@ -150,6 +150,38 @@ Personal records are Library membership, watched state and playback progress.
   per-item epoch. Each checkpoint compares the epoch inside its transaction, so
   deleted progress can never come back from a late write. See
   [playback](playback.md#progress-and-resume).
+
+### Stream memory
+
+`catalog_stream_memory.rs` (schema v9) remembers what the user last played, so
+the next episode can start from the same release. Two overwrite-only
+(upsert) records:
+
+- `season_release_memory`, keyed by `seasons.id`: the last played release.
+- `episode_stream_memory`, keyed by `episodes.id`: the last played stream,
+  which adds the resolved provider file basename and size.
+
+- **Keys follow `episode_playback_progress`:** canonical row IDs with
+  `ON DELETE RESTRICT`, so identity merges move the record to the winner (newest
+  `updated_at` wins) before deleting the loser. Callers address them by
+  `(series, season, episode)`; a write for a season or episode missing from the
+  catalog fails with `MissingIdentityMapping` rather than inventing rows.
+- **Raw strings, not traits:** info hash (40 lowercase hex, `CHECK`ed), release
+  name, quality, size, indexer file index and file name hint, plus the provider
+  file basename and size. `kinema-core` derives traits when reading. Unknown is
+  NULL; empty strings and path separators in the basename are refused.
+- **One write, both records**, in one `IMMEDIATE` transaction. Validation
+  happens before any row changes. Reads return `None` for missing rows.
+  `ReadPreviousSeason` finds the nearest earlier season (number ≥ 1, so
+  specials never count) that has a record.
+- **MUST: personal record.** Excluded from cache, media, artwork and refresh
+  cleanup. Independent of watched state and progress: **Clear saved progress**
+  and Library removal leave it alone. Never store URLs, debrid file IDs or
+  provider file IDs. Never log hashes, names or file names, only counts and
+  outcome categories.
+- **Worker:** `LibraryOperation::StreamMemory(StreamMemoryOperation)` goes
+  through the FIFO local queue; `Remember` counts as a mutation (acknowledged,
+  revisioned, `Full` when the queue is saturated), the reads do not.
 
 ## Artwork cache
 

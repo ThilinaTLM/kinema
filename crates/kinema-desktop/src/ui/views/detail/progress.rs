@@ -255,8 +255,7 @@ impl Detail {
     ) {
         match (action, episode) {
             (ProgressAction::PlayFromBeginning, Some((s, n))) => {
-                self.continue_episode(s, n, cx);
-                self.start_over_requested = true;
+                self.play_episode(s, n, Some(true), cx);
             }
             (ProgressAction::PlayFromBeginning, None) => {
                 self.open_streams(cx);
@@ -527,6 +526,39 @@ mod fixture_tests {
                 d.write_error.as_ref().map(|(w, _)| w),
                 Some(Write::ClearEpisodeProgress(_))
             ));
+        });
+    }
+
+    #[gpui::test]
+    fn continue_resumes_the_saved_episode_without_opening_the_stream_list(cx: &mut TestAppContext) {
+        let d = detail(true, "detail-live-local-series-resume", cx);
+        d.update(cx, |d, cx| {
+            d.run_primary_for_test(cx);
+            // Played from its memory: the list is skipped and the checkpoint resumes.
+            assert_eq!(d.page(), super::super::Page::Overview);
+            let direct = d.direct.as_ref().expect("a direct request");
+            assert_eq!(
+                (direct.episode_number(), direct.intent()),
+                ((1, 3), super::PlaybackIntent::Resume)
+            );
+            // Choose stream is the way to the list for that episode.
+            d.choose_stream(1, 3, cx);
+            assert_eq!(d.page(), super::super::Page::Streams);
+            assert!(d.direct.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn play_from_beginning_plays_directly_and_starts_over(cx: &mut TestAppContext) {
+        let d = detail(true, "detail-live-local-series-resume", cx);
+        d.update(cx, |d, cx| {
+            d.run_progress_action(ProgressAction::PlayFromBeginning, Some((1, 3)), cx);
+            let direct = d.direct.as_ref().expect("a direct request");
+            assert_eq!(
+                (direct.episode_number(), direct.intent()),
+                ((1, 3), super::PlaybackIntent::StartOver)
+            );
+            assert_eq!(d.page(), super::super::Page::Overview);
         });
     }
 

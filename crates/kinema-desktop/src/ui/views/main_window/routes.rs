@@ -35,6 +35,33 @@ impl MainWindow {
         cx.notify();
     }
 
+    /// A player window needs a stream chosen for its next or previous episode:
+    /// bring the main window forward on that series' stream list, closest
+    /// matches first. The pick plays into the player window.
+    pub(super) fn open_stream_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(picker) = self.coordinator.read(cx).stream_picker().cloned() else {
+            return;
+        };
+        let kinema_core::sources::PlaybackTarget::Episode { series, .. } = &picker.target else {
+            return;
+        };
+        let Ok(catalog_title) = kinema_core::catalog::CatalogTitle::new(
+            series.clone(),
+            MediaKind::Series,
+            picker.title.as_str(),
+            None,
+        ) else {
+            self.coordinator
+                .update(cx, |c, cx| c.close_stream_picker(cx));
+            return;
+        };
+        crate::controllers::lifecycle::show_main(cx);
+        self.open_title(BrowseTitle::Cinemeta(catalog_title), window, cx);
+        if let Route::Detail(detail) = &self.route {
+            detail.update(cx, |d, cx| d.open_window_picker(cx));
+        }
+    }
+
     /// Native fixture seam for production Library captures: seeds saved results and
     /// personal state, selects Library and mirrors the toolbar, with no worker read.
     #[cfg(feature = "ui-probe")]

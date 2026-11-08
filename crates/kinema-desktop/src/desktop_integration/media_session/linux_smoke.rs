@@ -94,6 +94,8 @@ fn exercise_session() -> Result<()> {
         duration: Some(Duration::from_secs(240)),
         volume: 0.37,
         seekable: false,
+        can_next: false,
+        can_previous: false,
     };
     session.publish(Some(&snapshot))?;
     assert_transport_properties(&player, false)?;

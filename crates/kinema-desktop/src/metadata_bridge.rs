@@ -11,7 +11,7 @@ use crate::{
     app_state::Stage,
     catalog_worker::{
         CatalogWorker, MetadataAction, MetadataEvent, MetadataRequest, MetadataSnapshot, Mode,
-        Submit,
+        SourceLane, Submit,
     },
 };
 
@@ -67,7 +67,11 @@ fn action_of(ask: Ask) -> MetadataAction {
     match ask {
         Ask::Browse { kind, offset } => MetadataAction::Browse { kind, offset },
         Ask::Details { kind, id } => MetadataAction::Details { kind, id },
-        Ask::Sources { indexer, target } => MetadataAction::Sources { indexer, target },
+        Ask::Sources { indexer, target } => MetadataAction::Sources {
+            indexer,
+            target,
+            lane: SourceLane::Detail,
+        },
     }
 }
 
@@ -109,6 +113,9 @@ pub(crate) enum Polled {
     Cinemeta(MetaEvent),
     /// Quiet optional enrichment; never turn this into a primary-view failure.
     Enrichment(MetadataEvent),
+    /// A source listing asked for by episode-continuity resolution. It has its
+    /// own worker slot and never feeds the Streams page's resource.
+    Continuity(MetadataEvent),
 }
 
 pub(crate) fn poll(worker: &CatalogWorker) -> Option<Polled> {
@@ -118,6 +125,15 @@ pub(crate) fn poll(worker: &CatalogWorker) -> Option<Polled> {
     }
     if matches!(event.action, MetadataAction::Tmdb(_)) {
         return Some(Polled::Tmdb(event));
+    }
+    if matches!(
+        event.action,
+        MetadataAction::Sources {
+            lane: SourceLane::Continuity,
+            ..
+        }
+    ) {
+        return Some(Polled::Continuity(event));
     }
     translate(event).map(Polled::Cinemeta)
 }

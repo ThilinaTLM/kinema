@@ -143,13 +143,20 @@ impl PlaySession {
                 self.preparation = Some(event.generation);
                 match after_prepare(selection, &prepared.files) {
                     AfterPrepare::Play(file_id) => self.play_file(event.generation, file_id, cx),
-                    AfterPrepare::Message(message) => self.error = Some(message),
+                    AfterPrepare::Message(message) => {
+                        self.error = Some(message);
+                        cx.emit(PlaySessionEvent::NeedsPicker);
+                    }
                 }
             }
             AppOutcome::PlaybackStarted { .. } | AppOutcome::EmbeddedPlaybackStarted { .. } => {
                 if let Some(preparation) = self.preparation.take() {
                     self.coordinator.update(cx, |coordinator, cx| {
-                        coordinator.cancel_preparation(preparation, cx);
+                        // An episode in the embedded player: its window keeps the
+                        // pack so the next episode can come from it.
+                        if !coordinator.preparation_is_kept(preparation) {
+                            coordinator.cancel_preparation(preparation, cx);
+                        }
                     });
                 }
                 cx.emit(DismissEvent);
@@ -192,10 +199,12 @@ impl PlaySession {
         tracing::debug!(preparation, provider = ?self.provider, "UI selected-file play requested");
         self.error = None;
         self.pending = self.coordinator.update(cx, |c, cx| {
+            let keep = c.wants_kept_preparation(preparation);
             c.command(
                 AppAction::PlayFile {
                     preparation,
                     file_id,
+                    keep,
                 },
                 cx,
             )

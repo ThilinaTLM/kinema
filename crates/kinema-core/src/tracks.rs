@@ -5,6 +5,9 @@
 //! languages are raw codes. These rules lead with a language name, keep only
 //! meaningful titles, and put the source in a separate detail.
 
+mod carryover;
+pub use carryover::{CarryTrack, TrackCarry, TrackPlan};
+
 /// Longest title or file name shown before it is shortened with "…".
 pub const MAX_TITLE_CHARS: usize = 40;
 

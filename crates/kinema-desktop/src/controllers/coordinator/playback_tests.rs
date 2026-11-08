@@ -75,6 +75,7 @@ mod integration {
             retries: 0,
             retry_at: None,
             ready: None,
+            sealed: false,
         }
     }
     fn sample(sequence: u64, position: i64) -> PlayerCheckpoint {

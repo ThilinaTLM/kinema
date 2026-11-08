@@ -7,6 +7,7 @@ pub mod artwork;
 pub mod catalog;
 pub mod catalog_normalized;
 pub mod discover;
+pub mod episode_continuity;
 pub mod library;
 pub mod media;
 pub mod provider;

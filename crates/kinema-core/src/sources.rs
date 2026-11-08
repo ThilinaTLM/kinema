@@ -173,11 +173,20 @@ pub fn select_file_with_hint(
         if provider != DebridKind::RealDebrid {
             return None;
         }
+        // An index alone carries no file name to cross-check, and indexers have
+        // repeated one index for different episodes. Trust it only when the
+        // file's own full marker names the target episode.
+        let index_only = hint.filename.as_deref().is_none_or(|n| n.trim().is_empty());
         let matches: Vec<_> = files
             .iter()
             .enumerate()
             .filter(|(_, file)| {
-                file.id.parse::<u64>().ok() == Some(id) && eligible_hint_path(&file.path, target)
+                file.id.parse::<u64>().ok() == Some(id)
+                    && if index_only {
+                        eligible_path(&file.path, target)
+                    } else {
+                        eligible_hint_path(&file.path, target)
+                    }
             })
             .map(|(i, _)| i)
             .collect();
@@ -241,13 +250,44 @@ fn eligible_hint_path(path: &str, target: &PlaybackTarget) -> bool {
     if let Some(pair) = episode_marker(stem) {
         return pair == (*season, *episode);
     }
-    // Detect even embedded/malformed SxxExx and NxNN markers, rather than
-    // mistaking a rejected range or marker for an unnumbered filename.
-    let bytes = stem.as_bytes();
-    !bytes.iter().enumerate().any(|(i, byte)| {
-        (*byte == b's' && bytes.get(i + 1).is_some_and(u8::is_ascii_digit))
-            || (*byte == b'x' && i > 0 && bytes[i - 1].is_ascii_digit())
-    })
+    // Detect even malformed SxxExx and NxNN tokens, rather than mistaking a
+    // rejected range or marker for an unnumbered filename.
+    !stem
+        .split(|c: char| !c.is_alphanumeric())
+        .any(looks_like_marker)
+}
+
+// A token that starts with `s<digit>`, embeds a glued full `s<n>e<n>` (as in
+// `shows01e03`), or is `<1-2 digits>x...`. Resolutions (`1920x1080`) and a bare
+// `s<digit>` inside a word (`fs88`) do not count.
+fn looks_like_marker(token: &str) -> bool {
+    if token
+        .strip_prefix('s')
+        .is_some_and(|rest| rest.bytes().next().is_some_and(|b| b.is_ascii_digit()))
+    {
+        return true;
+    }
+    let bytes = token.as_bytes();
+    if (0..bytes.len()).any(|i| {
+        bytes[i] == b's' && {
+            let digits = bytes[i + 1..]
+                .iter()
+                .take_while(|b| b.is_ascii_digit())
+                .count();
+            digits > 0
+                && bytes.get(i + 1 + digits) == Some(&b'e')
+                && bytes.get(i + 2 + digits).is_some_and(u8::is_ascii_digit)
+        }
+    }) {
+        return true;
+    }
+    token
+        .split_once('x')
+        .is_some_and(|(season, _)| is_number(season) && season.len() <= 2)
+}
+
+fn is_number(text: &str) -> bool {
+    !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// Returns original input indices, never ranks by size, ID, or input order.
@@ -330,14 +370,20 @@ fn episode_marker(stem: &str) -> Option<(u32, u32)> {
         let Some((season, episode)) = pair else {
             continue;
         };
-        if season.is_empty()
-            || episode.is_empty()
-            || !season.bytes().all(|b| b.is_ascii_digit())
-            || !episode.bytes().all(|b| b.is_ascii_digit())
-        {
+        // `WxH` resolutions are not markers: season sides of 3+ digits and
+        // episode sides of 4+ digits.
+        if is_number(season) && (season.len() >= 3 || (is_number(episode) && episode.len() >= 4)) {
+            continue;
+        }
+        // A revision suffix (`S01E05v2`) does not change the episode.
+        let episode = match episode.split_once('v') {
+            Some((number, revision)) if is_number(number) && is_number(revision) => number,
+            _ => episode,
+        };
+        if !is_number(season) || !is_number(episode) {
             // A malformed episode-looking token cannot be ignored in favor of
             // another valid marker later in the name.
-            if !season.is_empty() && season.bytes().all(|b| b.is_ascii_digit()) {
+            if is_number(season) {
                 return None;
             }
             continue;
@@ -461,6 +507,228 @@ mod tests {
             )
             .0,
             FileSelection::Ambiguous(vec![0, 1])
+        );
+    }
+
+    fn rd_pack(paths: &[&str]) -> Vec<RemoteFile> {
+        let mut pack = files(paths);
+        for (i, file) in pack.iter_mut().enumerate() {
+            file.id = (i + 1).to_string();
+        }
+        pack
+    }
+
+    fn strict(season: u32, ep: u32, path: &str) -> FileSelection {
+        select_file(&episode(season, ep), &files(&[path]))
+    }
+
+    #[test]
+    fn resolutions_are_not_markers() {
+        for name in [
+            "[Grp] Show 01 [BDRip 1448x1080 x264 FLAC].mkv",
+            "Show 01 966x720.mkv",
+            "Show 01 1920x1080.mkv",
+        ] {
+            let pack = rd_pack(&[name]);
+            assert_eq!(
+                hinted(
+                    &episode(1, 1),
+                    &pack,
+                    DebridKind::RealDebrid,
+                    Some(0),
+                    Some(name)
+                )
+                .0,
+                FileSelection::Unique(0),
+                "{name}"
+            );
+        }
+        // A real marker next to a resolution still reads.
+        assert_eq!(
+            strict(1, 5, "Show 1x05 1920x1080.mkv"),
+            FileSelection::Unique(0)
+        );
+        assert_eq!(
+            strict(1, 5, "Show.S01E05.1448x1080.mkv"),
+            FileSelection::Unique(0)
+        );
+        // Resolution-only names are no marker for the strict rule.
+        assert_eq!(strict(1, 1, "Show 1448x1080.mkv"), FileSelection::NotFound);
+    }
+
+    #[test]
+    fn s_digit_inside_a_word_is_not_a_malformed_marker() {
+        let name = "Show 01 Title (1080p x265 q22 FS88 Joy).mkv";
+        let pack = rd_pack(&[name]);
+        assert_eq!(
+            hinted(
+                &episode(1, 1),
+                &pack,
+                DebridKind::RealDebrid,
+                Some(0),
+                Some(name)
+            )
+            .0,
+            FileSelection::Unique(0)
+        );
+        // The marker reader ignores it beside a real marker too.
+        assert_eq!(
+            strict(1, 1, "Show.S01E01.FS88.mkv"),
+            FileSelection::Unique(0)
+        );
+        // A glued full marker is still seen, and still contradicts.
+        let glued = rd_pack(&["ShowS01E03.mkv"]);
+        assert_eq!(
+            hinted(
+                &episode(1, 2),
+                &glued,
+                DebridKind::RealDebrid,
+                Some(0),
+                Some("ShowS01E03.mkv")
+            )
+            .0,
+            FileSelection::NotFound
+        );
+        // A leading malformed `s<digit>` token still refuses.
+        let bad = rd_pack(&["Show.S01Special.mkv"]);
+        assert_eq!(
+            hinted(
+                &episode(1, 1),
+                &bad,
+                DebridKind::RealDebrid,
+                Some(0),
+                Some("Show.S01Special.mkv")
+            )
+            .0,
+            FileSelection::NotFound
+        );
+    }
+
+    #[test]
+    fn revision_suffix_is_allowed() {
+        assert_eq!(
+            strict(1, 5, "[Grp] Show - S01E05v2.mkv"),
+            FileSelection::Unique(0)
+        );
+        assert_eq!(strict(1, 5, "Show 1x05v2.mkv"), FileSelection::Unique(0));
+        assert_eq!(strict(1, 6, "Show 1x05v2.mkv"), FileSelection::NotFound);
+        let name = "[Grp] Show - S01E01v2.mkv";
+        let pack = rd_pack(&[name]);
+        assert_eq!(
+            hinted(
+                &episode(1, 1),
+                &pack,
+                DebridKind::RealDebrid,
+                Some(0),
+                Some(name)
+            )
+            .0,
+            FileSelection::Unique(0)
+        );
+    }
+
+    #[test]
+    fn combined_and_contradicting_markers_stay_refused() {
+        for name in [
+            "Show.S01E01E02.mkv",
+            "Show.S01E01-02.mkv",
+            "Show - [1x16 - 1x17] - Two Parts.mkv",
+            "Show.S01E01.S01E02.mkv",
+            "Show.S01E05v2E06.mkv",
+            "Show.S01E05.06.mkv",
+            "Show.2nd.season.ep.-04x13~'Name'.(BDRip).avi",
+        ] {
+            for (s, e) in [(1, 1), (1, 2), (1, 5), (1, 16), (1, 17), (2, 13)] {
+                assert_eq!(
+                    strict(s, e, name),
+                    FileSelection::NotFound,
+                    "{name} {s}x{e}"
+                );
+                let pack = rd_pack(&[name]);
+                assert_eq!(
+                    hinted(
+                        &episode(s, e),
+                        &pack,
+                        DebridKind::RealDebrid,
+                        Some(0),
+                        Some(name)
+                    )
+                    .0,
+                    FileSelection::NotFound,
+                    "{name} hint {s}x{e}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn index_only_hint_needs_the_files_own_matching_marker() {
+        let pack = rd_pack(&["Show/01.mkv", "Show/02.mkv", "Show/03.mkv"]);
+        // Unnumbered files cannot verify an index: no selection.
+        assert_eq!(
+            hinted(&episode(1, 2), &pack, DebridKind::RealDebrid, Some(1), None),
+            (FileSelection::NotFound, FileSelectionMethod::None)
+        );
+        let marked = rd_pack(&["Show.S01E01.mkv", "Show.S01E02.mkv", "Show.S01E03.mkv"]);
+        assert_eq!(
+            hinted(
+                &episode(1, 2),
+                &marked,
+                DebridKind::RealDebrid,
+                Some(1),
+                None
+            ),
+            (FileSelection::Unique(1), FileSelectionMethod::FileIndex)
+        );
+        // Wrong index: the marker rejects it; the strict rule finds the file.
+        assert_eq!(
+            hinted(
+                &episode(1, 3),
+                &marked,
+                DebridKind::RealDebrid,
+                Some(1),
+                None
+            )
+            .0,
+            FileSelection::Unique(2)
+        );
+        // A blank filename counts as index-only.
+        let blank = select_file_with_hint(
+            &episode(1, 2),
+            &pack,
+            DebridKind::RealDebrid,
+            Some(&FileHint {
+                file_index: Some(1),
+                filename: Some("  ".into()),
+            }),
+        );
+        assert_eq!(blank.0, FileSelection::NotFound);
+        // AllDebrid IDs are never indices.
+        assert_eq!(
+            hinted(
+                &episode(1, 2),
+                &marked,
+                DebridKind::AllDebrid,
+                Some(0),
+                None
+            )
+            .1,
+            FileSelectionMethod::Heuristic
+        );
+    }
+
+    #[test]
+    fn named_hint_with_index_still_allows_unnumbered_files() {
+        let pack = rd_pack(&["Show/01.mkv", "Show/02.mkv"]);
+        assert_eq!(
+            hinted(
+                &episode(1, 2),
+                &pack,
+                DebridKind::RealDebrid,
+                Some(1),
+                Some("02.mkv")
+            ),
+            (FileSelection::Unique(1), FileSelectionMethod::Filename)
         );
     }
 

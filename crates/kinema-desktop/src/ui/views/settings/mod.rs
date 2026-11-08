@@ -106,6 +106,7 @@ pub fn install(coordinator: &Entity<AppCoordinator>, cx: &mut App) {
         CoordinatorEvent::OpenSettings => open(coordinator, Section::General, cx),
         CoordinatorEvent::OpenSettingsAt(destination) => open_at(coordinator, *destination, cx),
         CoordinatorEvent::About => open(coordinator, Section::About, cx),
+        CoordinatorEvent::OpenStreamPicker | CoordinatorEvent::DirectPlay { .. } => {}
         CoordinatorEvent::App(event) => {
             if cx.global::<SettingsWindows>().pending_save == Some(event.generation) {
                 cx.global_mut::<SettingsWindows>().pending_save = None;

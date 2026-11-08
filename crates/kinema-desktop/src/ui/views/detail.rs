@@ -1,6 +1,6 @@
 //! Production title detail. Route-local selection; the shared coordinator owns I/O.
 use crate::controllers::{
-    coordinator::{AppCoordinator, BrowseTitle, PlaybackIntent},
+    coordinator::{AppCoordinator, BrowseTitle, CoordinatorEvent, PlaybackIntent},
     play_session::{PlaySession, PlaySessionEvent, format_bytes},
 };
 use crate::{
@@ -30,6 +30,9 @@ use kinema_core::{
     catalog::CatalogEpisode,
     sources::{IndexerKind, PlaybackTarget, SourceCandidate},
 };
+mod continuity;
+#[cfg(all(test, feature = "ui-probe-test"))]
+mod continuity_tests;
 mod episodes;
 mod facts;
 #[cfg(feature = "ui-probe")]
@@ -296,6 +299,10 @@ pub(crate) struct Detail {
     pending_return_focus: bool,
     /// "Play from beginning" chosen from a context menu, consumed by the next play.
     start_over_requested: bool,
+    /// An episode being played from its stream memory (no stream list).
+    direct: Option<continuity::Direct>,
+    /// The stream list is ordered by closeness to a remembered release.
+    ranking: Option<continuity::Ranking>,
     /// Pending Clear saved progress confirmation: `Some(None)` is the movie.
     clear_confirm: Option<Option<(u32, u32)>>,
     episode_return_focus: Option<(u32, u32)>,
@@ -377,6 +384,9 @@ impl Detail {
                 this.apply_season_request(cx);
                 cx.notify();
             }),
+            cx.subscribe(&coordinator, |this, _, event: &CoordinatorEvent, cx| {
+                this.apply_coordinator_event(event, cx)
+            }),
             cx.subscribe(&indexer, |this, _, event: &SelectEvent<IndexerKind>, cx| {
                 let SelectEvent::Changed(indexer) = event;
                 this.reset_stream_selection();
@@ -425,6 +435,8 @@ impl Detail {
             pending_stream_focus: false,
             pending_return_focus: false,
             start_over_requested: false,
+            direct: None,
+            ranking: None,
             clear_confirm: None,
             episode_return_focus: None,
             page_focus: cx.focus_handle().tab_stop(true),
@@ -454,6 +466,9 @@ impl Detail {
         };
         this.reconcile_similar(cx);
         this.ensure_personal(cx);
+        // Leaving the title ends a direct request and a waiting picker.
+        cx.on_release(|this, cx| this.release_continuity(cx))
+            .detach();
         this
     }
     #[cfg(all(test, feature = "ui-probe-test"))]
@@ -632,6 +647,9 @@ impl Detail {
     /// Drop the chosen episode and, with it, any streams page for it.
     fn clear_episode(&mut self, cx: &mut Context<Self>) {
         self.episode = None;
+        if self.page == Page::Streams {
+            self.end_ranking(cx);
+        }
         if self.is_series() {
             self.target = None;
         }
@@ -690,7 +708,7 @@ impl Detail {
         if next_up.is_some() {
             self.season_chosen = true;
         }
-        if self.season != chosen {
+        if self.season != chosen && !self.keeps_stream_page() {
             self.coordinator.update(cx, |c, cx| {
                 c.cancel_detail_sources(cx);
                 if chosen.is_none() {
@@ -706,9 +724,10 @@ impl Detail {
         self.ensure_season(false, cx);
         if let Some(ep) = &self.episode {
             let episodes = self.episodes(cx);
-            if !episodes
-                .iter()
-                .any(|e| e.season == ep.season && e.number == ep.number)
+            if !self.keeps_stream_page()
+                && !episodes
+                    .iter()
+                    .any(|e| e.season == ep.season && e.number == ep.number)
                 && !self.coordinator.read(cx).tmdb_season.busy()
             {
                 self.clear_episode(cx);
@@ -862,6 +881,7 @@ impl Detail {
     }
     fn close_streams(&mut self, cx: &mut Context<Self>) {
         self.start_over_requested = false;
+        self.end_ranking(cx);
         self.stream_page = streams_page::StreamPage::default();
         tracing::debug!(route = "detail", "UI route changed");
         self.page = Page::Overview;
@@ -937,8 +957,9 @@ impl Detail {
             self.play_subscriptions = vec![
                 cx.subscribe(&session, |this, _, _: &DismissEvent, cx| this.stop_play(cx)),
                 cx.subscribe(&session, move |this, _, event: &PlaySessionEvent, cx| {
-                    let PlaySessionEvent::Retry = event;
-                    this.play_stream_row(index, None, cx);
+                    if let PlaySessionEvent::Retry = event {
+                        this.play_stream_row(index, None, cx);
+                    }
                 }),
                 cx.observe(&session, |_, _, cx| cx.notify()),
             ];
@@ -1031,7 +1052,7 @@ impl Detail {
         match self.primary_action(cx) {
             PrimaryAction::Streams => self.open_streams(cx),
             PrimaryAction::Episodes => self.focus_episodes(cx),
-            PrimaryAction::Continue(season, number) => self.continue_episode(season, number, cx),
+            PrimaryAction::Continue(season, number) => self.play_episode(season, number, None, cx),
             PrimaryAction::Blocked(_) => {}
         }
     }

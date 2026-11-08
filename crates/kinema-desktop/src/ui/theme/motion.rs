@@ -94,6 +94,10 @@ pub mod timing {
     pub const REQUEST_PENDING: Duration = Duration::from_millis(1200);
     /// How long a player status notice (such as "Subtitle added") stays.
     pub const PLAYER_NOTICE: Duration = Duration::from_secs(4);
+    /// Countdown on the player's **Up next** card before the next episode starts.
+    pub const UP_NEXT_COUNTDOWN: Duration = Duration::from_secs(5);
+    /// Step of the **Up next** countdown (one displayed second).
+    pub const UP_NEXT_TICK: Duration = Duration::from_secs(1);
     /// An external subtitle that has not appeared as a track by now failed.
     pub const SUBTITLE_LOAD_TIMEOUT: Duration = Duration::from_secs(5);
     /// Rolling window for the recent download speed.

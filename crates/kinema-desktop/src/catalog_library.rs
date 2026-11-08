@@ -2,6 +2,7 @@
 use super::playback_progress::{
     self, PlaybackProgressOperation, PlaybackProgressResult, PlaybackProgressSnapshot,
 };
+use super::stream_memory::{StreamMemoryOperation, StreamMemoryResult};
 use super::*;
 use kinema_core::watch_progress::PlaybackProgressTarget;
 use kinema_core::{
@@ -87,6 +88,11 @@ pub(crate) struct SeasonSnapshot {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum LibraryOperation {
     PlaybackProgress(PlaybackProgressOperation),
+    #[allow(
+        dead_code,
+        reason = "Playback start (Phase 2) constructs stream-memory operations"
+    )]
+    StreamMemory(StreamMemoryOperation),
     ReadTitles(Vec<TitleRef>),
     ReadEpisodes(Vec<EpisodeRef>),
     List(LibraryQuery),
@@ -116,6 +122,7 @@ pub(crate) enum LibraryOperation {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum LibraryResult {
     PlaybackProgress(PlaybackProgressResult),
+    StreamMemory(StreamMemoryResult),
     /// Positional batch outcomes, including duplicate refs. Only unresolved
     /// identity is per-ref; storage/cache failures fail the operation itself.
     Titles(Vec<Result<PersonalTitle, CatalogError>>),
@@ -132,7 +139,7 @@ pub(crate) enum LibraryResult {
     Season(Vec<PersonalEpisode>),
 }
 
-fn title_id(tx: &Transaction<'_>, reference: &TitleRef) -> Result<i64, CatalogError> {
+pub(super) fn title_id(tx: &Transaction<'_>, reference: &TitleRef) -> Result<i64, CatalogError> {
     let found: Option<i64> = match reference {
         TitleRef::Canonical(id) => tx
             .query_row("SELECT id FROM titles WHERE id=?1", [id.get()], |r| {
@@ -223,11 +230,18 @@ impl CatalogService {
                 .playback_progress_operation(operation)
                 .map(LibraryResult::PlaybackProgress);
         }
+        if let LibraryOperation::StreamMemory(operation) = operation {
+            return self
+                .stream_memory_operation(operation)
+                .map(LibraryResult::StreamMemory);
+        }
         let tx = self
             .connection
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let result = match operation {
-            LibraryOperation::PlaybackProgress(_) => unreachable!(),
+            LibraryOperation::PlaybackProgress(_) | LibraryOperation::StreamMemory(_) => {
+                unreachable!()
+            }
             LibraryOperation::ReadTitles(refs) => {
                 if refs.len() > 500 {
                     return Err(CatalogError::InvalidMetadata);

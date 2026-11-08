@@ -382,6 +382,7 @@ mod tests {
                 metadata(MetadataAction::Sources {
                     indexer: IndexerKind::Torrentio,
                     target: PlaybackTarget::Movie(ImdbId::new("tt0133093").unwrap()),
+                    lane: crate::catalog_worker::SourceLane::Detail,
                 }),
                 "torrentio",
             ),
@@ -393,6 +394,7 @@ mod tests {
                         season: 2,
                         episode: 4,
                     },
+                    lane: crate::catalog_worker::SourceLane::Continuity,
                 }),
                 "peerflix",
             ),

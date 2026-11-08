@@ -126,8 +126,13 @@ impl Detail {
                 ),
             );
         }
+        let generation = self.coordinator.read(cx).sources.generation();
         for i in indices {
-            list = list.child(self.stream_row(i, &sources.candidates[i], provider, cx));
+            let mark = self
+                .ranking
+                .as_ref()
+                .and_then(|ranking| ranking.mark(generation, sources, i));
+            list = list.child(self.stream_row(i, &sources.candidates[i], provider, mark, cx));
         }
         if sources.omitted > 0 {
             list = list.child(
@@ -281,6 +286,7 @@ impl Detail {
         i: usize,
         candidate: &SourceCandidate,
         provider: &'static str,
+        mark: Option<&'static str>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let focus = self.stream_focus[i].clone();
@@ -292,6 +298,9 @@ impl Detail {
             .size(size_label(candidate.size))
             .seeders(candidate.seeders)
             .selected(self.selected == Some(i));
+        if let Some(mark) = mark {
+            row = row.meta(Badge::new(mark).tone(BadgeTone::Primary));
+        }
         if self.busy_session_for(i, cx) {
             row = row.meta(Badge::new("Preparing…").tone(BadgeTone::Primary));
         }

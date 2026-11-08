@@ -54,6 +54,17 @@ pub(crate) struct Request {
     pub mode: Mode,
 }
 
+/// Who asked for a source listing. Each lane has its own worker slot, so the
+/// Streams page and episode-continuity resolution never replace or cancel each
+/// other's request. The cached listing is shared.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum SourceLane {
+    /// The Streams page.
+    Detail,
+    /// Resolving the next, previous or remembered episode's stream.
+    Continuity,
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum MetadataAction {
     Browse {
@@ -67,6 +78,7 @@ pub(crate) enum MetadataAction {
     Sources {
         indexer: IndexerKind,
         target: PlaybackTarget,
+        lane: SourceLane,
     },
     Tmdb(TmdbQuery),
     /// One or several visible titles (at most 20); work is sequential inside one
@@ -306,7 +318,7 @@ fn slot(kind: MediaKind) -> usize {
 
 // Separate kind/indexer operation slots avoid one page starving another while
 // keeping pending metadata bounded to twenty operations, regardless of IDs/pages.
-const METADATA_SLOTS: usize = 20;
+const METADATA_SLOTS: usize = 22;
 
 fn metadata_slot(action: &MetadataAction) -> usize {
     match action {
@@ -320,12 +332,19 @@ fn metadata_slot(action: &MetadataAction) -> usize {
         }
         MetadataAction::Browse { kind, .. } => slot(*kind),
         MetadataAction::Details { kind, .. } => 2 + slot(*kind),
-        MetadataAction::Sources { indexer, target } => {
-            4 + slot(target.kind()) * 2
-                + match indexer {
-                    IndexerKind::Torrentio => 0,
-                    IndexerKind::Peerflix => 1,
-                }
+        MetadataAction::Sources {
+            indexer,
+            target,
+            lane,
+        } => {
+            let indexer = match indexer {
+                IndexerKind::Torrentio => 0,
+                IndexerKind::Peerflix => 1,
+            };
+            match lane {
+                SourceLane::Detail => 4 + slot(target.kind()) * 2 + indexer,
+                SourceLane::Continuity => 20 + indexer,
+            }
         }
         MetadataAction::Tmdb(query) => {
             8 + match query {
@@ -881,7 +900,9 @@ impl Backend for CatalogService {
             MetadataAction::Details { kind, id } => self
                 .read_details(*kind, id)
                 .map(|value| value.map(MetadataSnapshot::Details)),
-            MetadataAction::Sources { indexer, target } => self
+            MetadataAction::Sources {
+                indexer, target, ..
+            } => self
                 .read_sources(*indexer, target)
                 .map(|value| value.map(MetadataSnapshot::Sources)),
             MetadataAction::Tmdb(query) => self
@@ -912,7 +933,9 @@ impl Backend for CatalogService {
             MetadataAction::Details { kind, id } => self
                 .refresh_details(*kind, id)
                 .map(MetadataSnapshot::Details),
-            MetadataAction::Sources { indexer, target } => self
+            MetadataAction::Sources {
+                indexer, target, ..
+            } => self
                 .refresh_sources(*indexer, target)
                 .map(MetadataSnapshot::Sources),
             MetadataAction::Tmdb(query) => self.refresh_tmdb(query).map(MetadataSnapshot::Tmdb),
@@ -2112,6 +2135,52 @@ mod tests {
         assert_eq!(
             mailbox.submit_metadata(browse_request(5, 0, Mode::Load)),
             Submit::Closed
+        );
+    }
+
+    fn sources_request(generation: u64, lane: SourceLane, episode: u32) -> MetadataRequest {
+        MetadataRequest {
+            generation,
+            action: MetadataAction::Sources {
+                indexer: IndexerKind::Torrentio,
+                target: PlaybackTarget::Episode {
+                    series: ImdbId::new("tt1234567").unwrap_or_else(|e| panic!("id: {e}")),
+                    season: 1,
+                    episode,
+                },
+                lane,
+            },
+            mode: Mode::Load,
+        }
+    }
+
+    #[test]
+    fn source_lanes_have_their_own_slots_so_neither_replaces_the_other() {
+        let mailbox = Mailbox::default();
+        // The Streams page and episode-continuity resolution ask about different
+        // episodes of the same indexer at the same time.
+        assert_eq!(
+            mailbox.submit_metadata(sources_request(1, SourceLane::Detail, 1)),
+            Submit::Queued
+        );
+        assert_eq!(
+            mailbox.submit_metadata(sources_request(2, SourceLane::Continuity, 2)),
+            Submit::Queued
+        );
+        let mut generations = Vec::new();
+        while let Some(Work::Metadata(request)) = mailbox.take_work() {
+            generations.push(request.generation);
+            if generations.len() == 2 {
+                break;
+            }
+        }
+        generations.sort_unstable();
+        assert_eq!(generations, [1, 2]);
+        // Within a lane the newest request still replaces the queued one.
+        mailbox.submit_metadata(sources_request(3, SourceLane::Continuity, 2));
+        assert_eq!(
+            mailbox.submit_metadata(sources_request(4, SourceLane::Continuity, 3)),
+            Submit::Replaced
         );
     }
 

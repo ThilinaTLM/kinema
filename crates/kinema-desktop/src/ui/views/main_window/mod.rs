@@ -129,6 +129,15 @@ impl MainWindow {
         let toasts = cx.new(|_| ToastHost::new());
         let subscriptions = vec![
             cx.observe(&toasts, |_, _, cx| cx.notify()),
+            cx.subscribe_in(
+                &coordinator,
+                window,
+                |this, _, event: &CoordinatorEvent, window, cx| {
+                    if matches!(event, CoordinatorEvent::OpenStreamPicker) {
+                        this.open_stream_picker(window, cx);
+                    }
+                },
+            ),
             cx.subscribe(&coordinator, |this, _, event: &CoordinatorEvent, cx| {
                 if matches!(
                     event,

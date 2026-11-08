@@ -41,6 +41,10 @@ struct PendingOpen {
 
 enum PendingProgress {
     Open(PendingOpen),
+    /// Saved progress of the episode a window is about to swap to.
+    SwapOpen {
+        window: String,
+    },
     Begin {
         session: String,
         generation: u64,
@@ -61,6 +65,9 @@ struct Run {
     retries: u8,
     retry_at: Option<Instant>,
     ready: Option<(u64, i64, bool)>,
+    /// The window moved on to another source: nothing from this run is accepted
+    /// any more. It is kept only to resume the episode if the swap is undone.
+    sealed: bool,
 }
 
 #[derive(Default)]
@@ -127,26 +134,7 @@ impl AppCoordinator {
             self.finish_progress_open(pending, None, cx);
             return;
         };
-        let reference = TitleRef::External {
-            kind: match target {
-                PlaybackTarget::Movie(_) => MediaKind::Movie,
-                PlaybackTarget::Episode { .. } => MediaKind::Series,
-            },
-            identifier: ExternalIdentifier {
-                namespace: "imdb".into(),
-                external_id: target.imdb_id().as_str().into(),
-            },
-        };
-        let operation = match target {
-            PlaybackTarget::Movie(_) => LibraryOperation::ReadTitles(vec![reference]),
-            PlaybackTarget::Episode {
-                season, episode, ..
-            } => LibraryOperation::ReadEpisodes(vec![EpisodeRef::Coordinates {
-                title: reference,
-                season,
-                episode,
-            }]),
-        };
+        let operation = progress_read(&target);
         if let Err(error) = self.submit_progress(operation, PendingProgress::Open(pending)) {
             self.set_notice(NoticeTopic::Progress, error);
         }
@@ -170,25 +158,10 @@ impl AppCoordinator {
             self.playback
                 .runs
                 .entry(pending.session.clone())
-                .or_insert(Run {
-                    snapshot,
-                    generation: 0,
-                    sequence: 0,
-                    in_flight: false,
-                    latest: None,
-                    retries: 0,
-                    retry_at: None,
-                    ready: None,
-                });
+                .or_insert(Run::new(snapshot));
         }
-        let launch = snapshot.map(|s| crate::ui::views::player::PlaybackLaunch {
-            subject: s.target,
-            epoch: s.epoch,
-            run: 0,
-            checkpoint: s.checkpoint.map(|c| c.observation),
-            watched: s.watch.is_some_and(|w| w.watched),
-            intent: pending.intent,
-        });
+        let launch = snapshot.map(|s| launch_for(&s, pending.intent));
+        let (session, target) = (pending.session.clone(), pending.subtitle_target.clone());
         if crate::ui::views::player::open(
             pending.session.clone(),
             pending.mode,
@@ -208,6 +181,8 @@ impl AppCoordinator {
                 "Embedded player could not be opened.",
             );
             self.queue_embedded_release(pending.session, cx);
+        } else {
+            self.announce_subject(&session, target, cx);
         }
     }
 
@@ -308,6 +283,7 @@ impl AppCoordinator {
                         if !self.send_pending_ready(&session, cx) {
                             self.send_latest_checkpoint(&session, cx);
                         }
+                        self.advance_swaps(cx);
                     }
                     _ => {
                         if run.latest.is_none() {
@@ -322,32 +298,16 @@ impl AppCoordinator {
                         );
                         player::progress_notice(&session, sample.generation, true, cx);
                         self.send_pending_ready(&session, cx);
+                        self.advance_swaps(cx);
                     }
                 }
             }
+            PendingProgress::SwapOpen { window } => {
+                let result = read_snapshot(&event.result);
+                self.swap_progress_read(&window, result, cx);
+            }
             PendingProgress::Open(pending) => {
-                let result = match &event.result {
-                    Ok(LibraryResult::Titles(states)) => states
-                        .first()
-                        .ok_or_else(|| "Movie progress was not returned.".to_owned())
-                        .and_then(|s| {
-                            s.as_ref().map(|s| s.playback_progress).map_err(|_| {
-                                "Movie identity could not be resolved for progress.".to_owned()
-                            })
-                        }),
-                    Ok(LibraryResult::Episodes(states)) => states
-                        .first()
-                        .ok_or_else(|| "Episode progress was not returned.".to_owned())
-                        .and_then(|s| {
-                            s.as_ref().map(|s| Some(s.playback_progress)).map_err(|_| {
-                                "Episode identity could not be resolved for progress.".to_owned()
-                            })
-                        }),
-                    Err(_) => Err(
-                        "Saved progress could not be read. Retry playback from Transfers.".into(),
-                    ),
-                    _ => Err("Saved progress returned an unexpected response.".into()),
-                };
+                let result = read_snapshot(&event.result);
                 match result {
                     Ok(snapshot) => self.finish_progress_open(pending, snapshot, cx),
                     Err(error) => {
@@ -454,7 +414,8 @@ impl AppCoordinator {
         let Some(run) = self.playback.runs.get_mut(&session) else {
             return;
         };
-        if sample.generation != run.generation
+        if run.sealed
+            || sample.generation != run.generation
             || sample.subject != run.snapshot.target
             || sample.run != run.snapshot.active_run
             || sample.epoch != run.snapshot.epoch
@@ -463,6 +424,7 @@ impl AppCoordinator {
             return;
         }
         run.sequence = sample.sequence;
+        let observation = sample.observation;
         if sample.force {
             run.retry_at = None;
         }
@@ -472,6 +434,8 @@ impl AppCoordinator {
             run.retry_at = None;
         }
         self.send_latest_checkpoint(&session, cx);
+        // At 80% of the episode the next one is resolved ahead of time.
+        self.flow_progress(&session, observation, cx);
     }
     fn send_latest_checkpoint(&mut self, session: &str, cx: &mut Context<Self>) {
         let Some(run) = self.playback.runs.get_mut(session) else {
@@ -520,6 +484,7 @@ impl AppCoordinator {
         for session in due {
             self.send_latest_checkpoint(&session, cx);
         }
+        self.advance_swaps(cx);
         self.playback.runs.retain(|id, run| {
             self.sessions.iter().any(|s| &s.session.id == id)
                 || run.in_flight
@@ -562,6 +527,173 @@ impl AppCoordinator {
                     .await;
             }
         })
+    }
+}
+
+impl Run {
+    fn new(snapshot: PlaybackProgressSnapshot) -> Self {
+        Self {
+            snapshot,
+            generation: 0,
+            sequence: 0,
+            in_flight: false,
+            latest: None,
+            retries: 0,
+            retry_at: None,
+            ready: None,
+            sealed: false,
+        }
+    }
+}
+
+/// What the player needs to start a run from saved progress.
+pub(super) fn launch_for(
+    snapshot: &PlaybackProgressSnapshot,
+    intent: PlaybackIntent,
+) -> crate::ui::views::player::PlaybackLaunch {
+    crate::ui::views::player::PlaybackLaunch {
+        subject: snapshot.target,
+        epoch: snapshot.epoch,
+        run: 0,
+        checkpoint: snapshot.checkpoint.map(|c| c.observation),
+        watched: snapshot.watch.is_some_and(|w| w.watched),
+        intent,
+    }
+}
+
+/// The catalog read that returns a target's saved progress.
+fn progress_read(target: &PlaybackTarget) -> LibraryOperation {
+    let reference = TitleRef::External {
+        kind: match target {
+            PlaybackTarget::Movie(_) => MediaKind::Movie,
+            PlaybackTarget::Episode { .. } => MediaKind::Series,
+        },
+        identifier: ExternalIdentifier {
+            namespace: "imdb".into(),
+            external_id: target.imdb_id().as_str().into(),
+        },
+    };
+    match target {
+        PlaybackTarget::Movie(_) => LibraryOperation::ReadTitles(vec![reference]),
+        PlaybackTarget::Episode {
+            season, episode, ..
+        } => LibraryOperation::ReadEpisodes(vec![EpisodeRef::Coordinates {
+            title: reference,
+            season: *season,
+            episode: *episode,
+        }]),
+    }
+}
+
+/// Saved progress from a [`progress_read`] result. `Ok(None)` is a movie with no
+/// progress record; a failed read is never the same as no progress.
+fn read_snapshot(
+    result: &Result<LibraryResult, String>,
+) -> Result<Option<PlaybackProgressSnapshot>, String> {
+    match result {
+        Ok(LibraryResult::Titles(states)) => states
+            .first()
+            .ok_or_else(|| "Movie progress was not returned.".to_owned())
+            .and_then(|s| {
+                s.as_ref()
+                    .map(|s| s.playback_progress)
+                    .map_err(|_| "Movie identity could not be resolved for progress.".to_owned())
+            }),
+        Ok(LibraryResult::Episodes(states)) => states
+            .first()
+            .ok_or_else(|| "Episode progress was not returned.".to_owned())
+            .and_then(|s| {
+                s.as_ref()
+                    .map(|s| Some(s.playback_progress))
+                    .map_err(|_| "Episode identity could not be resolved for progress.".to_owned())
+            }),
+        Err(_) => Err("Saved progress could not be read. Retry playback from Transfers.".into()),
+        _ => Err("Saved progress returned an unexpected response.".into()),
+    }
+}
+
+/// Run bookkeeping the source swap needs ([`super::continuity`]).
+impl AppCoordinator {
+    /// Reads the saved progress of `target` for a window about to swap to it.
+    pub(super) fn read_progress_for_swap(
+        &mut self,
+        window: &str,
+        target: &PlaybackTarget,
+    ) -> Result<(), String> {
+        self.submit_progress(
+            progress_read(target),
+            PendingProgress::SwapOpen {
+                window: window.into(),
+            },
+        )
+    }
+    /// True when the run has no save in flight or waiting: every observation
+    /// handed to it was acknowledged (or there is no run to save).
+    pub(super) fn run_drained(&self, session: &str) -> bool {
+        self.playback
+            .runs
+            .get(session)
+            .is_none_or(|run| !run.in_flight && run.latest.is_none() && run.ready.is_none())
+    }
+    pub(super) fn seal_run(&mut self, session: &str) {
+        if let Some(run) = self.playback.runs.get_mut(session) {
+            run.sealed = true;
+            run.latest = None;
+            run.retry_at = None;
+        }
+    }
+    pub(super) fn unseal_run(&mut self, session: &str) {
+        if let Some(run) = self.playback.runs.get_mut(session) {
+            run.sealed = false;
+        }
+    }
+    pub(super) fn install_run(&mut self, session: &str, snapshot: PlaybackProgressSnapshot) {
+        self.playback
+            .runs
+            .insert(session.to_owned(), Run::new(snapshot));
+    }
+    pub(super) fn drop_run(&mut self, session: &str) {
+        self.playback.runs.remove(session);
+    }
+    /// Saved progress of a sealed run, to resume it if the swap is undone.
+    pub(super) fn sealed_snapshot(&self, session: &str) -> Option<PlaybackProgressSnapshot> {
+        self.playback.runs.get(session).map(|run| run.snapshot)
+    }
+    #[cfg(all(test, feature = "ui-probe-test"))]
+    pub(super) fn run_sealed(&self, session: &str) -> Option<bool> {
+        self.playback.runs.get(session).map(|run| run.sealed)
+    }
+    /// A save in flight (not yet acknowledged) for the session's run.
+    #[cfg(all(test, feature = "ui-probe-test"))]
+    pub(crate) fn fixture_save_in_flight(&mut self, session: &str, in_flight: bool) {
+        if let Some(run) = self.playback.runs.get_mut(session) {
+            run.in_flight = in_flight;
+        }
+    }
+    /// `(sequence, generation, latest observation waiting)` of the session's run.
+    #[cfg(all(test, feature = "ui-probe-test"))]
+    pub(crate) fn fixture_run_state(&self, session: &str) -> Option<(u64, u64, bool)> {
+        self.playback
+            .runs
+            .get(session)
+            .map(|run| (run.sequence, run.generation, run.latest.is_some()))
+    }
+    #[cfg(all(test, feature = "ui-probe-test"))]
+    pub(crate) fn fixture_clear_latest(&mut self, session: &str) {
+        if let Some(run) = self.playback.runs.get_mut(session) {
+            run.latest = None;
+            run.retry_at = None;
+        }
+    }
+    #[cfg(all(test, feature = "ui-probe-test"))]
+    pub(crate) fn fixture_begin_run(&mut self, session: &str, generation: u64) {
+        if let Some(run) = self.playback.runs.get_mut(session) {
+            run.generation = generation;
+        }
+    }
+    #[cfg(all(test, feature = "ui-probe-test"))]
+    pub(crate) fn fixture_requests_made(&self) -> u64 {
+        self.playback.next
     }
 }
 

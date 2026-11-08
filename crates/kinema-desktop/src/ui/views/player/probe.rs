@@ -247,6 +247,14 @@ pub enum SubtitleScene {
     SearchKeyRejected,
     /// `player-search-text`: local file, waiting for a typed title.
     SearchText,
+    /// `player-dock`: Previous disabled (first episode), Next enabled.
+    DockNeighbours,
+    /// `player-dock-busy`: Next resolving (busy), Previous enabled.
+    DockBusy,
+    /// `player-dock-failure`: both enabled, with the failure notice in the dock.
+    DockFailure,
+    /// `player-up-next`: the end-of-file card three seconds into its countdown.
+    UpNext,
 }
 
 #[cfg(feature = "ui-probe")]
@@ -359,6 +367,18 @@ fn run_probe_inner(
                         view.subtitle_notice = Some((SubtitleNotice::Added { skipped: 1 }, Instant::now()));
                     }
                     match scene {
+                        SubtitleScene::DockNeighbours => view.neighbours = Neighbours { previous: NeighbourState::Disabled, next: NeighbourState::Enabled },
+                        SubtitleScene::DockBusy => view.neighbours = Neighbours { previous: NeighbourState::Enabled, next: NeighbourState::Busy },
+                        SubtitleScene::DockFailure => {
+                            view.neighbours = Neighbours { previous: NeighbourState::Enabled, next: NeighbourState::Enabled };
+                            view.neighbour_notice = Some((Some(NeighbourDirection::Next), Instant::now()));
+                        }
+                        SubtitleScene::UpNext => {
+                            view.neighbours = Neighbours { previous: NeighbourState::Enabled, next: NeighbourState::Enabled };
+                            view.state.ended = true;
+                            view.state.paused = true;
+                            view.up_next = Some(UpNext::fixture(3));
+                        }
                         SubtitleScene::Drop => view.drop_hover = Some(true),
                         SubtitleScene::Menu => {
                             // One external track as if downloaded: "OpenSubtitles · ASS".

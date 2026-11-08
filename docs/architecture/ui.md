@@ -96,6 +96,13 @@ accessible names.
   watched and other actions are secondary buttons from the same 32 px family.
 - Detail actions are **the same from every entry point** (Discover, Library,
   search, recommendations). Only the Back target differs.
+- **Continue and Resume play without the stream list** when Kinema remembers
+  what you watched (see [playback](playback.md#choosing-the-neighbours-stream)):
+  progress and failures show in an inline play panel below the hero, which also
+  carries **Choose stream**. The hero has the same **Choose stream** button beside
+  Continue, and episode menus offer **Play** and **Choose stream**. Clicking an
+  episode card still opens its stream list. A stream picked from the list is
+  remembered like any other.
 - Enrichment arrives asynchronously, is checked by generation, and never moves
   focus.
 
@@ -103,6 +110,12 @@ accessible names.
 
 - A separate route reached from Detail with the `COLUMN` slide. Esc or Back
   returns to Detail with focus restored.
+- When the list is opened for a remembered release (no stream to play
+  directly) or for a player window's Next/Previous, it is ordered by closeness
+  to that release, says "Closest matches first", marks the top rows **Best
+  match** / **Close match**, and selects the first. Sort preferences do not apply
+  while it is ranked. Back or Esc from a player window's list returns that
+  window's control to Enabled; picking a stream there plays into that window.
 - It has a compact header, filter controls and a list. The list shows parsed
   quality, codec and audio tags, size, seeders, and **account presence** in the
   debrid service. Account presence is not a cache or readiness check.

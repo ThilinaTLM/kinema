@@ -131,6 +131,8 @@ pub mod player {
     pub const HELP_MOUSE_LABEL_MAX: Pixels = px(132.);
     pub const DIAGNOSTICS_TOP: Pixels = px(72.);
     pub const DIAGNOSTICS_MAX_WIDTH: Pixels = px(360.);
+    /// Width of the **Up next** card above the dock.
+    pub const UP_NEXT_WIDTH: Pixels = px(320.);
 }
 
 /// Primitive-level metrics that are not component sizes.

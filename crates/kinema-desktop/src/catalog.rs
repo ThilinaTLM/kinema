@@ -53,9 +53,11 @@ mod normalized_tmdb;
 pub(crate) mod playback_progress;
 #[path = "catalog_schema.rs"]
 mod schema;
+#[path = "catalog_stream_memory.rs"]
+pub(crate) mod stream_memory;
 
 const ENDPOINT: &str = "https://v3-cinemeta.strem.io/";
-const SCHEMA_VERSION: i64 = 8;
+const SCHEMA_VERSION: i64 = 9;
 const MAX_EPISODES: usize = 20_000;
 const MAX_URL_BYTES: usize = 4096;
 const MAX_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
@@ -194,6 +196,7 @@ fn initialize_catalog(connection: &mut Connection) -> Result<(), CatalogError> {
     schema::migrate(&tx)?;
     schema::migrate_library(&tx)?;
     schema::migrate_playback_progress(&tx)?;
+    schema::migrate_stream_memory(&tx)?;
     tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     tx.commit()?;
     Ok(())
@@ -306,7 +309,10 @@ impl CatalogService {
             if (4..7).contains(&version) {
                 schema::migrate_library(&tx)?;
             }
-            schema::migrate_playback_progress(&tx)?;
+            if version < 8 {
+                schema::migrate_playback_progress(&tx)?;
+            }
+            schema::migrate_stream_memory(&tx)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             tx.commit()?;
         }
@@ -1446,7 +1452,7 @@ mod tests {
             [],
             |row| row.get(0),
         )?;
-        assert_eq!(tables, 17);
+        assert_eq!(tables, 19);
         assert_eq!(
             service
                 .connection
@@ -1503,7 +1509,7 @@ mod tests {
             [],
             |row| row.get(0),
         )?;
-        assert_eq!(tables, 17);
+        assert_eq!(tables, 19);
         assert_eq!(
             connection.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))?,
             SCHEMA_VERSION
@@ -1746,7 +1752,7 @@ mod tests {
         let dir = tempfile::tempdir()?;
         let path = dir.path().join("v5");
         let service = CatalogService::open(&path)?;
-        service.connection.execute_batch("DROP TABLE movie_playback_progress; DROP TABLE episode_playback_progress; DROP TABLE library_entries; DROP TABLE movie_watch_state; DROP TABLE episode_watch_state;")?;
+        service.connection.execute_batch("DROP TABLE season_release_memory; DROP TABLE episode_stream_memory; DROP TABLE movie_playback_progress; DROP TABLE episode_playback_progress; DROP TABLE library_entries; DROP TABLE movie_watch_state; DROP TABLE episode_watch_state;")?;
         service.connection.pragma_update(None, "user_version", 5)?;
         drop(service);
         let service = CatalogService::open(&path)?;
