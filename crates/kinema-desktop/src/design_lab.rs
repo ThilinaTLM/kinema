@@ -2357,11 +2357,14 @@ impl Render for Lab {
 }
 
 // ── P4 Settings: append-only production fixture scene registrations ──────────
-const SETTINGS_SCENES: [&str; 8] = [
+const SETTINGS_SCENES: [&str; 11] = [
     "settings-general",
     "settings-accounts-no-token",
     "settings-accounts",
+    "settings-accounts-no-subtitle-key",
+    "settings-accounts-login-entry",
     "settings-playback",
+    "settings-playback-subtitles",
     "settings-keyboard-mouse",
     "settings-storage",
     "settings-appearance",
@@ -2380,8 +2383,11 @@ fn open_settings_fixture(
     };
     use settings::{Section, SettingsWindow};
     let section = match scene {
-        "settings-accounts" | "settings-accounts-no-token" => Section::Accounts,
-        "settings-playback" => Section::Playback,
+        "settings-accounts"
+        | "settings-accounts-no-token"
+        | "settings-accounts-no-subtitle-key"
+        | "settings-accounts-login-entry" => Section::Accounts,
+        "settings-playback" | "settings-playback-subtitles" => Section::Playback,
         "settings-keyboard-mouse" => Section::KeyboardMouse,
         "settings-storage" => Section::Storage,
         "settings-appearance" => Section::Appearance,
@@ -2390,7 +2396,15 @@ fn open_settings_fixture(
     };
     options.window_bounds = Some(WindowBounds::Windowed(Bounds {
         origin: point(px(0.), px(0.)),
-        size: size(px(860.), px(600.)),
+        // The Accounts page is taller than the default capture.
+        size: size(
+            px(860.),
+            px(if section == Section::Accounts {
+                900.
+            } else {
+                600.
+            }),
+        ),
     }));
     if let Err(error) = cx.open_window(options, |window, cx| {
         let coordinator = cx.new(|cx| {
@@ -2413,6 +2427,12 @@ fn open_settings_fixture(
                         [kinema_core::provider::ProviderId::Cinemeta]
                     },
                 ),
+                subtitle_languages: if scene == "settings-playback-subtitles" {
+                    kinema_core::subtitle_languages::SubtitleLanguages::new(["en", "pt", "es"])
+                        .unwrap_or_default()
+                } else {
+                    Default::default()
+                },
                 ..Default::default()
             });
             state.usage = Some(crate::media::UsageSnapshot {
@@ -2423,10 +2443,17 @@ fn open_settings_fixture(
             state
         });
         let no_token = scene == "settings-accounts-no-token";
+        let no_subtitle_key = scene == "settings-accounts-no-subtitle-key";
         cx.new(|cx| {
             let mut view = SettingsWindow::fixture(coordinator, section, window, cx);
             if no_token {
                 view.fixture_tmdb_missing();
+            }
+            if no_subtitle_key {
+                view.fixture_opensubtitles_missing();
+            }
+            if scene == "settings-accounts-login-entry" {
+                view.fixture_login_entry(cx);
             }
             view
         })

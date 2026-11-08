@@ -3,6 +3,7 @@
 use crate::ui::theme::motion::timing;
 use std::time::Instant;
 
+use super::search_model::ONLINE_SOURCE;
 use kinema_core::tracks::{MediaNames, TrackFacts, TrackLabel, TrackRole};
 use kinema_mpv::{Chapter, MAX_VOLUME, Track, TrackKind};
 
@@ -183,6 +184,7 @@ pub fn track_labels(
     kind: TrackKind,
     tracks: &[&Track],
     names: Option<MediaNames<'_>>,
+    online: &[i64],
 ) -> Vec<TrackLabel> {
     let role = if kind == TrackKind::Audio {
         TrackRole::Audio
@@ -200,6 +202,7 @@ pub fn track_labels(
             external: t.external,
             forced: t.forced,
             hearing_impaired: t.hearing_impaired,
+            source: (t.external && online.contains(&t.id)).then_some(ONLINE_SOURCE),
         })
         .collect();
     kinema_core::tracks::track_labels(role, &facts, names)
@@ -345,10 +348,15 @@ mod tests {
             channels: None,
         };
         let labels = |tracks: &[Track]| {
-            track_labels(TrackKind::Audio, &tracks.iter().collect::<Vec<_>>(), None)
-                .into_iter()
-                .map(|l| l.primary)
-                .collect::<Vec<_>>()
+            track_labels(
+                TrackKind::Audio,
+                &tracks.iter().collect::<Vec<_>>(),
+                None,
+                &[],
+            )
+            .into_iter()
+            .map(|l| l.primary)
+            .collect::<Vec<_>>()
         };
         assert_eq!(
             labels(&[

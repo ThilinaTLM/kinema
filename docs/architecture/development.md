@@ -113,6 +113,7 @@ The scenes include `components`, `browse`, `menus`, `sheet`, `detail`,
 `series`, `series-streams`, `states`, `tokens` and `motion`, plus `detail-live-*`
 fixtures, `player-subtitles` (drop hint and subtitle notice held on screen),
 `player-tracks` (subtitle menu over messy real-world track metadata),
+`player-search*` (online subtitle sheet: results, loading, empty, quota, no key, key rejected, typed title),
 and `player`/`player-native` (real libmpv on supplied media,
 `--smoke-seconds` 1–15). The full list is in `design_lab.rs` and
 `bin/ui-probe.rs`. **Add a scene or row for every new component or visual

@@ -34,6 +34,11 @@ impl AppPaths {
         }
     }
 
+    /// Downloaded subtitle files (`cache/subtitles`), resolved like `cache/artwork`.
+    pub fn subtitle_cache(&self) -> PathBuf {
+        self.cache.join("subtitles")
+    }
+
     fn development(root: PathBuf) -> Self {
         Self {
             data: root.clone(),
@@ -53,5 +58,6 @@ mod tests {
         assert_eq!(paths.data, root);
         assert_eq!(paths.config, paths.data);
         assert_eq!(paths.cache, paths.data);
+        assert_eq!(paths.subtitle_cache(), root.join("subtitles"));
     }
 }

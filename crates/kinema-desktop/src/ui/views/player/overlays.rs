@@ -19,6 +19,9 @@ impl PlayerWindow {
         if same {
             return;
         }
+        if kind == MenuKind::Subtitles {
+            self.refresh_online_key(cx);
+        }
         let items = self.menu_items(kind, cx);
         if items.is_empty() {
             return;
@@ -87,7 +90,8 @@ impl PlayerWindow {
                     title: &self.title.name,
                     episode_name: self.title.episode_name.as_deref(),
                 };
-                let labels = track_labels(wanted, &tracks, Some(names));
+                let online = self.online.track_ids(self.state.media_generation);
+                let labels = track_labels(wanted, &tracks, Some(names), online);
                 let mut items = Vec::new();
                 if subtitles {
                     let none_selected = !self
@@ -126,6 +130,18 @@ impl PlayerWindow {
                         false,
                         Rc::new(|view, cx| view.request_subtitle_files(cx)),
                     ));
+                    let weak = view.clone();
+                    items.push(MenuItem::Action {
+                        label: "Search online".into(),
+                        shortcut: None,
+                        icon: None,
+                        disabled_reason: self.search_unavailable_reason().map(Into::into),
+                        checked: false,
+                        handler: Rc::new(move |window, cx| {
+                            let _ =
+                                weak.update(cx, |view, cx| view.open_subtitle_search(window, cx));
+                        }),
+                    });
                 }
                 items
             }

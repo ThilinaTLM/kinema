@@ -14,7 +14,10 @@ mod player;
 mod render;
 mod software;
 
-pub use player::{Config, MAX_SUBTITLE_FILES, MAX_VOLUME, Player};
+pub use player::{
+    Config, MAX_SUBTITLE_FILES, MAX_SUBTITLE_LANG_BYTES, MAX_SUBTITLE_TITLE_BYTES, MAX_VOLUME,
+    Player, SubtitleFile,
+};
 pub use software::Frame;
 
 #[cfg(feature = "gpu-surface")]

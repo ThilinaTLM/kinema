@@ -1,11 +1,17 @@
 //! Bounded application composition. No filesystem, vault, network or process work
 //! happens in submit/poll; dropping the handle signals shutdown without joining.
 use crate::{
-    credentials::{CredentialError, CredentialStore, MetadataCredentialStore, SecretString},
+    credentials::{
+        CredentialError, CredentialStore, MetadataCredentialStore, OpenSubtitlesCredentialStore,
+        OpenSubtitlesStatus, SecretString,
+    },
     media::{MediaError, MediaService, PlaybackSession, UsageSnapshot},
     paths::AppPaths,
     player,
-    providers::{DebridClient, DebridError, PreparedTorrent, ResolvedMedia},
+    providers::{
+        DebridClient, DebridError, PreparedTorrent, ResolvedMedia,
+        opensubtitles::{OpenSubtitlesClient, OpenSubtitlesError, default_user_agent},
+    },
     settings::{Settings, SettingsError, SettingsStore},
     tmdb::TmdbClient,
 };
@@ -49,6 +55,12 @@ pub enum AppAction {
     },
     DeleteTmdbCredential,
     TestTmdbCredential,
+    /// Reads which OpenSubtitles credentials exist (on demand, never at startup).
+    LoadOpenSubtitles,
+    /// `ApiKey` proves the key with one fixed search; `Login` signs in and reads the
+    /// allowance. Neither spends download allowance.
+    CheckOpenSubtitles(OpenSubtitlesPart),
+    EditOpenSubtitles(OpenSubtitlesEdit),
     Prepare {
         target: PlaybackTarget,
         candidate: SourceCandidate,
@@ -69,6 +81,29 @@ pub enum AppAction {
         session_id: String,
     },
 }
+/// Which OpenSubtitles credential a Test exercises.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OpenSubtitlesPart {
+    ApiKey,
+    Login,
+}
+/// Download allowance reported for a signed-in OpenSubtitles account.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OpenSubtitlesAllowance {
+    pub remaining: Option<u32>,
+    pub allowed: Option<u32>,
+}
+/// One OpenSubtitles credential mutation; values are secrets and never formatted.
+#[derive(Debug)]
+pub enum OpenSubtitlesEdit {
+    ApiKey(SecretString),
+    Login {
+        username: SecretString,
+        password: SecretString,
+    },
+    RemoveApiKey,
+    RemoveLogin,
+}
 impl AppAction {
     pub(crate) fn operation(&self) -> &'static str {
         match self {
@@ -80,6 +115,9 @@ impl AppAction {
             Self::SetTmdbCredential { .. } => "set_tmdb_credential",
             Self::DeleteTmdbCredential => "delete_tmdb_credential",
             Self::TestTmdbCredential => "test_tmdb_credential",
+            Self::LoadOpenSubtitles => "load_opensubtitles",
+            Self::CheckOpenSubtitles(_) => "check_opensubtitles",
+            Self::EditOpenSubtitles(_) => "edit_opensubtitles",
             Self::Prepare { .. } => "prepare",
             Self::PlayFile { .. } => "play_file",
             Self::PlayLocal { .. } => "play_local",
@@ -179,6 +217,8 @@ pub enum AppOutcome {
         session: PlaybackSession,
         file_name: String,
         mode: player::PlayerChoice,
+        /// Read-only, weak lookup of hashable bytes for subtitle search.
+        hash_windows: Option<crate::media::HashWindows>,
     },
     CredentialChecked {
         provider: DebridKind,
@@ -187,6 +227,15 @@ pub enum AppOutcome {
         status: CredentialState,
     },
     TmdbCredentialChecked,
+    /// Current OpenSubtitles credential presence after a load or edit.
+    OpenSubtitles {
+        status: OpenSubtitlesStatus,
+    },
+    /// The tested part works. `allowance` is present only for a login check.
+    OpenSubtitlesChecked {
+        part: OpenSubtitlesPart,
+        allowance: Option<OpenSubtitlesAllowance>,
+    },
     MediaFailed {
         session_id: String,
         message: String,
@@ -514,6 +563,8 @@ fn family(action: &AppAction) -> Option<u8> {
         AppAction::TestCredential(DebridKind::RealDebrid) => Some(3),
         AppAction::TestCredential(DebridKind::AllDebrid) => Some(4),
         AppAction::TestTmdbCredential => Some(5),
+        AppAction::CheckOpenSubtitles(OpenSubtitlesPart::ApiKey) => Some(6),
+        AppAction::CheckOpenSubtitles(OpenSubtitlesPart::Login) => Some(7),
         _ => None,
     }
 }
@@ -792,6 +843,11 @@ impl Application {
             | AppAction::TestTmdbCredential => {
                 span.record("provider", "tmdb");
             }
+            AppAction::LoadOpenSubtitles
+            | AppAction::CheckOpenSubtitles(_)
+            | AppAction::EditOpenSubtitles(_) => {
+                span.record("provider", "opensubtitles");
+            }
             _ => {}
         }
         let _span = span.entered();
@@ -863,6 +919,27 @@ impl Application {
                         &cancel,
                     )?;
                     Ok(AppOutcome::TmdbCredentialChecked)
+                }
+                AppAction::LoadOpenSubtitles => {
+                    let status = OpenSubtitlesCredentialStore::new()
+                        .status()
+                        .map_err(|e| e.to_string())?;
+                    Ok(AppOutcome::OpenSubtitles { status })
+                }
+                AppAction::CheckOpenSubtitles(part) => {
+                    let allowance = check_opensubtitles(
+                        &OpenSubtitlesCredentialStore::new(),
+                        |key| OpenSubtitlesClient::new(key, default_user_agent()),
+                        part,
+                        &cancel,
+                    )?;
+                    Ok(AppOutcome::OpenSubtitlesChecked { part, allowance })
+                }
+                AppAction::EditOpenSubtitles(edit) => {
+                    let store = OpenSubtitlesCredentialStore::new();
+                    edit_opensubtitles(&store, edit)?;
+                    let status = store.status().map_err(|e| e.to_string())?;
+                    Ok(AppOutcome::OpenSubtitles { status })
                 }
                 AppAction::TestCredential(provider) => {
                     validate(provider)?;
@@ -1031,6 +1108,7 @@ impl Application {
                             session,
                             file_name: record.file_name.clone(),
                             mode: record.player.clone(),
+                            hash_windows: self.media.as_ref().map(MediaService::hash_windows),
                         });
                     }
                     if let Some(child) =
@@ -1106,6 +1184,7 @@ impl Application {
                 session,
                 file_name,
                 mode: choice,
+                hash_windows: self.media.as_ref().map(MediaService::hash_windows),
             }
         } else {
             AppOutcome::PlaybackStarted { session, file_name }
@@ -1152,6 +1231,70 @@ fn update_metadata_credential(
             CredentialState::Present
         },
     })
+}
+
+/// Removing something already absent is success: the goal state holds.
+fn edit_opensubtitles(
+    store: &OpenSubtitlesCredentialStore,
+    edit: OpenSubtitlesEdit,
+) -> Result<(), String> {
+    let result = match edit {
+        OpenSubtitlesEdit::ApiKey(value) => store.set_api_key(value),
+        OpenSubtitlesEdit::Login { username, password } => store.set_login(username, password),
+        OpenSubtitlesEdit::RemoveApiKey => match store.delete_api_key() {
+            Err(CredentialError::Missing) => Ok(()),
+            other => other,
+        },
+        OpenSubtitlesEdit::RemoveLogin => match store.delete_login() {
+            Err(CredentialError::Missing) => Ok(()),
+            other => other,
+        },
+    };
+    result.map_err(|e| e.to_string())
+}
+
+/// Reads the saved credentials and exercises one part. Failures keep the adapter's
+/// distinct messages (key rejected, login rejected, service failure, not configured).
+fn check_opensubtitles(
+    store: &OpenSubtitlesCredentialStore,
+    make_client: impl FnOnce(SecretString) -> Result<OpenSubtitlesClient, OpenSubtitlesError>,
+    part: OpenSubtitlesPart,
+    cancel: &AtomicBool,
+) -> Result<Option<OpenSubtitlesAllowance>, String> {
+    use kinema_core::subtitle_search::SubtitleQuery;
+    check(cancel)?;
+    let credentials = store.credentials().map_err(|e| e.to_string())?;
+    check(cancel)?;
+    let login = credentials.login;
+    let client = make_client(credentials.api_key).map_err(|e| e.to_string())?;
+    match part {
+        OpenSubtitlesPart::Login => {
+            let (username, password) = login.ok_or_else(|| CredentialError::Missing.to_string())?;
+            let session = client
+                .login(username.expose(), &password, cancel)
+                .map_err(|e| e.to_string())?;
+            let info = client
+                .user_info(&session, cancel)
+                .map_err(|e| e.to_string())?;
+            Ok(Some(OpenSubtitlesAllowance {
+                remaining: info.remaining_downloads.or(session.remaining_downloads),
+                allowed: info.allowed_downloads.or(session.allowed_downloads),
+            }))
+        }
+        OpenSubtitlesPart::ApiKey => {
+            // One fixed, harmless search proves the key without spending allowance.
+            let query = SubtitleQuery {
+                target: None,
+                text: Some("matrix".into()),
+                languages: vec!["en".into()],
+                moviehash: None,
+            };
+            client
+                .search(&query, None, cancel)
+                .map_err(|e| e.to_string())?;
+            Ok(None)
+        }
+    }
 }
 
 fn test_credential<E: std::fmt::Display>(
@@ -2682,6 +2825,189 @@ mod tests {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .is_empty()
+        );
+        Ok(())
+    }
+    #[test]
+    fn opensubtitles_edits_are_idempotent_removals_and_report_failures() -> Result<(), String> {
+        let store = crate::credentials::test_opensubtitles_store();
+        // Removing what is absent already satisfies the request.
+        edit_opensubtitles(&store, OpenSubtitlesEdit::RemoveApiKey)?;
+        edit_opensubtitles(&store, OpenSubtitlesEdit::RemoveLogin)?;
+        edit_opensubtitles(
+            &store,
+            OpenSubtitlesEdit::ApiKey(SecretString::new("k".into())),
+        )?;
+        edit_opensubtitles(
+            &store,
+            OpenSubtitlesEdit::Login {
+                username: SecretString::new("u".into()),
+                password: SecretString::new("p".into()),
+            },
+        )?;
+        let status = store.status().map_err(|e| e.to_string())?;
+        assert!(status.api_key && status.login);
+        edit_opensubtitles(&store, OpenSubtitlesEdit::RemoveLogin)?;
+        let status = store.status().map_err(|e| e.to_string())?;
+        assert!(status.api_key && !status.login);
+        Ok(())
+    }
+    /// Serves one canned reply per connection on loopback and returns the base URL.
+    fn serve_replies(
+        replies: Vec<(u16, &'static str)>,
+    ) -> Result<(reqwest::Url, std::thread::JoinHandle<Vec<String>>), io::Error> {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
+        let url = reqwest::Url::parse(&format!("http://{}/api/v1/", listener.local_addr()?))
+            .map_err(io::Error::other)?;
+        let handle = std::thread::spawn(move || {
+            let mut seen = Vec::new();
+            for (status, body) in replies {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    break;
+                };
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                let (mut data, mut buffer) = (Vec::new(), [0u8; 4096]);
+                while let Ok(n) = stream.read(&mut buffer) {
+                    data.extend_from_slice(&buffer[..n]);
+                    let text = String::from_utf8_lossy(&data).to_string();
+                    let Some(end) = text.find("\r\n\r\n") else {
+                        if n == 0 {
+                            break;
+                        }
+                        continue;
+                    };
+                    let length = text[..end]
+                        .lines()
+                        .find_map(|l| {
+                            l.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .and_then(|v| v.trim().parse::<usize>().ok())
+                        })
+                        .unwrap_or(0);
+                    if n == 0 || data.len() >= end + 4 + length {
+                        break;
+                    }
+                }
+                seen.push(String::from_utf8_lossy(&data).to_string());
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+            seen
+        });
+        Ok((url, handle))
+    }
+
+    fn stored_opensubtitles(login: bool) -> Result<OpenSubtitlesCredentialStore, String> {
+        let store = crate::credentials::test_opensubtitles_store();
+        store
+            .set_api_key(SecretString::new("fixture-key".into()))
+            .map_err(|e| e.to_string())?;
+        if login {
+            store
+                .set_login(
+                    SecretString::new("alice".into()),
+                    SecretString::new("pw".into()),
+                )
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(store)
+    }
+
+    fn run_check(
+        store: &OpenSubtitlesCredentialStore,
+        base: reqwest::Url,
+        part: OpenSubtitlesPart,
+    ) -> Result<Option<OpenSubtitlesAllowance>, String> {
+        check_opensubtitles(
+            store,
+            |_| OpenSubtitlesClient::for_test(base.clone(), base),
+            part,
+            &AtomicBool::new(false),
+        )
+    }
+
+    #[test]
+    fn opensubtitles_key_check_has_distinct_outcomes() -> Result<(), Box<dyn std::error::Error>> {
+        let store = stored_opensubtitles(false)?;
+        let (url, server) = serve_replies(vec![(200, r#"{"data": []}"#)])?;
+        // An empty result is still a working key.
+        assert_eq!(run_check(&store, url, OpenSubtitlesPart::ApiKey), Ok(None));
+        let seen = server.join().map_err(|_| "server panicked")?;
+        assert!(seen[0].starts_with("GET /api/v1/subtitles?"));
+        for (status, expected) in [
+            (401, OpenSubtitlesError::ApiKeyRejected),
+            (403, OpenSubtitlesError::ApiKeyRejected),
+            (500, OpenSubtitlesError::ServiceFailure),
+            (429, OpenSubtitlesError::RateLimited),
+        ] {
+            let (url, _server) = serve_replies(vec![(status, "{}")])?;
+            assert_eq!(
+                run_check(&store, url, OpenSubtitlesPart::ApiKey),
+                Err(expected.to_string()),
+                "{status}"
+            );
+        }
+        // No key saved: never a network request, and distinct from a rejected key.
+        let empty = crate::credentials::test_opensubtitles_store();
+        let (url, _server) = serve_replies(vec![])?;
+        assert_eq!(
+            run_check(&empty, url, OpenSubtitlesPart::ApiKey),
+            Err(CredentialError::Missing.to_string())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn opensubtitles_login_check_reports_allowance_and_distinct_failures()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let store = stored_opensubtitles(true)?;
+        let login = r#"{"token": "t", "base_url": "api.opensubtitles.com", "user": {"allowed_downloads": 20, "remaining_downloads": 18}}"#;
+        let info =
+            r#"{"data": {"allowed_downloads": 20, "remaining_downloads": 17, "vip": false}}"#;
+        let (url, server) = serve_replies(vec![(200, login), (200, info)])?;
+        assert_eq!(
+            run_check(&store, url, OpenSubtitlesPart::Login),
+            Ok(Some(OpenSubtitlesAllowance {
+                remaining: Some(17),
+                allowed: Some(20)
+            }))
+        );
+        let seen = server.join().map_err(|_| "server panicked")?;
+        assert!(seen[0].starts_with("POST /api/v1/login"));
+        assert!(seen[1].starts_with("GET /api/v1/infos/user"));
+
+        let (url, _server) = serve_replies(vec![(401, "{}")])?;
+        assert_eq!(
+            run_check(&store, url, OpenSubtitlesPart::Login),
+            Err(OpenSubtitlesError::LoginRejected.to_string())
+        );
+        let (url, _server) = serve_replies(vec![(503, "{}")])?;
+        assert_eq!(
+            run_check(&store, url, OpenSubtitlesPart::Login),
+            Err(OpenSubtitlesError::ServiceFailure.to_string())
+        );
+        // A key without a saved login cannot test the login.
+        let key_only = stored_opensubtitles(false)?;
+        let (url, _server) = serve_replies(vec![])?;
+        assert_eq!(
+            run_check(&key_only, url, OpenSubtitlesPart::Login),
+            Err(CredentialError::Missing.to_string())
+        );
+        // Cancellation wins before any request.
+        let (url, _server) = serve_replies(vec![])?;
+        let cancelled = AtomicBool::new(true);
+        assert!(
+            check_opensubtitles(
+                &store,
+                |_| OpenSubtitlesClient::for_test(url.clone(), url),
+                OpenSubtitlesPart::Login,
+                &cancelled
+            )
+            .is_err()
         );
         Ok(())
     }

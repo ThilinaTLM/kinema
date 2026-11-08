@@ -141,8 +141,18 @@ The chrome is a **Cinema Dock** built from design-system tokens on
 
 ### External subtitles
 
-The embedded player can add subtitle files the user already has. Online search
-is a [proposal](../proposals/external-subtitles.md).
+The embedded player can add subtitle files the user already has, and search
+OpenSubtitles.com for more ([provider rules](providers.md); the proposal keeps
+the unbuilt remainder). The player window holds the session's
+`Option<PlaybackTarget>` (`subtitle_target`, in memory only; `PlayLocal` files
+have `None` and identity is never inferred from file names),
+`Player::add_subtitles` takes `SubtitleFile { path, title, lang }` so a download
+carries its release name and language (local files pass neither), and downloads
+are cached by `subtitle_cache` (see [data](data.md#subtitle-cache)).
+`MediaService::hash_window(session)` is the read-only source for a movie hash:
+a local file's path, or a managed asset's payload path only when its first and
+last 64 KiB are in the durable range set. It never starts or prioritizes
+acquisition.
 
 - **Two entry points:** **Add file** in the subtitle menu (native dialog,
   several files allowed) and dropping files anywhere on the player window. The
@@ -171,6 +181,70 @@ is a [proposal](../proposals/external-subtitles.md).
   ready". Drop support is code-read for X11, Wayland, Windows and macOS and
   tested through GPUI dispatch, not yet by hand on each platform.
 
+#### Online search
+
+- **Entry:** **Search online** in the subtitle menu, below **Add file**. It is
+  shown but disabled with a reason when no API key is saved ("Add an
+  OpenSubtitles API key in Settings") or the media is not loaded. Whether a key
+  exists is read off the UI thread (re-read when the credential generation
+  changes) and is "unknown", hence enabled, until the first read finishes; the
+  sheet itself reports a missing key.
+- **Sheet over the video** (`ui::primitives::sheet::Sheet`, Esc closes it).
+  Playback keeps running; shortcuts do not fire while the field has focus (the
+  text field's Esc arrives as an action, so the window closes the sheet from the
+  field's `Cancelled` event). It holds a language filter (shown for two or more
+  settings languages; default **All**, which searches every configured language),
+  a title field and **Search** only for media without a usable catalog id, the
+  remaining allowance once known (login, or the last download), and the results:
+  release name, language, download count and badges **Hash match**, **HI/SDH**,
+  **Forced**, **AI translated**. The service ranks results; at most 50 are shown.
+- **Searches run only on request.** A catalog id searches on open; otherwise on
+  **Search**/Enter. Changing the language filter searches again. One search or
+  download is in flight; nothing starts while another runs.
+- **Identity** is the catalog target (movie, or series + season + episode); typed
+  text is used only when there is none, trimmed, collapsed and capped at 120
+  characters. File names never feed the query.
+- **Work off the UI thread.** Keyring reads, login, search, download, cache and
+  hashing run on the background executor with a cancel flag and a generation;
+  closing the sheet or the window cancels, and a stale result is dropped. The
+  signed-in session lives in memory per window and is reused until the saved
+  credentials change (`opensubtitles_generation`) or the service expires it
+  (replaced once, then repeated). A rejected login is remembered for that
+  credential generation and never retried.
+- **Moviehash is optional.** If a hash source is installed
+  (`set_hash_window_source`, backed by `MediaService::hash_window`), the worker
+  reads the first and last 64 KiB of the returned file and hashes them. Any
+  failure omits the hash; it never blocks, waits or triggers acquisition.
+- **Distinct states**, each with short copy: searching, empty ("No subtitles
+  found"), service failure and offline and rate limited (**Retry**), download limit
+  reached (with the reset time as "Resets at HH:MM UTC"), and API key needed or
+  rejected, sign-in required, sign-in rejected (**Open Settings**, pointing to
+  Settings → Accounts). An empty result is never shown for a failure.
+- **Choosing a result** uses the cache (`SubtitleCache::lookup`, no allowance, no
+  sign-in), else downloads, stores, then goes through the same load path as **Add
+  file** with the release name as title and the language as `lang`. The row shows
+  "Adding…" and the sheet stays open until the new external track is observed,
+  then closes with the dock status "Subtitle added". A failure keeps the sheet
+  open with the reason; a reload under an add abandons it.
+- **Track source:** tracks the window added from a download are remembered by
+  mpv track id for that media load and read "OpenSubtitles · SRT" in the dimmed
+  column; others read "File · SRT". mpv's `external-filename` (a cache path) is
+  never shown or logged.
+- **Logs** carry categories and counts only (opened, outcome, result count):
+  never queries, titles, file names, keys, tokens or download links.
+- **Unverified:** the live OpenSubtitles API, a real download into mpv, and the
+  moviehash path against a real service have not been exercised; the adapter is
+  covered by loopback fixtures and the sheet by pure state tests, lab scenes
+  (`player-search*`) and GPUI dispatch. The sheet uses the global theme
+  palette like the player's menus.
+- **Hash source:** each embedded start carries a weak `HashWindows` handle from
+  the media service, which the coordinator installs as the player's hash
+  source. It answers only for live sessions and never keeps storage alive.
+- **Not planned for now:** a second provider (SubDL is the candidate; every user
+  would need their own key), unofficial proxies or scraping (Stremio v3 proxy,
+  Addic7ed, Podnapisi), and automatic sync with `alass` (GPL-3.0-or-later,
+  incompatible with linking into Apache-2.0 Kinema; manual delay exists).
+
 ### Track labels
 
 Audio and subtitle menus use `kinema_core::tracks`, never raw metadata:
@@ -191,8 +265,8 @@ Audio and subtitle menus use `kinema_core::tracks`, never raw metadata:
   names longer than 40 characters end at a word with "…".
 - **Tags** from observed track flags: Forced, SDH; audio adds the layout
   (Mono, Stereo, 5.1, 7.1).
-- **Source in the dimmed right column:** "Built-in" or "File · SRT" for
-  subtitles, the codec (AAC, E-AC-3 …) for audio.
+- **Source in the dimmed right column:** "Built-in", "File · SRT" or (downloaded)
+  "OpenSubtitles · SRT" for subtitles, the codec (AAC, E-AC-3 …) for audio.
 - Rows that would read the same are numbered in order ("English 1",
   "English 2"). Identity is still the mpv track ID; labels never select.
 

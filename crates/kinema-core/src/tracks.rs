@@ -25,6 +25,8 @@ pub struct TrackFacts<'a> {
     pub external: bool,
     pub forced: bool,
     pub hearing_impaired: bool,
+    /// Where an external track came from ("OpenSubtitles"); `None` reads "File".
+    pub source: Option<&'a str>,
 }
 
 /// Names of what is playing, used only to shorten added files' names for
@@ -125,9 +127,14 @@ pub fn track_label(
         parts.push("SDH".into());
     }
     let format = track.codec.and_then(|c| codec_name(role, c));
+    let origin = track
+        .source
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("File");
     let detail = match (track.external, role, format) {
-        (true, _, Some(format)) => Some(format!("File · {format}")),
-        (true, _, None) => Some("File".into()),
+        (true, _, Some(format)) => Some(format!("{origin} · {format}")),
+        (true, _, None) => Some(origin.into()),
         (false, TrackRole::Subtitle, _) => Some("Built-in".into()),
         (false, TrackRole::Audio, format) => format.map(Into::into),
     };
@@ -640,6 +647,58 @@ mod tests {
                 label("English · Commentary · Forced · SDH", Some("Built-in")),
                 label("Track 9", Some("Built-in")),
             ]
+        );
+    }
+
+    #[test]
+    fn downloaded_subtitles_name_their_source_not_the_file() {
+        let online = |source| TrackFacts {
+            external: true,
+            codec: Some("subrip"),
+            source,
+            ..sub(
+                5,
+                Some("The.Outsider.S01E04.1080p.WEB-DL.x264-GRP"),
+                Some("en"),
+            )
+        };
+        let names = MediaNames {
+            title: "The Outsider",
+            episode_name: None,
+        };
+        let detail = |source| track_label(TrackRole::Subtitle, &online(source), Some(names));
+        assert_eq!(
+            detail(Some("OpenSubtitles")),
+            label(
+                "English · 1080p WEB-DL x264-GRP",
+                Some("OpenSubtitles · SRT")
+            )
+        );
+        assert_eq!(
+            detail(None),
+            label("English · 1080p WEB-DL x264-GRP", Some("File · SRT"))
+        );
+        // The source only describes external tracks; a blank one reads "File".
+        let embedded = TrackFacts {
+            source: Some("OpenSubtitles"),
+            ..sub(1, None, Some("en"))
+        };
+        assert_eq!(
+            track_label(TrackRole::Subtitle, &embedded, None)
+                .detail
+                .as_deref(),
+            Some("Built-in")
+        );
+        let blank = TrackFacts {
+            source: Some("  "),
+            external: true,
+            ..sub(2, None, Some("en"))
+        };
+        assert_eq!(
+            track_label(TrackRole::Subtitle, &blank, None)
+                .detail
+                .as_deref(),
+            Some("File")
         );
     }
 

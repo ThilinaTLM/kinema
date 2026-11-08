@@ -217,12 +217,20 @@ pub(crate) fn take_focus_events(cx: &mut App) -> Vec<PlayerTarget> {
 }
 
 /// Replaying a lease activates its existing window without reloading its URL.
+/// What the coordinator knows about the session beyond its media.
+#[derive(Default)]
+pub struct SessionContext {
+    pub progress: Option<PlaybackLaunch>,
+    /// Catalog identity for online subtitle search; `None` for local files.
+    pub subtitle_target: Option<PlaybackTarget>,
+}
+
 pub fn open(
     session_id: String,
     mode: PlayerChoice,
     url: String,
     title: PlaybackTitle,
-    progress: Option<PlaybackLaunch>,
+    context: SessionContext,
     coordinator: Entity<AppCoordinator>,
     cx: &mut App,
 ) -> Result<(), String> {
@@ -293,8 +301,9 @@ pub fn open(
     let initially_active = handle
         .update(cx, |view, window, _| {
             view.lease = Some((session_id.clone(), generation));
-            view.progress = progress.map(Progress::new);
+            view.progress = context.progress.map(Progress::new);
             view.progress_owner = Some(coordinator.clone());
+            view.subtitle_target = context.subtitle_target;
             window.is_window_active()
         })
         .unwrap_or(false);

@@ -5,6 +5,7 @@ use crate::{
 };
 use kinema_core::provider::{ProviderId, ProviderPriority};
 use kinema_core::sources::{DebridKind, IndexerKind};
+use kinema_core::subtitle_languages::SubtitleLanguages;
 use serde::{Deserialize, Serialize};
 use std::{fmt, io::Write, path::PathBuf};
 
@@ -95,6 +96,8 @@ pub struct Settings {
     pub theme: ThemeChoice,
     pub poster_size: PosterSize,
     pub reduce_motion: MotionChoice,
+    /// Preferred subtitle languages, most wanted first.
+    pub subtitle_languages: SubtitleLanguages,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -108,6 +111,7 @@ impl Default for Settings {
             theme: ThemeChoice::default(),
             poster_size: PosterSize::default(),
             reduce_motion: MotionChoice::default(),
+            subtitle_languages: SubtitleLanguages::default(),
         }
     }
 }
@@ -309,6 +313,9 @@ struct Document {
     poster_size: PosterSize,
     #[serde(default)]
     reduce_motion: MotionChoice,
+    /// ISO 639-1 codes; aliases and case are normalized on load, never rewritten there.
+    #[serde(default)]
+    subtitle_languages: Option<Vec<String>>,
     indexer: String,
     debrid: String,
     media_limit_bytes: u64,
@@ -346,6 +353,7 @@ impl Document {
             theme: settings.theme,
             poster_size: settings.poster_size,
             reduce_motion: settings.reduce_motion,
+            subtitle_languages: Some(settings.subtitle_languages.to_vec()),
             indexer: match settings.indexer {
                 IndexerKind::Torrentio => "torrentio",
                 IndexerKind::Peerflix => "peerflix",
@@ -376,6 +384,11 @@ impl Document {
             theme: self.theme,
             poster_size: self.poster_size,
             reduce_motion: self.reduce_motion,
+            // Missing key means English; unknown codes or an empty list are invalid.
+            subtitle_languages: match self.subtitle_languages {
+                None => SubtitleLanguages::default(),
+                Some(codes) => SubtitleLanguages::new(codes).map_err(|_| SettingsError::Invalid)?,
+            },
             indexer: match self.indexer.as_str() {
                 "torrentio" => IndexerKind::Torrentio,
                 "peerflix" => IndexerKind::Peerflix,
@@ -605,6 +618,57 @@ mod tests {
                 );
                 assert_eq!(std::fs::read_to_string(&store.path)?, invalid);
             }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn subtitle_languages_default_roundtrip_and_normalize() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let dir = tempfile::tempdir()?;
+        let store = SettingsStore::open(&paths(dir.path()))?;
+        assert_eq!(store.load()?.subtitle_languages.codes(), ["en"]);
+        let base = "version = 1\nindexer = \"torrentio\"\ndebrid = \"real-debrid\"\nmedia_limit_bytes = 1\nplayer = \"mpv\"\n";
+        // Missing key: English.
+        std::fs::write(&store.path, base)?;
+        assert_eq!(store.load()?.subtitle_languages.codes(), ["en"]);
+        // Aliases, case and duplicates normalize on load without rewriting the file.
+        let aliased = format!("{base}subtitle_languages = [\"FRE\", \"en\", \"fr\", \"eng\"]\n");
+        std::fs::write(&store.path, &aliased)?;
+        assert_eq!(store.load()?.subtitle_languages.codes(), ["fr", "en"]);
+        assert_eq!(std::fs::read_to_string(&store.path)?, aliased);
+        // Save writes the canonical list, and order survives a round trip.
+        let settings = Settings {
+            subtitle_languages: SubtitleLanguages::new(["es", "pt", "en"])?,
+            ..Settings::default()
+        };
+        store.save(&settings)?;
+        let text = std::fs::read_to_string(&store.path)?;
+        assert!(text.contains("subtitle_languages = [\"es\", \"pt\", \"en\"]"));
+        assert_eq!(
+            store.load()?.subtitle_languages,
+            settings.subtitle_languages
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_subtitle_languages_preserve_file() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = tempfile::tempdir()?;
+        let store = SettingsStore::open(&paths(dir.path()))?;
+        let base = "version = 1\nindexer = \"torrentio\"\ndebrid = \"real-debrid\"\nmedia_limit_bytes = 1\nplayer = \"mpv\"\n";
+        for value in ["[]", "[\"xx\"]", "[\"en\", \"\"]", "\"en\"", "[1]", "true"] {
+            let invalid = format!("{base}subtitle_languages = {value}\n");
+            std::fs::write(&store.path, &invalid)?;
+            assert!(
+                matches!(store.load(), Err(SettingsError::Invalid)),
+                "{value}"
+            );
+            assert_eq!(
+                store.save(&Settings::default()),
+                Err(SettingsError::Invalid)
+            );
+            assert_eq!(std::fs::read_to_string(&store.path)?, invalid);
         }
         Ok(())
     }

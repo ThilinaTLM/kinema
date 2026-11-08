@@ -35,6 +35,8 @@ struct PendingOpen {
     url: String,
     title: PlaybackTitle,
     intent: PlaybackIntent,
+    /// Catalog identity for online subtitle search; `None` for local files.
+    subtitle_target: Option<PlaybackTarget>,
 }
 
 enum PendingProgress {
@@ -119,6 +121,7 @@ impl AppCoordinator {
             url,
             title,
             intent,
+            subtitle_target: target.clone(),
         };
         let Some(target) = target else {
             self.finish_progress_open(pending, None, cx);
@@ -191,7 +194,10 @@ impl AppCoordinator {
             pending.mode,
             pending.url,
             pending.title,
-            launch,
+            crate::ui::views::player::SessionContext {
+                progress: launch,
+                subtitle_target: pending.subtitle_target,
+            },
             cx.entity(),
             cx,
         )

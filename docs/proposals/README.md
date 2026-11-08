@@ -105,7 +105,6 @@ What exists today (link the architecture page), and the constraints that apply.
 | [Direct torrent playback](torrent-engine.md) | media | Draft |
 | [External player discovery and reconnects](external-players.md) | playback | Draft |
 | [Player enhancements](player-enhancements.md) | playback | Draft |
-| [External subtitles](external-subtitles.md) | playback / providers | Draft |
 | [HDR playback](hdr-playback.md) | playback | Draft |
 | [Watch history and data portability](watch-history-and-portability.md) | data | Draft |
 | [Browse loading and backdrop](browse-loading-and-backdrop.md) | UI | Draft |
@@ -116,7 +115,6 @@ What exists today (link the architecture page), and the constraints that apply.
 | [Performance budgets](performance-budgets.md) | all | Draft |
 | [Cross-platform qualification](cross-platform-qualification.md) | platform | Draft |
 | [Desktop releases and distribution](desktop-releases.md) | platform | Draft |
-| [Keyring service name](keyring-service-name.md) | providers (debt) | Draft |
 | [Player process isolation](player-process-isolation.md) | playback (debt) | Draft |
 | [Cancellable networking](cancellable-networking.md) | runtime (debt) | Draft |
 | [Mobile platforms](mobile-platforms.md) | platform | Draft |
@@ -131,8 +129,6 @@ design. Remove an item once it ships and its rules are in `architecture/`.
 - [ ] Seek-bar thumbnail previews: [player enhancements](player-enhancements.md)
 - [ ] Qualify the player shortcuts on Windows, macOS and non-US layouts, then
   add configurable bindings: [player enhancements](player-enhancements.md)
-- [ ] Online subtitle search and download (OpenSubtitles); local files already
-  load by drop or **Add file**: [external subtitles](external-subtitles.md)
 - [ ] Validate 4K, high-bitrate and hardware-decoded playback:
   [player enhancements](player-enhancements.md)
 - [ ] HDR playback with correct output and tone mapping: [HDR playback](hdr-playback.md)
@@ -156,7 +152,6 @@ design. Remove an item once it ships and its rules are in `architecture/`.
 
 **Engineering debt** (see the Known debt notes in architecture)
 
-- [ ] Rename the keyring service from `kinema-next`: [keyring service name](keyring-service-name.md)
 - [ ] Isolate native playback crashes from the app: [player process isolation](player-process-isolation.md)
 - [ ] Make network requests interruptible: [cancellable networking](cancellable-networking.md)
 - [ ] Back up or export personal records: [watch history and portability](watch-history-and-portability.md)

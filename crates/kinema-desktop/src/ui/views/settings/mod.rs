@@ -22,8 +22,10 @@ mod general;
 #[cfg(all(test, feature = "ui-probe-test"))]
 mod interaction_tests;
 mod keyboard;
+mod opensubtitles;
 mod playback;
 mod storage;
+mod subtitles;
 #[cfg(test)]
 mod tests;
 
@@ -167,23 +169,25 @@ pub fn open_at(
     use crate::controllers::coordinator::SettingsDestination;
     let section = match destination {
         SettingsDestination::General => Section::General,
-        SettingsDestination::Account(_) => Section::Accounts,
+        SettingsDestination::Account(_) | SettingsDestination::Subtitles => Section::Accounts,
         SettingsDestination::Storage => Section::Storage,
     };
     open(coordinator, section, cx);
-    if let SettingsDestination::Account(provider) = destination {
-        let account = match provider {
-            DebridKind::RealDebrid => Account::RealDebrid,
-            DebridKind::AllDebrid => Account::AllDebrid,
-        };
-        if let Some(handle) = cx.global::<SettingsWindows>().window {
-            let _ = handle.update(cx, |view, window, cx| {
-                if let Some(focus) = view.account_focus.get(&account) {
-                    focus.focus(window, cx);
-                }
-                cx.notify();
-            });
-        }
+    let account = match destination {
+        SettingsDestination::Account(DebridKind::RealDebrid) => Some(Account::RealDebrid),
+        SettingsDestination::Account(DebridKind::AllDebrid) => Some(Account::AllDebrid),
+        SettingsDestination::Subtitles => Some(Account::OpenSubtitlesKey),
+        _ => None,
+    };
+    if let Some(account) = account
+        && let Some(handle) = cx.global::<SettingsWindows>().window
+    {
+        let _ = handle.update(cx, |view, window, cx| {
+            if let Some(focus) = view.account_focus.get(&account) {
+                focus.focus(window, cx);
+            }
+            cx.notify();
+        });
     }
 }
 
@@ -242,6 +246,10 @@ enum SettingChange {
     ProviderDown(ProviderId),
     Indexer(IndexerKind),
     Debrid(DebridKind),
+    SubtitleAdd(&'static str),
+    SubtitleRemove(&'static str),
+    SubtitleUp(&'static str),
+    SubtitleDown(&'static str),
 }
 fn apply_change(settings: &mut Settings, change: SettingChange) {
     match change {
@@ -252,6 +260,18 @@ fn apply_change(settings: &mut Settings, change: SettingChange) {
         SettingChange::ProviderDown(id) => settings.metadata_priority.move_down(id),
         SettingChange::Indexer(v) => settings.indexer = v,
         SettingChange::Debrid(v) => settings.debrid = v,
+        SettingChange::SubtitleAdd(code) => {
+            settings.subtitle_languages.add(code);
+        }
+        SettingChange::SubtitleRemove(code) => {
+            settings.subtitle_languages.remove(code);
+        }
+        SettingChange::SubtitleUp(code) => {
+            settings.subtitle_languages.move_up(code);
+        }
+        SettingChange::SubtitleDown(code) => {
+            settings.subtitle_languages.move_down(code);
+        }
     }
 }
 
@@ -266,6 +286,13 @@ pub struct SettingsWindow {
     debrid: Entity<Select<DebridKind>>,
     limit: Entity<TextInput>,
     secret: Entity<TextInput>,
+    secret_user: Entity<TextInput>,
+    /// Last OpenSubtitles login test result (allowance), shown under the rows.
+    os_note: Option<String>,
+    language_add: Option<Entity<Select<subtitles::LanguageChoice>>>,
+    /// The list the add menu was built for; it is rebuilt when the list changes.
+    language_add_for: Option<kinema_core::subtitle_languages::SubtitleLanguages>,
+    language_add_subscription: Option<Subscription>,
     editing: Option<Account>,
     status: HashMap<Account, AccountStatus>,
     snapshots: HashMap<Account, Option<CredentialState>>,
@@ -322,6 +349,12 @@ impl SettingsWindow {
             input.set_placeholder("New token — stored only in OS secure storage", cx);
             input
         });
+        let secret_user = cx.new(|cx| {
+            let mut input = TextInput::new(window, cx);
+            input.set_label("OpenSubtitles username", cx);
+            input.set_placeholder("Username", cx);
+            input
+        });
         let subscriptions = vec![
             cx.subscribe(&coordinator, |this, _, event, cx| {
                 if let CoordinatorEvent::App(event) = event {
@@ -350,6 +383,11 @@ impl SettingsWindow {
                     this.submit_secret(cx);
                 }
             }),
+            cx.subscribe(&secret_user, |this, _, event, cx| {
+                if matches!(event, TextInputEvent::Submitted) {
+                    this.submit_secret(cx);
+                }
+            }),
             theme::observe_appearance(window),
         ];
         let settings_loaded = coordinator.read(cx).settings.is_some();
@@ -367,6 +405,11 @@ impl SettingsWindow {
             debrid,
             limit,
             secret,
+            secret_user,
+            os_note: None,
+            language_add: None,
+            language_add_for: None,
+            language_add_subscription: None,
             editing: None,
             status: HashMap::new(),
             snapshots: HashMap::new(),
@@ -380,13 +423,15 @@ impl SettingsWindow {
             wheel: SmoothWheel::new(),
         };
         this.sync(cx);
+        this.load_opensubtitles(cx);
         this.sidebar.focus(window, cx);
         this
     }
     fn sync(&mut self, cx: &mut Context<Self>) {
         let state = self.coordinator.read(cx);
         for account in Account::ALL {
-            if self.latest_account.contains_key(&account) {
+            // OpenSubtitles rows have no coordinator snapshot; see `load_opensubtitles`.
+            if account.opensubtitles().is_some() || self.latest_account.contains_key(&account) {
                 continue;
             }
             let snapshot = if let Some(provider) = account.provider() {
@@ -422,6 +467,9 @@ impl SettingsWindow {
                 .update(cx, |select, cx| select.set_value(self.settings.indexer, cx));
             self.debrid
                 .update(cx, |select, cx| select.set_value(self.settings.debrid, cx));
+        }
+        if self.language_add_for.as_ref() != Some(&self.settings.subtitle_languages) {
+            self.rebuild_language_add(cx);
         }
     }
     fn show_error(&mut self, field: &'static str, message: String) -> Option<String> {
@@ -521,7 +569,7 @@ impl SettingsWindow {
         body = match self.section {
             Section::General => self.general(body, p),
             Section::Accounts => self.accounts_section(body, p, weak, cx),
-            Section::Playback => self.playback(body, p, weak),
+            Section::Playback => self.playback(body, p, weak, cx),
             Section::KeyboardMouse => self.keyboard_mouse(body, p),
             Section::Storage => self.storage(body, p, weak, cx),
             Section::Appearance => self.appearance(body, p, weak),
@@ -662,7 +710,27 @@ impl SettingsWindow {
             .insert(Account::RealDebrid, AccountStatus::Verified);
         view.status
             .insert(Account::AllDebrid, AccountStatus::Missing);
+        view.status
+            .insert(Account::OpenSubtitlesKey, AccountStatus::Saved);
+        view.status
+            .insert(Account::OpenSubtitlesLogin, AccountStatus::Missing);
         view
+    }
+    /// Fixture variant: the login entry card is open.
+    pub fn fixture_login_entry(&mut self, cx: &mut Context<Self>) {
+        let account = Account::OpenSubtitlesLogin;
+        let (label, placeholder, _) = account.entry_text();
+        self.secret.update(cx, |input, cx| {
+            input.set_label(label, cx);
+            input.set_placeholder(placeholder, cx);
+        });
+        self.editing = Some(account);
+    }
+    /// Fixture variant: no OpenSubtitles API key yet.
+    pub fn fixture_opensubtitles_missing(&mut self) {
+        for account in Account::OPENSUBTITLES {
+            self.status.insert(account, AccountStatus::Missing);
+        }
     }
     /// Fixture variant: no saved TMDB token.
     pub fn fixture_tmdb_missing(&mut self) {

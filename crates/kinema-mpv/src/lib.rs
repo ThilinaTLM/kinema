@@ -10,7 +10,10 @@ mod state;
 
 pub use error::{Error, Result};
 pub use failure::PlaybackFailure;
-pub use mpv::{Config, Frame, MAX_SUBTITLE_FILES, MAX_VOLUME, Player};
+pub use mpv::{
+    Config, Frame, MAX_SUBTITLE_FILES, MAX_SUBTITLE_LANG_BYTES, MAX_SUBTITLE_TITLE_BYTES,
+    MAX_VOLUME, Player, SubtitleFile,
+};
 pub use state::{
     BufferedRange, Chapter, HardwareDecoding, PlaybackState, RenderBackend, RenderDiagnostics,
     ResolutionPolicy, Track, TrackKind,

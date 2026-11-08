@@ -290,7 +290,12 @@ fn replay_preserves_original_player_across_preference_changes()
                 session,
                 file_name,
                 mode,
+                hash_windows,
             } if embedded => {
+                assert!(
+                    hash_windows.is_some(),
+                    "embedded start carries the hash lookup"
+                );
                 assert_eq!(mode, original);
                 assert_eq!(file_name, "fixture.mkv");
                 session
@@ -318,6 +323,7 @@ fn replay_preserves_original_player_across_preference_changes()
                 session: replay,
                 file_name,
                 mode,
+                ..
             } = replay
             else {
                 return Err("embedded replay changed backend".into());

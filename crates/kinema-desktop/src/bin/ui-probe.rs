@@ -28,6 +28,13 @@ fn parse_player_probe(args: &[String]) -> Result<Option<PlayerProbeArgs>, &'stat
     let subtitles = match scene.as_str() {
         "player-subtitles" => Some(player::SubtitleScene::Drop),
         "player-tracks" => Some(player::SubtitleScene::Menu),
+        "player-search" => Some(player::SubtitleScene::SearchResults),
+        "player-search-loading" => Some(player::SubtitleScene::SearchLoading),
+        "player-search-empty" => Some(player::SubtitleScene::SearchEmpty),
+        "player-search-quota" => Some(player::SubtitleScene::SearchQuota),
+        "player-search-no-key" => Some(player::SubtitleScene::SearchNoKey),
+        "player-search-key" => Some(player::SubtitleScene::SearchKeyRejected),
+        "player-search-text" => Some(player::SubtitleScene::SearchText),
         _ => None,
     };
     if !native && scene != "player" && subtitles.is_none() {

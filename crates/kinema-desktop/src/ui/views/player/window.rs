@@ -195,6 +195,7 @@ impl PlayerWindow {
             title,
             progress: None,
             progress_owner: None,
+            subtitle_target: None,
             lease: None,
             #[cfg(any(feature = "gpu-surface", feature = "ui-probe"))]
             frames_presented: 0,
@@ -250,6 +251,8 @@ impl PlayerWindow {
             subtitle_admission: Task::ready(()),
             subtitle_pending: None,
             subtitle_notice: None,
+            online: search::OnlineSubtitles::default(),
+            search: None,
             startup_cancel,
             _initialize: Task::ready(()),
             _updates: updates,
@@ -268,6 +271,7 @@ impl PlayerWindow {
     }
 
     pub(super) fn start_player(&mut self, cx: &mut Context<Self>) {
+        self.refresh_online_key(cx);
         if self
             .startup_cancel
             .load(std::sync::atomic::Ordering::Acquire)
@@ -1200,6 +1204,7 @@ impl Render for PlayerWindow {
             })
             .when(self.help_focus.is_some(), |el| el.child(self.shortcut_help(window, cx)))
             .children(self.drop_hint())
+            .children(self.search_sheet(window, cx))
             // Opt-in diagnostics only: no handlers, id or focus, so it never takes input.
             .when_some(self.cadence_text.clone(), |el, text| {
                 el.child(

@@ -26,6 +26,7 @@ use gpui::{prelude::*, *};
 use kinema_core::media::PlaybackTitle;
 #[cfg(feature = "ui-probe")]
 use kinema_core::media::playback_title;
+use kinema_core::sources::PlaybackTarget;
 use kinema_mpv::{Config, PlaybackFailure, PlaybackState, Player, TrackKind};
 use playback_progress::PlaybackIntent;
 use playback_progress::{Phase as ProgressPhase, Progress, duration_mismatch};
@@ -42,6 +43,9 @@ mod overlays;
 #[cfg(feature = "ui-probe")]
 mod probe;
 mod registry;
+mod search;
+pub(crate) use search::set_hash_window_source;
+mod search_model;
 mod startup;
 mod subtitles;
 #[cfg(test)]
@@ -57,8 +61,8 @@ use probe::*;
 pub use probe::{SubtitleScene, run_probe, run_probe_mode, run_subtitle_probe};
 use registry::*;
 pub(crate) use registry::{
-    authorize_progress, checkpoint_all, close_session, desktop_snapshots, dispatch_transport,
-    invalidate_progress, open, progress_notice, show_player, take_focus_events,
+    SessionContext, authorize_progress, checkpoint_all, close_session, desktop_snapshots,
+    dispatch_transport, invalidate_progress, open, progress_notice, show_player, take_focus_events,
 };
 use startup::*;
 use subtitles::{SubtitleNotice, SubtitlePending, has_subtitle_name};
@@ -141,6 +145,9 @@ pub struct PlayerWindow {
     title: PlaybackTitle,
     progress: Option<Progress>,
     progress_owner: Option<Entity<AppCoordinator>>,
+    /// Catalog identity of this session for online subtitle search; memory only.
+    /// `None` for local files, never inferred from file names.
+    subtitle_target: Option<PlaybackTarget>,
     lease: Option<(String, u64)>,
     #[cfg(any(feature = "gpu-surface", feature = "ui-probe"))]
     frames_presented: u64,
@@ -196,6 +203,10 @@ pub struct PlayerWindow {
     subtitle_admission: Task<()>,
     subtitle_pending: Option<SubtitlePending>,
     subtitle_notice: Option<(SubtitleNotice, Instant)>,
+    /// Online subtitle state that outlives the sheet (session, allowance, tracks).
+    online: search::OnlineSubtitles,
+    /// The search sheet over the video, while open.
+    search: Option<search::SearchSheet>,
     startup_cancel: Arc<std::sync::atomic::AtomicBool>,
     _initialize: Task<()>,
     _updates: Task<()>,

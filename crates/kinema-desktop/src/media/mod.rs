@@ -127,6 +127,9 @@ pub struct UsageSnapshot {
     pub downloaded_bytes: u64,
 }
 
+/// Bytes at each end of the file that the OpenSubtitles hash reads.
+const HASH_WINDOW: u64 = 64 * 1024;
+
 struct Asset {
     diagnostic_id: u64,
     dir: PathBuf,
@@ -487,6 +490,22 @@ impl MediaService {
         }
         result
     }
+    /// The file to read for an OpenSubtitles movie hash: the playing size and a
+    /// path whose first and last 64 KiB are final file bytes. Local files return
+    /// their canonical path; managed remote assets only once both windows are in
+    /// the durable range set (the payload is sparse). Read-only: never starts
+    /// or prioritizes acquisition. `None` for unknown or released sessions,
+    /// files under 64 KiB, and anything not yet fully available. Callers read the
+    /// path off the UI thread and treat I/O failure as no hash.
+    pub fn hash_window(&self, id: &str) -> Option<(u64, PathBuf)> {
+        hash_window(&self.shared, id)
+    }
+    /// A handle the player can query without owning the service: it holds a
+    /// weak reference, so it never keeps storage alive and reads `None` after
+    /// shutdown.
+    pub fn hash_windows(&self) -> HashWindows {
+        HashWindows(Arc::downgrade(&self.shared))
+    }
     pub fn release(&self, id: &str) -> Result<(), MediaError> {
         let _span = tracing::info_span!("media", operation = "release").entered();
         let started = std::time::Instant::now();
@@ -704,5 +723,44 @@ fn content_type(path: &Path) -> &'static str {
         "wav" => "audio/wav",
         "ogg" => "audio/ogg",
         _ => "application/octet-stream",
+    }
+}
+
+/// Cloneable, weak query handle for [`MediaService::hash_window`].
+#[derive(Clone)]
+pub struct HashWindows(std::sync::Weak<Shared>);
+impl HashWindows {
+    pub fn get(&self, id: &str) -> Option<(u64, PathBuf)> {
+        let shared = self.0.upgrade()?;
+        hash_window(&shared, id)
+    }
+}
+impl std::fmt::Debug for HashWindows {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HashWindows")
+    }
+}
+fn hash_window(shared: &Shared, id: &str) -> Option<(u64, PathBuf)> {
+    let state = shared.state.lock().ok()?;
+
+    let lease = state.sessions.get(id)?;
+    if !lease.active.load(Ordering::Acquire) {
+        return None;
+    }
+    match &lease.source {
+        Source::Local(_, size, _) => {
+            let path = lease.path.clone()?;
+            (*size >= HASH_WINDOW).then_some((*size, path))
+        }
+        Source::Remote(asset) => {
+            let size = asset.identity.size;
+            if size < HASH_WINDOW {
+                return None;
+            }
+            let ranges = &asset.state.lock().ok()?.ranges;
+            (storage::available(ranges, 0, HASH_WINDOW)
+                && storage::available(ranges, size - HASH_WINDOW, size))
+            .then(|| (size, asset.dir.join("payload")))
+        }
     }
 }
