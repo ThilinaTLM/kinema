@@ -1,5 +1,6 @@
 //! Separate, lease-owned Cinema player. libmpv initialization and destruction
 //! (including worker joins) never run on GPUI's foreground executor.
+use crate::ui::motion::{AnimateExt, transition::POPUP_IN};
 use crate::ui::theme::layout::player;
 use crate::ui::theme::layout::player::{
     DOCK_BOTTOM_INSET, DOCK_ESTIMATE, DOCK_FADE, DOCK_SIDE_INSET, HELP_COLUMN, TOP_BAR_HEIGHT,
@@ -33,6 +34,7 @@ use playback_progress::{Phase as ProgressPhase, Progress, duration_mismatch};
 pub(crate) use playback_progress::{PlaybackLaunch, PlayerCheckpoint};
 
 mod chrome;
+mod continuity;
 mod controls;
 mod diagnostics;
 mod dock;
@@ -48,24 +50,35 @@ pub(crate) use search::set_hash_window_source;
 mod search_model;
 mod startup;
 mod subtitles;
+mod swap;
+#[cfg(all(test, feature = "ui-probe-test"))]
+mod swap_tests;
 #[cfg(test)]
 mod tests;
+mod track_carryover;
 mod volume;
 mod window;
 
+use continuity::UpNext;
+pub(crate) use continuity::{NeighbourDirection, NeighbourRequests, NeighbourState, Neighbours};
 use diagnostics::*;
 #[cfg(feature = "ui-probe")]
 #[allow(unused_imports)]
 use probe::*;
 #[cfg(feature = "ui-probe")]
 pub use probe::{SubtitleScene, run_probe, run_probe_mode, run_subtitle_probe};
+#[cfg(all(test, feature = "ui-probe-test"))]
+pub(crate) use registry::open_fixture;
 use registry::*;
 pub(crate) use registry::{
     SessionContext, authorize_progress, checkpoint_all, close_session, desktop_snapshots,
-    dispatch_transport, invalidate_progress, open, progress_notice, show_player, take_focus_events,
+    dispatch_transport, final_checkpoint, invalidate_progress, neighbour_failed, open,
+    progress_notice, set_neighbours, show_player, take_focus_events,
 };
 use startup::*;
 use subtitles::{SubtitleNotice, SubtitlePending, has_subtitle_name};
+use swap::{PendingCarry, WindowSwap};
+pub(crate) use swap::{SwapSubject, load_source, rekey_window, set_subject};
 
 #[cfg(feature = "gpu-surface")]
 use kinema_mpv::ResolutionPolicy;
@@ -114,17 +127,22 @@ pub fn bind_keys(cx: &mut App) {
 const CLOSE: usize = 0;
 const TIMELINE: usize = 1;
 const PLAY: usize = 2;
-const BACK: usize = 3;
-const FORWARD: usize = 4;
-const CHAPTERS: usize = 5;
-const SUBTITLES: usize = 6;
-const AUDIO: usize = 7;
-const SPEED: usize = 8;
-const FULLSCREEN: usize = 9;
-const MUTE: usize = 10;
-const VOLUME: usize = 11;
-const HELP: usize = 12;
-const CONTROL_COUNT: usize = 13;
+const PREVIOUS_EPISODE: usize = 3;
+const BACK: usize = 4;
+const FORWARD: usize = 5;
+const NEXT_EPISODE: usize = 6;
+const CHAPTERS: usize = 7;
+const SUBTITLES: usize = 8;
+const AUDIO: usize = 9;
+const SPEED: usize = 10;
+const FULLSCREEN: usize = 11;
+const MUTE: usize = 12;
+const VOLUME: usize = 13;
+const HELP: usize = 14;
+// The Up next card follows the dock; it has no dock slot.
+const UP_NEXT_PLAY: usize = 15;
+const UP_NEXT_CANCEL: usize = 16;
+const CONTROL_COUNT: usize = 17;
 const SPEEDS: [f64; 7] = [0.5, 0.75, 1., 1.25, 1.5, 1.75, 2.];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -149,6 +167,27 @@ pub struct PlayerWindow {
     /// `None` for local files, never inferred from file names.
     subtitle_target: Option<PlaybackTarget>,
     lease: Option<(String, u64)>,
+    /// Where "play the next/previous episode" goes; the coordinator in production.
+    neighbour_requests: Option<Rc<dyn NeighbourRequests>>,
+    /// What the dock offers per direction, as the coordinator last said.
+    neighbours: Neighbours,
+    /// Dock notice for a neighbour request that failed; `None` direction means
+    /// a swap that did not complete.
+    neighbour_notice: Option<(Option<NeighbourDirection>, Instant)>,
+    /// The **Up next** countdown, owned by this window.
+    up_next: Option<UpNext>,
+    /// Set once the user cancelled or the countdown ran; reset when the file is
+    /// no longer at its end.
+    up_next_dismissed: bool,
+    /// Media in flight after a source swap, until it is ready or has failed.
+    swap: Option<WindowSwap>,
+    /// Audio and subtitle choices to restore on the new file.
+    carry: Option<PendingCarry>,
+    /// A failed swap's media lifecycle: its error must not close the window
+    /// while the coordinator rolls back.
+    rollback_after: Option<u64>,
+    #[cfg(all(test, feature = "ui-probe-test"))]
+    fixture_backend: Option<swap::FixtureBackend>,
     #[cfg(any(feature = "gpu-surface", feature = "ui-probe"))]
     frames_presented: u64,
     diagnostics: Option<PlayerPerformance>,
@@ -243,6 +282,10 @@ fn redraw_needed(
 }
 #[derive(Clone, Copy)]
 struct Availability {
+    previous_episode: NeighbourState,
+    next_episode: NeighbourState,
+    /// The **Up next** card is showing, so its buttons join the focus order.
+    up_next: bool,
     backend: bool,
     seekable: bool,
     chapters: bool,
@@ -256,6 +299,11 @@ fn control_enabled(index: usize, a: Availability) -> bool {
     match index {
         CLOSE | FULLSCREEN | HELP => true,
         TIMELINE | BACK | FORWARD => a.backend && a.seekable,
+        // Hidden controls are not drawn at all; a disabled one is drawn, explained
+        // and skipped by Tab; a busy one stays enabled but blocks input itself.
+        PREVIOUS_EPISODE => a.backend && neighbour_active(a.previous_episode),
+        NEXT_EPISODE => a.backend && neighbour_active(a.next_episode),
+        UP_NEXT_PLAY | UP_NEXT_CANCEL => a.up_next,
         CHAPTERS => a.backend && a.seekable && a.chapters,
         // Open with no tracks too: the menu also adds external files.
         SUBTITLES => a.backend && (a.subtitles || a.tracks_known),
@@ -271,6 +319,8 @@ fn disabled_reason(index: usize, a: Availability) -> Option<&'static str> {
     Some(match index {
         _ if !a.backend => "Player is not ready",
         TIMELINE | BACK | FORWARD => "Seeking unavailable for this media",
+        PREVIOUS_EPISODE => "No previous episode",
+        NEXT_EPISODE => "No next episode",
         CHAPTERS if !a.seekable => "Seeking unavailable for this media",
         CHAPTERS if !a.chapters_known => "Chapter information unavailable",
         CHAPTERS => "No chapters in this media",
@@ -279,6 +329,14 @@ fn disabled_reason(index: usize, a: Availability) -> Option<&'static str> {
         AUDIO => "No audio tracks in this media",
         _ => "Unavailable",
     })
+}
+/// Drawn unless hidden. A disabled one still explains itself.
+fn neighbour_visible(state: NeighbourState) -> bool {
+    state != NeighbourState::Hidden
+}
+/// Enabled or busy: in the focus order.
+fn neighbour_active(state: NeighbourState) -> bool {
+    matches!(state, NeighbourState::Enabled | NeighbourState::Busy)
 }
 fn terminal_failure(startup_error: bool, state: &PlaybackState) -> bool {
     startup_error

@@ -19,6 +19,15 @@ pub enum RegistrationError {
     Backend(String),
 }
 
+/// The player that OS media keys currently drive, with the actions it supports.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Selected {
+    pub target: PlayerTarget,
+    pub seekable: bool,
+    pub next: bool,
+    pub previous: bool,
+}
+
 /// Owner must keep this native HWND alive until this guard is dropped. Runtime
 /// retains the guard and detaches the OS media registration before releasing it.
 #[cfg(target_os = "windows")]
@@ -31,7 +40,7 @@ pub trait WindowsMediaHost {
 /// macOS creation/publication must run on the application main thread.
 pub struct MediaSession {
     controls: MediaControls,
-    selected: Arc<Mutex<Option<(PlayerTarget, bool)>>>,
+    selected: Arc<Mutex<Option<Selected>>>,
     _thread_bound: PhantomData<Rc<()>>,
     #[cfg(target_os = "windows")]
     _host: Option<Rc<dyn WindowsMediaHost>>,
@@ -140,7 +149,12 @@ impl MediaSession {
                 .set_volume(volume)
                 .map_err(|e| format!("{e:?}"))?;
         }
-        *selected = Some((snapshot.target, snapshot.seekable));
+        *selected = Some(Selected {
+            target: snapshot.target,
+            seekable: snapshot.seekable,
+            next: snapshot.can_next,
+            previous: snapshot.can_previous,
+        });
         Ok(())
     }
 }
@@ -150,8 +164,9 @@ pub fn capabilities_for(snapshot: Option<&PlayerSnapshot>) -> ActionCapabilities
         play: snapshot.is_some(),
         pause: snapshot.is_some(),
         stop: snapshot.is_some(),
-        next: false,
-        previous: false,
+        // Only while the dock offers them; the command is the dock's own.
+        next: snapshot.is_some_and(|snapshot| snapshot.can_next),
+        previous: snapshot.is_some_and(|snapshot| snapshot.can_previous),
         seek: snapshot.is_some_and(|snapshot| snapshot.seekable),
     }
 }
@@ -166,14 +181,21 @@ impl Drop for MediaSession {
 }
 
 /// Unsupported queue/shuffle/OpenUri events are ignored, never arbitrary launches.
-pub fn translate_event(event: Event, selected: Option<(PlayerTarget, bool)>) -> Option<Command> {
+pub fn translate_event(event: Event, selected: Option<Selected>) -> Option<Command> {
     match event {
         Event::Raise => return Some(Command::ShowMain),
         Event::Quit => return Some(Command::Quit),
         _ => {}
     }
-    let (target, seekable) = selected?;
+    let Selected {
+        target,
+        seekable,
+        next,
+        previous,
+    } = selected?;
     let action = match event {
+        Event::Next if next => Transport::Next,
+        Event::Previous if previous => Transport::Previous,
         Event::Play => Transport::Play,
         Event::Pause => Transport::Pause,
         Event::Toggle => Transport::Toggle,
@@ -202,10 +224,32 @@ mod tests {
         session_id: 7,
         generation: 3,
     };
+    fn selected(seekable: bool, next: bool, previous: bool) -> Option<Selected> {
+        Some(Selected {
+            target: TARGET,
+            seekable,
+            next,
+            previous,
+        })
+    }
+    fn snapshot() -> PlayerSnapshot {
+        PlayerSnapshot {
+            target: TARGET,
+            title: "Catalog title".into(),
+            description: None,
+            playback: Playback::Paused,
+            position: Duration::ZERO,
+            duration: None,
+            volume: 0.5,
+            seekable: true,
+            can_next: false,
+            can_previous: false,
+        }
+    }
 
     #[test]
     fn safe_event_translation() {
-        let selected = Some((TARGET, true));
+        let selected = selected(true, false, false);
         for event in [
             Event::Next,
             Event::Previous,
@@ -234,9 +278,12 @@ mod tests {
     #[test]
     fn seeks_require_observed_seekability() {
         let event = Event::SetPosition(MediaPosition(Duration::from_secs(90)));
-        assert_eq!(translate_event(event.clone(), Some((TARGET, false))), None);
         assert_eq!(
-            translate_event(event, Some((TARGET, true))),
+            translate_event(event.clone(), selected(false, false, false)),
+            None
+        );
+        assert_eq!(
+            translate_event(event, selected(true, false, false)),
             Some(Command::Transport {
                 target: TARGET,
                 action: Transport::SeekAbsolute(Duration::from_secs(90))
@@ -245,22 +292,49 @@ mod tests {
     }
 
     #[test]
-    fn selected_player_capabilities_never_advertise_a_queue() {
-        let mut snapshot = PlayerSnapshot {
-            target: TARGET,
-            title: "Catalog title".into(),
-            description: None,
-            playback: Playback::Paused,
-            position: Duration::ZERO,
-            duration: None,
-            volume: 0.5,
-            seekable: true,
-        };
+    fn next_and_previous_are_advertised_only_while_the_dock_offers_them() {
+        let mut snapshot = snapshot();
         let capabilities = capabilities_for(Some(&snapshot));
         assert!(capabilities.play && capabilities.pause && capabilities.stop && capabilities.seek);
         assert!(!capabilities.next && !capabilities.previous);
+        snapshot.can_next = true;
+        let capabilities = capabilities_for(Some(&snapshot));
+        assert!(capabilities.next && !capabilities.previous);
+        snapshot.can_previous = true;
+        let capabilities = capabilities_for(Some(&snapshot));
+        assert!(capabilities.next && capabilities.previous);
+        // Never a queue: no shuffle or repeat exist in the capability set at all.
         snapshot.seekable = false;
         assert!(!capabilities_for(Some(&snapshot)).seek);
+    }
+
+    #[test]
+    fn next_and_previous_route_as_the_dock_commands_and_only_when_advertised() {
+        let both = selected(true, true, true);
+        assert_eq!(
+            translate_event(Event::Next, both),
+            Some(Command::Transport {
+                target: TARGET,
+                action: Transport::Next
+            })
+        );
+        assert_eq!(
+            translate_event(Event::Previous, both),
+            Some(Command::Transport {
+                target: TARGET,
+                action: Transport::Previous
+            })
+        );
+        // A stale key press for a direction the dock no longer offers is dropped.
+        assert_eq!(
+            translate_event(Event::Next, selected(true, false, true)),
+            None
+        );
+        assert_eq!(
+            translate_event(Event::Previous, selected(true, true, false)),
+            None
+        );
+        assert_eq!(translate_event(Event::Next, None), None);
     }
 
     #[test]

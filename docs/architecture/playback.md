@@ -95,9 +95,11 @@ obligations of libmpv or FFmpeg. Distribution is an open question (see the
 
 ## Window, lease and session ownership
 
-- **One embedded window per lease.** Replaying a lease focuses its existing
-  window instead of creating a second owner. Different leases can have their own
-  windows at the same time.
+- **One embedded window per lease, one lease per window at a time.** Replaying a
+  lease focuses its existing window instead of creating a second owner.
+  Different leases can have their own windows at the same time. A window can
+  swap its source to another episode (below); it then briefly holds two leases
+  and ends up with one.
 - **MUST: closing a player** stops its decoder, flushes progress and releases its
   lease **exactly once**. It is not "delete cache" and not "stop download".
 - **Replay keeps the original backend.** A changed player preference applies to
@@ -109,6 +111,50 @@ obligations of libmpv or FFmpeg. Distribution is an open question (see the
 - **Startup readiness:** the initial load has a 60 s budget, and seek
   confirmation has 10 s. A launch with no checkpoint that fails says "Playback
   could not start". It never says "Saved position cannot be resumed".
+
+### Episode swap (same window)
+
+An embedded window playing a tracked episode can move to another episode
+without closing. Only embedded windows swap; external players never do.
+`AppCoordinator::swap_embedded_source` takes an open window and an
+already-launched lease, and runs this sequence exactly:
+
+1. **Flush** the old run. The final observation is submitted and the swap waits
+   until the save is acknowledged (no save in flight or waiting). If that takes
+   more than 3 s the swap is abandoned and the user keeps the episode.
+2. **Hold** the new lease next to the old one.
+3. **Re-key** the registry entry to the new session with a **new generation**,
+   and tombstone the old session. Late events, samples and window addressing
+   for the old session or generation find nothing.
+4. **Begin a run** for the new `Episode` subject (the old run is sealed and takes
+   no samples) and give the window its new `PlaybackTarget`, title and
+   `Progress`. The OS media session follows because it reads the window.
+5. **`Player::load`**, paused when tracked, then the normal resume sequence (a
+   saved position resumes; a duration mismatch still asks).
+6. When the window reports the new media **ready**, release the old lease,
+   exactly once.
+
+If anything fails before step 6 (no backend, load error, the new media failing,
+progress not saved in time), the **new** lease is released and the window goes
+back to the old session and resumes it from the position saved in step 1.
+A failure of the incoming media is masked in the window so it cannot close it
+while that happens. Closing the window mid-swap releases both leases, once each.
+
+After the new file's tracks are observed, the previous audio and subtitle choice
+is restored by **language and flags** (forced, SDH), never by track ID
+(`ui/views/player/track_carryover.rs`; it may move to `kinema-core::tracks`). With
+no match mpv's default stays. Sidecar subtitles are not carried.
+
+**The kept preparation.** A debrid preparation started for an episode in the
+embedded player is *kept* by its window instead of being dropped when playback
+starts: the worker keeps the preparation (file list, provider and client, at most
+8) and the coordinator keeps the file list (`KeptPreparation`). Another file of
+the pack is unlocked with `AppAction::PlayKeptFile`, which always starts an
+embedded lease. The pack moves with the window across swaps, is cancelled when
+the window closes, when the account changes (the worker drops every
+preparation), and when a swap leaves the pack. Resolution (which file or stream)
+is policy and stays outside the player: the player only exposes the swap, the
+kept pack and the neighbour state below.
 
 ### External players
 
@@ -131,13 +177,45 @@ The chrome is a **Cinema Dock** built from design-system tokens on
   audio, speed and fullscreen controls on the right. Volume (0–150) is a
   vertical panel at middle-right.
 - The chrome auto-hides after `CHROME_IDLE` while playing. It never hides while
-  a control has focus or hover, during a drag, while a menu is open, or when
-  paused, buffering, loading, ended or failed. The subtitle safe zone moves
+  a control has focus or hover, during a drag, while a menu is open, while the
+  **Up next** card is showing, or when paused, buffering, loading, ended or
+  failed. The subtitle safe zone moves
   `sub-pos` only while the chrome is visible.
 - **Show only observed capabilities.** Don't invent chapters, tracks, buffer
   ranges or HDR badges. An unknown duration shows `—`. Seek previews are
   text-only (time and chapter); thumbnails are a
   [proposal](../proposals/player-enhancements.md).
+
+### Next, Previous and Up next
+
+For tracked episodes the dock has **Previous episode** and **Next episode**
+ghost buttons beside ±10 s, with shortcuts **Shift+N** and **Shift+P**. They are
+shifted because leaving an episode costs more than a seek, so a stray tap must
+not do it; bare N/P stay free, and `<`/`>` would sit on the frame-step keys and
+depend on the layout. Each direction is one of four states, given by the
+coordinator (`Neighbours`):
+
+| State | When | Dock |
+| --- | --- | --- |
+| Hidden | movie, untracked file, external player, or nothing published | no button |
+| Disabled | an episode with no neighbour that way | button disabled, "No next episode" |
+| Enabled | a neighbour exists | usable |
+| Busy | a request is resolving | busy bar, input ignored |
+
+The window never resolves anything. It emits a request through the injectable
+`NeighbourRequests` (the coordinator in production) and receives
+`set_neighbours` / `neighbour_failed`. The coordinator publishes
+`NeighbourEvent::{SubjectChanged, Requested, Closed}`; neighbour resolution
+listens to those and answers with `set_neighbours`, `neighbour_failed`,
+`play_kept_file` or `swap_embedded_source`. A failure shows a dock notice
+("Couldn't open the next episode") and leaves the current episode playing.
+
+At end of file, if Next is enabled, an **Up next** card appears with a 5 s
+countdown, **Play now** and **Cancel**. It is owned by the window (its timer
+task is dropped on cancel, input, swap or close) and enters with the `POPUP_IN`
+preset. Any key, click or wheel input cancels it, as does Escape (before
+leaving fullscreen); pointer movement alone only reveals the chrome. It is
+shown once per ending: replaying or seeking away re-arms it.
 
 ### External subtitles
 
@@ -320,8 +398,9 @@ membership (see [data](data.md#personal-records)).
 - **OS media controls** (souvlaki, vendored) route to **one selected player**:
   the focused or explicitly chosen player, otherwise the most recently started
   one. They send the same commands as the Cinema Dock, not commands to a second
-  controller. Only supported actions are advertised, so Next and Previous stay
-  disabled. Only a safe title and description, the position and artwork are
+  controller. Only supported actions are advertised: Next and Previous are
+  advertised exactly while the dock's button for that direction is enabled
+  (not hidden, disabled or busy), and arrive as the same request as the button. Only a safe title and description, the position and artwork are
   published, never URLs or paths. Untrusted OpenUri requests are ignored.
 - **The sleep and idle inhibitor** (keepawake) is process-wide. It is held while
   *any* embedded video is actively playing, with a 30 s buffering grace. A

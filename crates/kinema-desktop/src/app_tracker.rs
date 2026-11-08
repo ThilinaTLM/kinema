@@ -82,6 +82,13 @@ impl Tracker {
         }
     }
 
+    /// A release for this session is already on its way to the worker.
+    pub(crate) fn release_pending(&self, id: &str) -> bool {
+        self.pending.iter().any(|(generation, pending)| {
+            *pending == Pending::Release && self.releases.get(generation).is_some_and(|r| r == id)
+        })
+    }
+
     pub(crate) fn is_pending(&self, generation: u64) -> bool {
         self.pending.contains_key(&generation)
     }

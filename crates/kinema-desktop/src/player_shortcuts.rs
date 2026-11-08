@@ -49,6 +49,8 @@ pub enum ShortcutId {
     NextFrame,
     PreviousChapter,
     NextChapter,
+    NextEpisode,
+    PreviousEpisode,
     ToggleFullscreen,
     Escape,
     ShowHelp,
@@ -84,6 +86,8 @@ actions!(
         NextFrame,
         PreviousChapter,
         NextChapter,
+        NextEpisode,
+        PreviousEpisode,
         ToggleFullscreen,
         Escape,
         ShowHelp,
@@ -120,6 +124,8 @@ impl ShortcutId {
             Self::NextFrame => Box::new(NextFrame),
             Self::PreviousChapter => Box::new(PreviousChapter),
             Self::NextChapter => Box::new(NextChapter),
+            Self::NextEpisode => Box::new(NextEpisode),
+            Self::PreviousEpisode => Box::new(PreviousEpisode),
             Self::ToggleFullscreen => Box::new(ToggleFullscreen),
             Self::Escape => Box::new(Escape),
             Self::ShowHelp => Box::new(ShowHelp),
@@ -319,6 +325,23 @@ const GROUPS: [ReferenceGroup; 6] = [
                 bindings: &["pagedown"],
                 repeat: RepeatPolicy::Suppress,
             },
+            // Shifted on purpose: leaving an episode is costlier than a seek, so a
+            // stray tap must not do it. Bare N/P stay free; `<`/`>` would sit on
+            // the frame-step keys and depend on the keyboard layout.
+            ShortcutEntry {
+                id: ShortcutId::NextEpisode,
+                label: "Next episode",
+                keys: "Shift+N",
+                bindings: &["shift-n"],
+                repeat: RepeatPolicy::Suppress,
+            },
+            ShortcutEntry {
+                id: ShortcutId::PreviousEpisode,
+                label: "Previous episode",
+                keys: "Shift+P",
+                bindings: &["shift-p"],
+                repeat: RepeatPolicy::Suppress,
+            },
             ShortcutEntry {
                 id: ShortcutId::ToggleFullscreen,
                 label: "Toggle fullscreen",
@@ -442,6 +465,10 @@ pub fn key_bindings() -> Vec<KeyBinding> {
                         KeyBinding::new(key, PreviousChapter, Some(context))
                     }
                     ShortcutId::NextChapter => KeyBinding::new(key, NextChapter, Some(context)),
+                    ShortcutId::NextEpisode => KeyBinding::new(key, NextEpisode, Some(context)),
+                    ShortcutId::PreviousEpisode => {
+                        KeyBinding::new(key, PreviousEpisode, Some(context))
+                    }
                     ShortcutId::ToggleFullscreen => {
                         KeyBinding::new(key, ToggleFullscreen, Some(context))
                     }
@@ -483,6 +510,16 @@ mod tests {
             entry(ShortcutId::SeekForwardFine).repeat,
             RepeatPolicy::Allow
         );
+        // Leaving an episode is costlier than a seek: shifted, and never repeated.
+        for id in [ShortcutId::NextEpisode, ShortcutId::PreviousEpisode] {
+            assert!(
+                entry(id)
+                    .bindings
+                    .iter()
+                    .all(|key| key.starts_with("shift-"))
+            );
+            assert_eq!(entry(id).repeat, RepeatPolicy::Suppress);
+        }
         assert_ne!(
             entry(ShortcutId::SeekForwardFine).bindings,
             entry(ShortcutId::SeekForwardLong).bindings

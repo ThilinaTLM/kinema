@@ -8,8 +8,16 @@
 //! secrets are passed directly to the worker, never retained here. The entity
 //! owns both workers and its polling task; no blocking work runs on the UI thread.
 //! `needs_quit_confirmation` includes pending launches, not just active sessions.
+mod continuity;
 mod personal;
 mod playback;
+#[cfg(all(test, feature = "ui-probe-test"))]
+pub(crate) use continuity::{SessionProbe, SwapStep};
+// Phase 2 (neighbour resolution) is the consumer of these.
+#[allow(unused_imports)]
+pub(crate) use continuity::{
+    EpisodeLaunch, KeptPreparation, NeighbourEvent, SwapError, SwapRequest,
+};
 use personal::PersonalStore;
 #[allow(
     unused_imports,
@@ -338,6 +346,8 @@ pub struct AppCoordinator {
     // ── sessions: preparation and launch identity correlation ──
     session_identity: std::collections::HashMap<u64, (String, PlaybackTarget, Option<String>)>,
     playback: playback::PlaybackStore,
+    /// Windows' kept preparations, swaps in progress and dock neighbour state.
+    continuity: continuity::ContinuityStore,
     /// Catalog-derived player titles retained for the lifetime of each replayable lease.
     player_titles: std::collections::HashMap<String, kinema_core::media::PlaybackTitle>,
     rates: kinema_core::transfer_rate::RateTracker,
@@ -375,6 +385,7 @@ impl AppCoordinator {
             // ── sessions ──
             session_identity: Default::default(),
             playback: Default::default(),
+            continuity: Default::default(),
             player_titles: Default::default(),
             rates: Default::default(),
             rate_epoch: std::time::Instant::now(),
@@ -468,6 +479,7 @@ impl AppCoordinator {
             // ── sessions ──
             session_identity: Default::default(),
             playback: Default::default(),
+            continuity: Default::default(),
             player_titles: Default::default(),
             rates: Default::default(),
             rate_epoch: std::time::Instant::now(),
@@ -1010,10 +1022,17 @@ impl AppCoordinator {
         );
         let resolved = (!unsolicited).then(|| self.tracker.resolve(event.generation));
         self.embedded_replays.remove(&event.generation);
+        // The preparation a start asked to keep, if any; claimed by its window below.
+        let keep = self.take_keep_request(event.generation);
+        self.route_outcome_failed(event.generation, &event.outcome, cx);
+        if let AppOutcome::Prepared { prepared, .. } = &event.outcome {
+            self.note_prepared(event.generation, prepared);
+        }
         if let AppOutcome::EmbeddedPlaybackStarted { session, .. } = &event.outcome
             && self.closed_embedded_sessions.contains_key(&session.id)
         {
             self.session_identity.remove(&event.generation);
+            self.discard_route(event.generation, keep, cx);
             self.prune_embedded_tombstones();
             return;
         }
@@ -1084,12 +1103,15 @@ impl AppCoordinator {
                 self.sessions.retain(|s| s.session.id != *id);
             }
             AppOutcome::Invalidated { released } => {
+                self.invalidate_swaps(released);
                 for id in released {
                     self.close_embedded_session(id, cx);
                     self.embedded_release_acknowledged(id);
                     self.tracker.session_released(id);
                     self.sessions.retain(|s| s.session.id != *id);
                 }
+                // The worker dropped every preparation; forget whatever is left.
+                self.invalidate_continuity();
             }
             AppOutcome::Usage(usage) => self.usage = Some(usage.clone()),
             AppOutcome::SessionUpdates(updates) => {
@@ -1164,8 +1186,14 @@ impl AppCoordinator {
             if resolved.as_ref().is_some_and(|r| !r.current) {
                 // Unlike an external process, obsolete embedded work need not be shown.
                 self.queue_embedded_release(session.id.clone(), cx);
+                self.discard_route(event.generation, keep, cx);
+            } else if self.is_routed(event.generation) {
+                // A launch into an open window: the swap owns the lease.
+                self.playback.intents.remove(&event.generation);
+                self.route_started(event.generation, session, keep, cx);
             } else {
                 self.embedded_sessions.insert(session.id.clone());
+                self.keep_for_window(&session.id, keep, cx);
                 let title = self
                     .player_titles
                     .get(&session.id)
@@ -1279,6 +1307,7 @@ impl AppCoordinator {
     }
     fn close_embedded_session(&mut self, session_id: &str, cx: &mut Context<Self>) {
         if self.embedded_sessions.remove(session_id) {
+            self.drop_window_state(session_id, cx);
             self.closed_embedded_sessions
                 .insert(session_id.to_owned(), false);
             crate::ui::views::player::close_session(session_id, cx);
@@ -1303,6 +1332,11 @@ impl AppCoordinator {
         self.closed_embedded_sessions
             .entry(session_id.clone())
             .or_insert(false);
+        // One release per lease: a second trigger while one is in flight (window
+        // close racing a swap, say) must not queue another.
+        if self.tracker.release_pending(&session_id) {
+            return;
+        }
         self.pending_embedded_releases.insert(session_id);
         self.retry_embedded_releases(cx);
     }
@@ -1342,6 +1376,7 @@ impl AppCoordinator {
         if !self.embedded_sessions.contains(&session_id) {
             return;
         }
+        self.drop_window_state(&session_id, cx);
         self.queue_embedded_release(session_id, cx);
         cx.notify();
     }
@@ -1382,7 +1417,9 @@ impl AppCoordinator {
             AppAction::LoadSettings => Pending::Load,
             AppAction::SaveSettings(_) => Pending::Settings,
             AppAction::Prepare { .. } => Pending::Prepare,
-            AppAction::PlayFile { .. } => Pending::Play { remote: true },
+            AppAction::PlayFile { .. } | AppAction::PlayKeptFile { .. } => {
+                Pending::Play { remote: true }
+            }
             AppAction::PlayLocal { .. } => Pending::Play { remote: false },
             AppAction::ReleaseSession(_) => Pending::Release,
             AppAction::CleanupUnused => Pending::Cleanup,
@@ -1399,6 +1436,17 @@ impl AppCoordinator {
         } else {
             self.tracker.issue(pending)
         };
+        let keep_request = match &action {
+            AppAction::PlayFile {
+                preparation,
+                keep: true,
+                ..
+            } => Some(*preparation),
+            _ => None,
+        };
+        if let Some(preparation) = keep_request {
+            self.continuity_keep_request(generation, preparation);
+        }
         if let AppAction::PlayFile { preparation, .. } = &action
             && let Some(identity) = self.session_identity.get(preparation).cloned()
         {
@@ -1435,6 +1483,7 @@ impl AppCoordinator {
             Some(generation)
         } else {
             self.tracker.withdraw(generation);
+            self.take_keep_request(generation);
             self.session_identity.remove(&generation);
             if let Some(id) = session_action {
                 self.session_error(&id, "Application service unavailable or busy. Retry.");
@@ -2093,6 +2142,7 @@ impl AppCoordinator {
         Some(generation)
     }
     pub fn cancel_preparation(&mut self, preparation: u64, cx: &mut Context<Self>) -> bool {
+        self.forget_prepared(preparation);
         self.tracker.cancel(preparation);
         self.session_identity.remove(&preparation);
         self.playback.intents.remove(&preparation);

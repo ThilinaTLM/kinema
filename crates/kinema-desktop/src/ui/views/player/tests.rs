@@ -713,6 +713,9 @@ fn timeline_rejects_unknown_and_invalid_duration() {
 #[test]
 fn disabled_controls_explain_themselves() {
     let a = Availability {
+        previous_episode: NeighbourState::Hidden,
+        next_episode: NeighbourState::Hidden,
+        up_next: false,
         backend: true,
         seekable: true,
         chapters: false,
@@ -784,6 +787,9 @@ fn disabled_controls_are_skipped() {
             .collect::<Vec<_>>()
     };
     let none = Availability {
+        previous_episode: NeighbourState::Hidden,
+        next_episode: NeighbourState::Hidden,
+        up_next: false,
         backend: false,
         seekable: false,
         chapters: true,
@@ -807,7 +813,33 @@ fn disabled_controls_are_skipped() {
         seekable: true,
         ..live
     };
-    assert_eq!(enabled(seekable), (0..CONTROL_COUNT).collect::<Vec<_>>());
+    // Episode controls are hidden and the Up next card is absent until offered.
+    let hidden = [PREVIOUS_EPISODE, NEXT_EPISODE, UP_NEXT_PLAY, UP_NEXT_CANCEL];
+    assert_eq!(
+        enabled(seekable),
+        (0..CONTROL_COUNT)
+            .filter(|i| !hidden.contains(i))
+            .collect::<Vec<_>>()
+    );
+    // Disabled stays out of the focus order but explains itself; busy stays in.
+    let first = Availability {
+        previous_episode: NeighbourState::Disabled,
+        next_episode: NeighbourState::Busy,
+        up_next: true,
+        ..seekable
+    };
+    assert!(!control_enabled(PREVIOUS_EPISODE, first));
+    assert_eq!(
+        disabled_reason(PREVIOUS_EPISODE, first),
+        Some("No previous episode")
+    );
+    assert!(control_enabled(NEXT_EPISODE, first));
+    assert_eq!(
+        enabled(first),
+        (0..CONTROL_COUNT)
+            .filter(|i| *i != PREVIOUS_EPISODE)
+            .collect::<Vec<_>>()
+    );
     let bare = Availability {
         chapters: false,
         subtitles: false,

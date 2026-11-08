@@ -84,7 +84,8 @@ fn dismissed_completed_preparation_is_not_launchable() -> Result<(), Box<dyn std
             2,
             AppAction::PlayFile {
                 preparation: 1,
-                file_id: "episode-1".into()
+                file_id: "episode-1".into(),
+                keep: false
             }
         )?,
         AppOutcome::Failed { .. }
