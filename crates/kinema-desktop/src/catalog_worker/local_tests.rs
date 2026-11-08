@@ -225,3 +225,45 @@ fn worker_shutdown_drains_and_acknowledges_accepted_mutation() {
     assert!(event.result.is_ok());
     assert_eq!(event.revision, 1);
 }
+#[test]
+fn stream_memory_writes_are_queued_in_order_and_saturation_is_explicit() {
+    use crate::catalog::stream_memory::{
+        ReleaseMemory, Remember, StreamMemory, StreamMemoryOperation,
+    };
+    let release = ReleaseMemory {
+        info_hash: kinema_core::sources::InfoHash::new("a".repeat(40)).unwrap(),
+        name: "Release".into(),
+        quality: None,
+        size: None,
+        file_index: None,
+        filename: None,
+    };
+    let write = |id| LocalRequest {
+        request_id: id,
+        generation: 0,
+        operation: LibraryOperation::StreamMemory(StreamMemoryOperation::Remember(Box::new(
+            Remember {
+                series: TitleRef::Canonical(TitleId::new(1).unwrap()),
+                season: 1,
+                episode: 1,
+                stream: StreamMemory {
+                    release: release.clone(),
+                    file_name: None,
+                    file_size: None,
+                },
+                season_release: release.clone(),
+            },
+        ))),
+    };
+    let mailbox = Mailbox::default();
+    for id in 0..LOCAL_CAPACITY {
+        assert_eq!(mailbox.submit_local(write(id as u64)), LocalSubmit::Queued);
+    }
+    assert_eq!(mailbox.submit_local(write(999)), LocalSubmit::Full);
+    for id in 0..LOCAL_CAPACITY {
+        let Some(Ready::Local(actual)) = mailbox.next::<LocalBackend>(FETCH_THREADS) else {
+            panic!("local FIFO")
+        };
+        assert_eq!(actual.request_id, id as u64);
+    }
+}

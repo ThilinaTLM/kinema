@@ -7,6 +7,11 @@ pub(crate) fn is_mutation(operation: &LibraryOperation) -> bool {
         LibraryOperation::PlaybackProgress(operation) if !matches!(operation, crate::catalog::playback_progress::PlaybackProgressOperation::Read(_))
     ) || matches!(
         operation,
+        LibraryOperation::StreamMemory(
+            crate::catalog::stream_memory::StreamMemoryOperation::Remember(_)
+        )
+    ) || matches!(
+        operation,
         LibraryOperation::SetMembership { .. }
             | LibraryOperation::SetMovieWatched { .. }
             | LibraryOperation::SetEpisodeWatched { .. }

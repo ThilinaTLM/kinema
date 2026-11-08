@@ -242,7 +242,7 @@ fn v6_migration_preserves_catalog_and_restricts_deletion() -> TestResult {
         let tx = service.connection.transaction()?;
         CatalogService::title_record(&tx, 1)?
     };
-    service.connection.execute_batch("DROP TABLE movie_playback_progress; DROP TABLE episode_playback_progress; DROP TABLE library_entries; DROP TABLE movie_watch_state; DROP TABLE episode_watch_state; PRAGMA user_version=6;")?;
+    service.connection.execute_batch("DROP TABLE season_release_memory; DROP TABLE episode_stream_memory; DROP TABLE movie_playback_progress; DROP TABLE episode_playback_progress; DROP TABLE library_entries; DROP TABLE movie_watch_state; DROP TABLE episode_watch_state; PRAGMA user_version=6;")?;
     drop(service);
     let mut service = CatalogService::open(&path)?;
     let after = {
@@ -455,7 +455,7 @@ fn failed_v7_migration_rolls_back_schema_and_version() -> TestResult {
     let path = dir.path().join("catalog");
     let service = CatalogService::open(&path)?;
     seed(&service)?;
-    service.connection.execute_batch("DROP TABLE movie_playback_progress; DROP TABLE episode_playback_progress; DROP TABLE library_entries; DROP TABLE movie_watch_state; DROP TABLE episode_watch_state; CREATE VIEW movie_watch_state AS SELECT 1 title_id; PRAGMA user_version=6;")?;
+    service.connection.execute_batch("DROP TABLE season_release_memory; DROP TABLE episode_stream_memory; DROP TABLE movie_playback_progress; DROP TABLE episode_playback_progress; DROP TABLE library_entries; DROP TABLE movie_watch_state; DROP TABLE episode_watch_state; CREATE VIEW movie_watch_state AS SELECT 1 title_id; PRAGMA user_version=6;")?;
     drop(service);
     assert!(matches!(
         CatalogService::open(&path),

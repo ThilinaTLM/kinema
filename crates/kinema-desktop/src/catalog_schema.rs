@@ -270,6 +270,37 @@ CREATE INDEX episode_playback_progress_recency ON episode_playback_progress(upda
     Ok(())
 }
 
+/// v9: personal stream memory. Raw indexer/provider strings only; see `catalog_stream_memory`.
+pub(super) fn migrate_stream_memory(tx: &rusqlite::Transaction<'_>) -> Result<(), CatalogError> {
+    tx.execute_batch(
+        r#"
+CREATE TABLE season_release_memory (
+ season_id INTEGER PRIMARY KEY REFERENCES seasons(id) ON DELETE RESTRICT,
+ info_hash TEXT NOT NULL CHECK(length(info_hash) = 40 AND info_hash NOT GLOB '*[^0-9a-f]*'),
+ name TEXT NOT NULL CHECK(name <> ''),
+ quality TEXT CHECK(quality <> ''),
+ size INTEGER CHECK(size >= 0),
+ file_index INTEGER CHECK(file_index >= 0),
+ filename TEXT CHECK(filename <> ''),
+ updated_at INTEGER NOT NULL CHECK(updated_at >= 0)
+) STRICT;
+CREATE TABLE episode_stream_memory (
+ episode_id INTEGER PRIMARY KEY REFERENCES episodes(id) ON DELETE RESTRICT,
+ info_hash TEXT NOT NULL CHECK(length(info_hash) = 40 AND info_hash NOT GLOB '*[^0-9a-f]*'),
+ name TEXT NOT NULL CHECK(name <> ''),
+ quality TEXT CHECK(quality <> ''),
+ size INTEGER CHECK(size >= 0),
+ file_index INTEGER CHECK(file_index >= 0),
+ filename TEXT CHECK(filename <> ''),
+ provider_file_name TEXT CHECK(provider_file_name <> ''),
+ provider_file_size INTEGER CHECK(provider_file_size >= 0),
+ updated_at INTEGER NOT NULL CHECK(updated_at >= 0)
+) STRICT;
+"#,
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

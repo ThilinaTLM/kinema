@@ -1365,6 +1365,8 @@ impl AppCoordinator {
                         }
                         self.local_details.fetched(request.generation, *detail, 0);
                     }
+                    // Stream memory is consumed by the playback start flow (Phase 2).
+                    LibraryResult::StreamMemory(_) => {}
                 }
                 mutation
             }
