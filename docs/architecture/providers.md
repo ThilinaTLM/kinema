@@ -53,7 +53,30 @@ the same boundary.
 - **One indexer is selected explicitly** (default: Torrentio). There is no
   federation, and no credentials are forwarded to indexers.
 - Requests are keyed by IMDb ID. Parsed quality, size and seed counts are
-  **unverified hints**, used for sorting and filtering only.
+  **unverified hints**, used for sorting, filtering and release matching
+  (below). They never identify a file.
+- **Per-episode file hints** (`behaviorHints.filename`, `fileIdx`) are
+  explicit identity, applied only through `select_file_with_hint`'s guards:
+  an exact basename match; an index only as a Real-Debrid file ID (AllDebrid
+  IDs are synthetic and never used); a hint is refused when the file name has
+  a contradicting or combined episode marker. **An index-only hint** (Peerflix
+  sends no file name) is accepted only when the file's own full marker equals
+  the target episode. *Why:* real captures showed Torrentio hints never chose
+  a wrong file, while one Peerflix index named the wrong episode with nothing
+  to cross-check it.
+- **Episode markers** are one standalone `SxxExx` or `NxNN` token, with an
+  optional `v<digit>` revision (`S01E05v2`). Not markers: `WxH` resolutions (a
+  season side of 3+ digits or an episode side of 4+, e.g. `1448x1080`) and
+  `s<digit>` inside a word (`FS88`). Combined episodes (`S01E01E02`,
+  `S01E01-02`, a following bare number) are always refused.
+- **Release matching** (`kinema_core::episode_continuity`) parses group,
+  resolution, source, codec, HDR/DV and audio from the release and file names,
+  and orders candidates by those traits, then size ratio, then seeders. A
+  missing trait never counts as a match. Only a **strong** match (same group
+  and same resolution) may be chosen without the user; anything else is a
+  ranked list for the user. Choosing a torrent this way never relaxes file
+  choice: the file inside is still picked by the rules here, or the list opens.
+  Traits are always re-derived from stored raw names, never persisted.
 - Rows that only have a direct URL, and duplicate hash/file-index rows, are
   omitted and counted. A successful empty result is valid. Invalid envelopes or
   hashes are **errors**, not empty results.

@@ -72,8 +72,9 @@ subsystems:
 - **A small fetch pool** (`kinema-fetch-N`, 4 threads) does blocking HTTP and
   parsing. At most 4 jobs are admitted, counting completions that are waiting to
   be persisted. Completions are served before new preparation work.
-- **Slots:** 2 search slots and 16 metadata slots (one per
-  operation/kind/indexer) are served round-robin. Each slot holds at most one
+- **Slots:** 2 search slots and 22 metadata slots (one per
+  operation/kind/indexer, with separate Detail and episode-continuity source
+  lanes) are served round-robin. Each slot holds at most one
   queued request.
 - **Local (personal) work** uses a separate bounded FIFO queue. It is never
   coalesced and never cancelled by navigation.

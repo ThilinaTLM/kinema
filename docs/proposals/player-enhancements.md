@@ -34,6 +34,9 @@ video. Subtitle clearance moves `sub-pos`, which styled ASS subtitles may ignore
 6. **4K and hardware decoding qualification** on real hardware. This includes
    checking that decoding is sustained and that frames don't drop.
 7. **ASS subtitle clearance** that works with styled subtitles.
+8. **Earlier Up next.** The card appears at end of file, so credits play out
+   first. Show it at a credits chapter, or in the last N seconds, without
+   cutting off post-credit scenes.
 
 ## Open questions
 

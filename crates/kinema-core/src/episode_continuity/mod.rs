@@ -1,6 +1,6 @@
 //! Pure policies for moving between episodes of a series without a trip back
 //! to Detail: neighbour order, release-trait parsing and similarity, and the
-//! neighbour-stream resolution flow. See `docs/proposals/episode-continuity.md`.
+//! neighbour-stream resolution flow. See `docs/architecture/playback.md` and `providers.md`.
 //!
 //! Nothing here performs I/O or logs. Release names, file names and hashes are
 //! personal data: callers persist the RAW strings, never parsed traits, and

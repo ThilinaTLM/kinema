@@ -27,8 +27,9 @@ flowchart LR
   about the Library, SQL or GPUI views. `kinema-desktop` owns the window,
   chrome, focus, sessions and progress. **All `unsafe` and FFI code lives in
   `kinema-mpv`.**
-- **The player is an independent window** with one window per lease. It is not
-  a pane in the browser and not a separate mpv process.
+- **The player is an independent window** that holds one lease at a time (an
+  [episode swap](#episode-swap-same-window) briefly holds two). It is not a pane
+  in the browser and not a separate mpv process.
 - **Commands return acceptance, not success.** Only observed mpv state is truth.
   A requested seek, speed, volume or track is not proof that it happened.
   Unknown metadata is different from known-empty metadata (`*_available`

@@ -5,7 +5,7 @@
 //!
 //! [`AppCoordinator::swap_embedded_source`] takes an open embedded window and an
 //! already-launched lease for another episode, and runs the sequence in
-//! `docs/architecture/playback.md#episode-continuity`:
+//! `docs/architecture/playback.md#episode-swap-same-window`:
 //!
 //! 1. flush the old run, acknowledged (the save has committed);
 //! 2. hold the new lease next to the old one;

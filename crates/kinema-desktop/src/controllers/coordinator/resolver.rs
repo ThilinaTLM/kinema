@@ -8,8 +8,8 @@
 //! invalidated; an answer for a token that no longer exists is dropped. That is
 //! the whole stale-result rule, so there is no other place to get it wrong.
 //!
-//! Neighbour resolution follows `docs/proposals/episode-continuity.md`:
-//! indexer first, then [`choose_neighbour_stream`]. Prefetch (decision 3) runs
+//! Neighbour resolution follows `docs/architecture/playback.md` ("Choosing the neighbour's stream"):
+//! indexer first, then [`choose_neighbour_stream`]. Prefetch runs
 //! the same job without the right to act: it can only fill the per-window
 //! cache, and no effect it produces touches the debrid account or the player.
 use crate::{

@@ -105,7 +105,6 @@ What exists today (link the architecture page), and the constraints that apply.
 | [Direct torrent playback](torrent-engine.md) | media | Draft |
 | [External player discovery and reconnects](external-players.md) | playback | Draft |
 | [Player enhancements](player-enhancements.md) | playback | Draft |
-| [Episode continuity](episode-continuity.md) | playback / data | Accepted |
 | [HDR playback](hdr-playback.md) | playback | Draft |
 | [Watch history and data portability](watch-history-and-portability.md) | data | Draft |
 | [Browse loading and backdrop](browse-loading-and-backdrop.md) | UI | Draft |
@@ -127,8 +126,6 @@ design. Remove an item once it ships and its rules are in `architecture/`.
 
 **Playback**
 
-- [ ] Next/Previous episode and Up next in the player, with remembered
-  releases per season: [episode continuity](episode-continuity.md)
 - [ ] Seek-bar thumbnail previews: [player enhancements](player-enhancements.md)
 - [ ] Qualify the player shortcuts on Windows, macOS and non-US layouts, then
   add configurable bindings: [player enhancements](player-enhancements.md)

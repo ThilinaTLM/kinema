@@ -20,8 +20,10 @@ proposals and code reviews use these terms exactly as defined here.
 | Generation | A monotonic in-memory number per request slot, screen or session, used to reject late results ([runtime](runtime.md#background-work-rules)) | Cancellation, which saves work but doesn't guarantee correctness |
 | Glass | The translucent header material from `palette.glass()` ([design system](design-system.md)) | Any blur effect; it is a translucent fill |
 | Known debt | An implemented decision documented as bad or outgrown, with a proposal to fix it ([rule strength](README.md#rule-strength)) | A proposal, which is not built |
+| Kept preparation | A debrid preparation (file list, provider) held by an embedded player window after start, so other files of the pack can play into it ([playback](playback.md#episode-swap-same-window)) | A download or a cached file; it holds no bytes |
 | Lease | A playback session's claim on an asset or local file; releasing it is idempotent ([media](media.md#rules)) | An asset; a player instance (external replay can share a lease) |
 | Membership | A title is in the user's Library (a `library_entries` row) ([data](data.md#personal-records)) | Watched state or progress; all three are independent |
+| Neighbour | The previous or next episode of the one playing, from the canonical listing, skipping specials and crossing seasons ([playback](playback.md#choosing-the-neighbours-stream)) | An episode guessed from file names |
 | Primary (provider) | The first active provider in the priority list; it owns search and browse ([providers](providers.md#metadata-ordered-priority-and-enrichment)) | The only provider that contributes data |
 | Provenance | The supplier, resource and observation time of a field's current value ([data](data.md#merge-rules)) | A history of values; only the current one is kept |
 | Run | One playback of a subject, with its own write authority for progress ([playback](playback.md#progress-and-resume)) | A session, which is about bytes and leases |
@@ -29,6 +31,8 @@ proposals and code reviews use these terms exactly as defined here.
 | Selection | The `selection` fill plus a marker showing a chosen item | Focus, which is the ring and is independent |
 | Session | A media session, which is a lease plus its local URL ([media](media.md#rules)) | A playback run or a player window |
 | Slot | A queue position in the catalog worker per operation, kind or indexer; it holds at most one queued request ([runtime](runtime.md#catalog-worker)) | A thread |
+| Stream memory | The last played stream per episode and release per season, a personal record of raw indexer strings ([data](data.md#stream-memory)) | Progress or watched state; a cache |
+| Strong match | A candidate release with the same group and resolution as the reference; the only kind chosen without the user ([providers](providers.md#indexers)) | Same pack, which is the same torrent |
 | Subject | The typed identity whose progress is saved: `Movie`, `Episode` or `Untracked` ([playback](playback.md#progress-and-resume)) | A display title or session ID |
 | Toast | A top-right card for an outcome or a page condition, derived from state each render and keyed by slot; each occurrence is also kept in the bell's notification log ([UI](ui.md#toasts)) | An inline `Alert`, a native OS notification |
 | Token (design) | A named value in `ui/theme` (color, size, spacing, opacity, timing) ([design system](design-system.md)) | Credentials or API tokens |
