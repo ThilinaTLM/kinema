@@ -31,6 +31,8 @@ use kinema_core::{
     sources::{IndexerKind, PlaybackTarget, SourceCandidate},
 };
 mod continuity;
+#[cfg(all(test, feature = "ui-probe-test"))]
+mod continuity_tests;
 mod episodes;
 mod facts;
 #[cfg(feature = "ui-probe")]
@@ -706,7 +708,7 @@ impl Detail {
         if next_up.is_some() {
             self.season_chosen = true;
         }
-        if self.season != chosen {
+        if self.season != chosen && !self.keeps_stream_page() {
             self.coordinator.update(cx, |c, cx| {
                 c.cancel_detail_sources(cx);
                 if chosen.is_none() {
@@ -722,9 +724,10 @@ impl Detail {
         self.ensure_season(false, cx);
         if let Some(ep) = &self.episode {
             let episodes = self.episodes(cx);
-            if !episodes
-                .iter()
-                .any(|e| e.season == ep.season && e.number == ep.number)
+            if !self.keeps_stream_page()
+                && !episodes
+                    .iter()
+                    .any(|e| e.season == ep.season && e.number == ep.number)
                 && !self.coordinator.read(cx).tmdb_season.busy()
             {
                 self.clear_episode(cx);

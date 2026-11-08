@@ -18,6 +18,8 @@ pub(crate) use continuity::EpisodeLaunch;
 pub(crate) use continuity::{NeighbourEvent, SessionProbe, SwapError, SwapRequest, SwapStep};
 pub use neighbours::DirectPlay;
 use neighbours::FlowStore;
+#[cfg(all(test, feature = "ui-probe-test"))]
+pub(crate) use neighbours::StreamPicker;
 use personal::PersonalStore;
 #[allow(
     unused_imports,

@@ -1094,6 +1094,11 @@ impl AppCoordinator {
         );
     }
 
+    /// A window's kept pack, with the files and hash a test chooses.
+    pub(crate) fn fixture_kept_pack(&mut self, session: &str, kept: KeptPreparation) {
+        self.continuity.kept.insert(session.to_owned(), kept);
+    }
+
     pub(crate) fn fixture_probe(&self, session: &str) -> SessionProbe {
         SessionProbe {
             embedded: self.embedded_sessions.contains(session),

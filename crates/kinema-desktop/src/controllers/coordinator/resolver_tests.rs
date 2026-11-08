@@ -1097,3 +1097,89 @@ fn episode_names_come_from_the_listing() {
     );
     assert_eq!(resolver.episode_name(&series(), 1, 1), None);
 }
+
+// ── a request before the listing ──
+
+fn unknown_window(resolver: &mut Resolver) -> Token {
+    let effects = resolver.subject_changed(SESSION, Some(&episode(1, 2)));
+    effects
+        .iter()
+        .find_map(|e| match e {
+            Effect::ReadListing { token, .. } => Some(*token),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("listing read"))
+}
+
+#[test]
+fn a_request_before_the_listing_waits_for_it_and_then_starts() {
+    let mut resolver = Resolver::default();
+    let first = unknown_window(&mut resolver);
+    resolver.set_played(SESSION, played(1, "Show.S01.1080p-GRP"));
+    let effects = resolver.request(SESSION, &episode(1, 2), NeighbourDirection::Next, None);
+    // Nothing is published (the dock keeps its own Busy) and a fresh read goes out.
+    assert!(publishes(&effects).is_empty());
+    assert!(matches!(effects.as_slice(), [Effect::ReadListing { .. }]));
+    assert_eq!(resolver.job_count(), 0);
+    let effects = resolver.listing_loaded(first, Some(listing()));
+    // The dock shows Busy throughout; it never flashes Enabled.
+    assert!(
+        publishes(&effects)
+            .iter()
+            .all(|d| d.next == NeighbourState::Busy)
+    );
+    assert!(effects.iter().any(|e| matches!(
+        e,
+        Effect::QueryIndexer { target, interactive: true, .. } if *target == episode(1, 3)
+    )));
+}
+
+#[test]
+fn an_unreadable_listing_ends_a_waiting_request_with_a_reason() {
+    let mut resolver = Resolver::default();
+    let first = unknown_window(&mut resolver);
+    let effects = resolver.request(SESSION, &episode(1, 2), NeighbourDirection::Next, None);
+    let second = match effects.as_slice() {
+        [Effect::ReadListing { token, .. }] => *token,
+        other => panic!("{other:?}"),
+    };
+    let effects = resolver.listing_loaded(first, None);
+    match outcomes(&effects).as_slice() {
+        [
+            Outcome {
+                decision: Decision::Unavailable { label },
+                ..
+            },
+        ] => assert_eq!(label, "Couldn't find a stream for this episode"),
+        other => panic!("{other:?}"),
+    }
+    // The request is over: the later answer starts nothing.
+    assert!(outcomes(&resolver.listing_loaded(second, Some(listing()))).is_empty());
+    assert_eq!(resolver.job_count(), 0);
+}
+
+#[test]
+fn a_prefetch_query_waits_behind_interactive_ones() {
+    let mut resolver = Resolver::default();
+    open(&mut resolver);
+    resolver.set_played(SESSION, played(1, "Show.S01.1080p-GRP"));
+    let effects = start_prefetch(&mut resolver, None);
+    assert!(effects.iter().any(|e| matches!(
+        e,
+        Effect::QueryIndexer {
+            interactive: false,
+            ..
+        }
+    )));
+    let mut other = Resolver::default();
+    open(&mut other);
+    other.set_played(SESSION, played(1, "Show.S01.1080p-GRP"));
+    let effects = other.request(SESSION, &episode(1, 2), NeighbourDirection::Previous, None);
+    assert!(effects.iter().any(|e| matches!(
+        e,
+        Effect::QueryIndexer {
+            interactive: true,
+            ..
+        }
+    )));
+}

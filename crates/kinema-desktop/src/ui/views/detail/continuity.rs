@@ -16,13 +16,17 @@ use kinema_core::episode_continuity::{Similarity, preselected_count, rank_order}
 /// A request to play an episode directly, from asking until its play session
 /// takes over.
 pub(super) struct Direct {
-    ticket: u64,
+    pub(super) ticket: u64,
     episode: CatalogEpisode,
     intent: PlaybackIntent,
-    stage: DirectStage,
+    pub(super) stage: DirectStage,
 }
 
-enum DirectStage {
+#[expect(
+    clippy::large_enum_variant,
+    reason = "One value per Detail; boxing it buys nothing"
+)]
+pub(super) enum DirectStage {
     /// The coordinator is reading the memory (and asking the indexer).
     Resolving,
     /// A stream is being prepared and started.
@@ -38,7 +42,7 @@ enum DirectStage {
 pub(super) struct Ranking {
     spec: PickerSpec,
     /// A player window is waiting for the pick (the coordinator holds it).
-    window_picker: bool,
+    pub(super) window_picker: bool,
     memo: std::cell::RefCell<Option<Rc<RankMemo>>>,
 }
 
@@ -48,6 +52,17 @@ struct RankMemo {
     /// Rank of each candidate position (`usize::MAX` when excluded).
     rank: Vec<usize>,
     preselected: usize,
+}
+
+impl Direct {
+    #[cfg(all(test, feature = "ui-probe-test"))]
+    pub(super) fn episode_number(&self) -> (u32, u32) {
+        (self.episode.season, self.episode.number)
+    }
+    #[cfg(all(test, feature = "ui-probe-test"))]
+    pub(super) fn intent(&self) -> PlaybackIntent {
+        self.intent
+    }
 }
 
 impl Ranking {
@@ -370,6 +385,12 @@ impl Detail {
         }
         self.end_direct(cx);
         self.open_ranked(episode, picker.spec, true, cx);
+    }
+
+    /// A ranked stream list is open for an episode that may be outside the
+    /// season Detail would pick: metadata arriving must not close it.
+    pub(super) fn keeps_stream_page(&self) -> bool {
+        self.page == Page::Streams && self.ranking.is_some()
     }
 
     /// The Streams page was left (or the title changed): the ranking ends, and a

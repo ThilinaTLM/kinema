@@ -217,6 +217,65 @@ preset. Any key, click or wheel input cancels it, as does Escape (before
 leaving fullscreen); pointer movement alone only reveals the chrome. It is
 shown once per ending: replaying or seeking away re-arms it.
 
+### Choosing the neighbour's stream
+
+The coordinator (`controllers/coordinator/{resolver,neighbours}.rs`) decides which
+file plays for a neighbour. `resolver.rs` is a pure state machine: inputs in,
+effects out, no GPUI or worker calls. Every asynchronous step carries a
+monotonic token, a job lives only while its window, subject and generation do,
+and an answer for a token that is gone is dropped.
+
+- **Dock state** comes from the canonical catalog listing, read off the UI thread
+  (`LibraryOperation::Detail`) when a window opens or swaps and again when the
+  catalog changes. `kinema_core::episode_continuity::neighbours_in_listing` gives
+  the neighbours: Enabled when the listing proves one, Disabled when the
+  episode has none that way, Hidden for movies and untracked files. A season
+  that is absent from the listing, or listed with neither rows nor a count, stops
+  the search, so an unknown listing never invents a neighbour. A listing that
+  cannot be read leaves the dock as it was (hidden before the first one).
+- **Resolution** runs for Next, Previous and Up next alike, with the dock Busy.
+  It asks the indexer for the neighbour's `SxxExx` (a separate worker lane, so
+  the Streams page's request is never replaced; one continuity query at a time;
+  a saved listing waits for the fresh one and is used only if that fails),
+  and takes the reference from the window's own stream, else the neighbour
+  season's remembered release, else the previous season's. It then applies
+  `choose_neighbour_stream`. A second request while Busy is ignored, closing the
+  window cancels the work, and an indexer failure is distinct from an empty
+  answer in the reason shown.
+- **Outcomes:** *SamePack* and *KeptFile* unlock the kept file into the same
+  window (`PlayKeptFile`). *StrongMatch* prepares that torrent with
+  `PlayFile { keep: true }` routed to the window; if its file selection is not
+  unique it becomes the Picker, never a guess. *Picker* opens the main
+  window's stream list for the neighbour, ordered by closeness to the
+  reference with the top rows marked; a stream chosen there plays into the
+  existing window, and dismissing the list returns the dock to Enabled.
+  *Unavailable* frees the control and shows the reason in the dock. The reason
+  (`ChoiceReason::label`, e.g. "Same pack") is shown as the dock note, after
+  the swap is ready when something started.
+- **Prefetch:** at 80% of a finite duration (`prefetch_due`) the next episode
+  is resolved once (indexer query and the pure choice) and cached for the
+  window. It is resolve-only: it never prepares a magnet, unlocks a file or
+  downloads bytes. A request that arrives while it runs adopts it; the cache is
+  dropped on swap, close, account change and when the listing changes the next
+  episode, and an indexer failure or empty answer is never cached.
+- **Record on play:** every playback start with an episode target remembers
+  its stream (`StreamMemoryOperation::Remember`): hash, indexer file index and
+  file name hint, release name, quality, size, plus the resolved provider
+  file's basename and size, and the season release without per-episode hints.
+  This covers embedded and external starts, swaps and picks from the list; an
+  embedded start that a newer play superseded records nothing. An episode the
+  catalog has no row for is a quiet no-op. Logs carry categories only, never
+  hashes, release names or file names. The stream an embedded window plays is
+  also its reference for its own neighbours.
+- **Play and Resume from Detail** first look for a remembered episode stream
+  and prepare it directly; its file is chosen by the usual hint rules and, if
+  not unique, the ranked stream list opens. Otherwise a remembered season (or
+  previous-season) release goes through the indexer and `choose_neighbour_stream`
+  with no kept pack: a same-pack or strong match is prepared, anything else
+  opens the ranked list. With nothing remembered, or an indexer failure, the
+  ordinary stream list opens (it shows its own empty or failed state). The
+  resume and duration-mismatch rules are unchanged.
+
 ### External subtitles
 
 The embedded player can add subtitle files the user already has, and search

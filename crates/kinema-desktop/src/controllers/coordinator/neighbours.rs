@@ -160,11 +160,11 @@ pub(super) struct FlowStore {
     notes: HashMap<String, String>,
     ticket: u64,
     /// Everything sent to the workers, for tests (no worker is attached).
-    #[cfg(test)]
+    #[cfg(all(test, feature = "ui-probe-test"))]
     pub(super) sent: Vec<Sent>,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "ui-probe-test"))]
 #[derive(Clone, Debug)]
 pub(super) enum Sent {
     Local(u64, LibraryOperation),
@@ -374,7 +374,7 @@ impl AppCoordinator {
             return false;
         };
         let request_id = READ_NAMESPACE | id;
-        #[cfg(test)]
+        #[cfg(all(test, feature = "ui-probe-test"))]
         if self.worker.is_err() {
             self.flow.next_read = id;
             self.flow.reads.insert(request_id, read);
@@ -445,7 +445,7 @@ impl AppCoordinator {
             action: self.indexer_action(target),
             mode: Mode::Load,
         };
-        #[cfg(test)]
+        #[cfg(all(test, feature = "ui-probe-test"))]
         if self.worker.is_err() {
             self.flow.sent.push(Sent::Indexer(token, target.clone()));
             return true;
@@ -974,6 +974,19 @@ fn provider_file(file: &kinema_core::sources::RemoteFile) -> Option<ProviderFile
     })
 }
 
+/// Test seam: how the next episode was chosen, as if resolved for `window`.
+#[cfg(all(test, feature = "ui-probe-test"))]
+impl AppCoordinator {
+    pub(crate) fn fixture_transition_note(&mut self, window: &str, note: &str) {
+        self.flow.notes.insert(window.to_owned(), note.to_owned());
+    }
+
+    /// Test seam: a picker a player window is waiting on.
+    pub(crate) fn fixture_stream_picker(&mut self, picker: StreamPicker) {
+        self.flow.picker = Some(picker);
+    }
+}
+
 // ── the picker's preparations and the plans of every start ──
 
 impl AppCoordinator {
@@ -1105,6 +1118,6 @@ impl AppCoordinator {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "ui-probe-test"))]
 #[path = "neighbours_tests.rs"]
 mod tests;

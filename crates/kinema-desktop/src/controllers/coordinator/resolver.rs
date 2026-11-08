@@ -133,6 +133,10 @@ pub(super) struct Outcome {
 
 /// A request for the coordinator to carry out.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "Short-lived values in a Vec that is consumed at once"
+)]
 pub(super) enum Effect {
     ReadListing {
         token: Token,

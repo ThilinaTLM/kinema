@@ -672,6 +672,48 @@ fn the_coordinator_gates_requests_and_reports_failures_to_the_dock() {
     assert_eq!(rig.lease().0, OLD);
 }
 
+#[test]
+fn the_reason_a_neighbour_was_not_found_is_shown_in_the_dock() {
+    use NeighbourState::*;
+    let mut rig = Rig::new();
+    rig.coordinator(|c, cx| {
+        c.set_neighbours(
+            OLD,
+            Neighbours {
+                previous: Hidden,
+                next: Enabled,
+            },
+            cx,
+        )
+    });
+    rig.coordinator(|c, cx| c.request_neighbour(OLD, 0, NeighbourDirection::Next, cx));
+    assert_eq!(rig.view(|v| v.neighbours.next), Busy);
+    rig.coordinator(|c, cx| c.neighbour_unavailable(OLD, "No streams found for this episode", cx));
+    assert_eq!(rig.view(|v| v.neighbours.next), Enabled);
+    // The reason replaces the generic wording, as a warning.
+    assert_eq!(
+        rig.view(|v| v.neighbour_note_text().map(|(t, w)| (t.to_owned(), w))),
+        Some(("No streams found for this episode".to_owned(), true))
+    );
+}
+
+#[test]
+fn how_the_episode_was_chosen_is_shown_once_the_swap_is_ready() {
+    let mut rig = Rig::new();
+    rig.coordinator(|c, _| c.fixture_transition_note(OLD, "Same pack"));
+    rig.swap(None).unwrap_or_else(|e| panic!("swap: {e:?}"));
+    // Not yet: the old episode is still the one on screen until the new is ready.
+    assert_eq!(
+        rig.view(|v| v.neighbour_note_text().map(|(t, _)| t.to_owned())),
+        None
+    );
+    rig.ready();
+    assert_eq!(
+        rig.view(|v| v.neighbour_note_text().map(|(t, w)| (t.to_owned(), w))),
+        Some(("Same pack".to_owned(), false))
+    );
+}
+
 fn end_of_file(rig: &mut Rig) {
     rig.cx.update(|cx| {
         set_neighbours(

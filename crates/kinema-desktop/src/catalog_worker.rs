@@ -2138,6 +2138,52 @@ mod tests {
         );
     }
 
+    fn sources_request(generation: u64, lane: SourceLane, episode: u32) -> MetadataRequest {
+        MetadataRequest {
+            generation,
+            action: MetadataAction::Sources {
+                indexer: IndexerKind::Torrentio,
+                target: PlaybackTarget::Episode {
+                    series: ImdbId::new("tt1234567").unwrap_or_else(|e| panic!("id: {e}")),
+                    season: 1,
+                    episode,
+                },
+                lane,
+            },
+            mode: Mode::Load,
+        }
+    }
+
+    #[test]
+    fn source_lanes_have_their_own_slots_so_neither_replaces_the_other() {
+        let mailbox = Mailbox::default();
+        // The Streams page and episode-continuity resolution ask about different
+        // episodes of the same indexer at the same time.
+        assert_eq!(
+            mailbox.submit_metadata(sources_request(1, SourceLane::Detail, 1)),
+            Submit::Queued
+        );
+        assert_eq!(
+            mailbox.submit_metadata(sources_request(2, SourceLane::Continuity, 2)),
+            Submit::Queued
+        );
+        let mut generations = Vec::new();
+        while let Some(Work::Metadata(request)) = mailbox.take_work() {
+            generations.push(request.generation);
+            if generations.len() == 2 {
+                break;
+            }
+        }
+        generations.sort_unstable();
+        assert_eq!(generations, [1, 2]);
+        // Within a lane the newest request still replaces the queued one.
+        mailbox.submit_metadata(sources_request(3, SourceLane::Continuity, 2));
+        assert_eq!(
+            mailbox.submit_metadata(sources_request(4, SourceLane::Continuity, 3)),
+            Submit::Replaced
+        );
+    }
+
     #[test]
     fn owned_worker_routes_metadata_requests_and_events() {
         let mut backend = Some(MetadataBackend {
