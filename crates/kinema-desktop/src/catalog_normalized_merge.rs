@@ -481,6 +481,14 @@ fn merge_personal(tx: &Transaction<'_>, target: Target, loser: i64) -> Result<()
             ("movie_watch_state", "title_id", winner)
         }
         Target::Episode(winner) => ("episode_watch_state", "episode_id", winner),
+        Target::Season(winner) => {
+            return super::stream_memory::merge(
+                tx,
+                super::stream_memory::Merge::Season,
+                winner,
+                loser,
+            );
+        }
         _ => return Ok(()),
     };
     tx.execute(&format!("INSERT INTO {table}({column},watched,updated_at) SELECT ?1,watched,updated_at FROM {table} WHERE {column}=?2 ON CONFLICT({column}) DO UPDATE SET watched=CASE WHEN excluded.updated_at>{table}.updated_at THEN excluded.watched WHEN excluded.updated_at={table}.updated_at THEN min({table}.watched,excluded.watched) ELSE {table}.watched END,updated_at=max({table}.updated_at,excluded.updated_at)"),params![winner,loser])?;
@@ -507,5 +515,8 @@ fn merge_personal(tx: &Transaction<'_>, target: Target, loser: i64) -> Result<()
         )?;
     }
     tx.execute(&format!("DELETE FROM {table} WHERE {column}=?1"), [loser])?;
+    if let Target::Episode(winner) = target {
+        super::stream_memory::merge(tx, super::stream_memory::Merge::Episode, winner, loser)?;
+    }
     Ok(())
 }
