@@ -314,77 +314,82 @@ impl PlayerWindow {
         };
         let total = countdown_steps().max(1) as f32;
         let remaining = card.remaining;
+        // Position on a wrapper: the entry preset offsets `top`, which on an
+        // element pinned by `bottom` would stretch it to the window's top edge.
+        let card = div()
+            .id("player-up-next")
+            .w(player::UP_NEXT_WIDTH)
+            .flex()
+            .flex_col()
+            .gap(s::S8)
+            .p(s::S12)
+            .occlude()
+            .rounded(radius::LG)
+            .bg(p.scrim)
+            .border_1()
+            .border_color(p.border)
+            .aria_label(format!(
+                "Up next. Playing the next episode in {remaining} seconds."
+            ))
+            // A press inside the card is a choice, not "other input".
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(
+                div()
+                    .text(TextSize::Sm)
+                    .weight(Weight::Semibold)
+                    .text_color(p.foreground)
+                    .child("Up next"),
+            )
+            .child(
+                div()
+                    .text(TextSize::Sm)
+                    .text_color(p.muted_foreground)
+                    .child(format!("Next episode in {remaining}…")),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .h(s::S4)
+                    .rounded(radius::FULL)
+                    .bg(p.input.opacity(opacity::TRACK))
+                    .child(
+                        div()
+                            .h_full()
+                            .w(relative(remaining as f32 / total))
+                            .rounded(radius::FULL)
+                            .bg(p.primary),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap(s::S8)
+                    .child(
+                        Button::new("player-up-next-play", "Play now")
+                            .variant(ButtonVariant::Primary)
+                            .over_art(true)
+                            .focus_handle(self.controls[UP_NEXT_PLAY].clone())
+                            .on_click(cx.listener(|view, _, _, cx| view.play_up_next(cx))),
+                    )
+                    .child(
+                        Button::new("player-up-next-cancel", "Cancel")
+                            .variant(ButtonVariant::Ghost)
+                            .over_art(true)
+                            .focus_handle(self.controls[UP_NEXT_CANCEL].clone())
+                            .on_click(cx.listener(|view, _, _, cx| {
+                                view.cancel_up_next();
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .animate_enter("player-up-next-enter", POPUP_IN, cx);
         Some(
             div()
-                .id("player-up-next")
                 .absolute()
                 .right(DOCK_SIDE_INSET)
                 .bottom(dock + DOCK_BOTTOM_INSET + s::S16)
-                .w(player::UP_NEXT_WIDTH)
-                .flex()
-                .flex_col()
-                .gap(s::S8)
-                .p(s::S12)
-                .occlude()
-                .rounded(radius::LG)
-                .bg(p.scrim)
-                .border_1()
-                .border_color(p.border)
-                .aria_label(format!(
-                    "Up next. Playing the next episode in {remaining} seconds."
-                ))
-                // A press inside the card is a choice, not "other input".
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .child(
-                    div()
-                        .text(TextSize::Sm)
-                        .weight(Weight::Semibold)
-                        .text_color(p.foreground)
-                        .child("Up next"),
-                )
-                .child(
-                    div()
-                        .text(TextSize::Sm)
-                        .text_color(p.muted_foreground)
-                        .child(format!("Next episode in {remaining}…")),
-                )
-                .child(
-                    div()
-                        .w_full()
-                        .h(s::S4)
-                        .rounded(radius::FULL)
-                        .bg(p.input.opacity(opacity::TRACK))
-                        .child(
-                            div()
-                                .h_full()
-                                .w(relative(remaining as f32 / total))
-                                .rounded(radius::FULL)
-                                .bg(p.primary),
-                        ),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .gap(s::S8)
-                        .child(
-                            Button::new("player-up-next-play", "Play now")
-                                .variant(ButtonVariant::Primary)
-                                .over_art(true)
-                                .focus_handle(self.controls[UP_NEXT_PLAY].clone())
-                                .on_click(cx.listener(|view, _, _, cx| view.play_up_next(cx))),
-                        )
-                        .child(
-                            Button::new("player-up-next-cancel", "Cancel")
-                                .variant(ButtonVariant::Ghost)
-                                .over_art(true)
-                                .focus_handle(self.controls[UP_NEXT_CANCEL].clone())
-                                .on_click(cx.listener(|view, _, _, cx| {
-                                    view.cancel_up_next();
-                                    cx.notify();
-                                })),
-                        ),
-                )
-                .animate_enter("player-up-next-enter", POPUP_IN, cx),
+                .child(card)
+                .into_any_element(),
         )
     }
 }
