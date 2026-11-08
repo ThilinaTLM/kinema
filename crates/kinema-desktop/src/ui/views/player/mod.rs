@@ -71,8 +71,8 @@ pub(crate) use registry::open_fixture;
 use registry::*;
 pub(crate) use registry::{
     SessionContext, authorize_progress, checkpoint_all, close_session, desktop_snapshots,
-    dispatch_transport, final_checkpoint, invalidate_progress, neighbour_failed, open,
-    progress_notice, set_neighbours, show_player, take_focus_events,
+    dispatch_transport, final_checkpoint, invalidate_progress, neighbour_failed, neighbour_note,
+    open, progress_notice, set_neighbours, show_player, take_focus_events,
 };
 use startup::*;
 use subtitles::{SubtitleNotice, SubtitlePending, has_subtitle_name};
@@ -173,6 +173,10 @@ pub struct PlayerWindow {
     /// Dock notice for a neighbour request that failed; `None` direction means
     /// a swap that did not complete.
     neighbour_notice: Option<(Option<NeighbourDirection>, Instant)>,
+    /// A reason or transition shown in the dock status instead of the generic
+    /// failure wording ("Same pack", "No streams found for this episode"); the
+    /// flag is whether it is a warning. Expires with `neighbour_notice`.
+    neighbour_note: Option<(String, bool)>,
     /// The **Up next** countdown, owned by this window.
     up_next: Option<UpNext>,
     /// Set once the user cancelled or the countdown ran; reset when the file is

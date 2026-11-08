@@ -342,6 +342,12 @@ impl Detail {
                 },
             })
         });
+        // A ranked list (a remembered release to match) overrides the sort: the
+        // closest streams come first and the first is preselected.
+        if let Some(ranking) = &self.ranking {
+            let generation = self.coordinator.read(cx).sources.generation();
+            ranking.arrange(generation, sources, &mut rows);
+        }
         rows
     }
     pub(super) fn streams_page(
@@ -408,6 +414,7 @@ impl Detail {
                 prefs.quality.label()
             ));
         }
+        let ranked_note = self.ranking.as_ref().map(|r| r.label().to_owned());
         let heading = div()
             .w_full()
             .flex()
@@ -423,6 +430,12 @@ impl Detail {
                     .text_color(p.foreground)
                     .child("Streams"),
             )
+            .children(ranked_note.map(|note| {
+                div()
+                    .text(TextSize::Sm)
+                    .text_color(p.primary_text)
+                    .child(format!("Closest matches first · {note}"))
+            }))
             .when(sources.is_some(), |el| {
                 el.child(
                     div()

@@ -104,6 +104,15 @@ impl PlayerWindow {
                 StatusItem::warning("Not saved"),
                 "Progress could not be saved",
             ))
+        } else if let Some((text, warning)) = self.neighbour_note_text() {
+            Some((
+                if warning {
+                    StatusItem::warning(text)
+                } else {
+                    StatusItem::text(text)
+                },
+                text,
+            ))
         } else if let Some(text) = neighbour_text.as_deref() {
             Some((StatusItem::warning(text), text))
         } else if let (Some((notice, _)), Some(full)) =

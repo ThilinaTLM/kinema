@@ -91,7 +91,7 @@ pub(super) enum Origin {
 
 /// The ranked picker's inputs: the Streams page re-ranks its own list with them.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct PickerSpec {
+pub struct PickerSpec {
     pub reference: ReferenceRelease,
     /// The playing torrent, whose file could not be identified.
     pub exclude: Option<InfoHash>,
@@ -138,9 +138,11 @@ pub(super) enum Effect {
         token: Token,
         series: ImdbId,
     },
+    /// `interactive` queries go before queued prefetches.
     QueryIndexer {
         token: Token,
         target: PlaybackTarget,
+        interactive: bool,
     },
     ReadMemory {
         token: Token,
@@ -222,11 +224,15 @@ struct Window {
     /// Coordinates came from a listing (so the dock may be published).
     known: bool,
     busy: Option<NeighbourDirection>,
+    /// A request that arrived before the listing did; it starts when it loads.
+    waiting: Option<(NeighbourDirection, Option<Kept>)>,
     prefetch: Prefetch,
 }
 
 impl Window {
-    fn publish(&self, session: &str) -> Effect {
+    /// The dock for this window, once its neighbours are known. Before that the
+    /// dock keeps what it has (hidden when nothing was ever published).
+    fn publish(&self, session: &str) -> Option<Effect> {
         let state = |coordinates: Option<(u32, u32)>, direction| {
             if self.busy == Some(direction) {
                 NeighbourState::Busy
@@ -236,13 +242,13 @@ impl Window {
                 NeighbourState::Disabled
             }
         };
-        Effect::Publish {
+        self.known.then(|| Effect::Publish {
             session: session.to_owned(),
             dock: Dock {
                 previous: state(self.coordinates.previous, NeighbourDirection::Previous),
                 next: state(self.coordinates.next, NeighbourDirection::Next),
             },
-        }
+        })
     }
 }
 
@@ -285,6 +291,7 @@ impl Resolver {
         self.listing(series)?.names.get(&(season, episode)).cloned()
     }
 
+    #[cfg(test)]
     pub(super) fn played(&self, session: &str) -> Option<&Played> {
         self.played.get(session)
     }
@@ -346,6 +353,7 @@ impl Resolver {
             coordinates: Neighbours::default(),
             known: false,
             busy: None,
+            waiting: None,
             prefetch: Prefetch::None,
         };
         if let Some(listing) = self.listing(series) {
@@ -354,7 +362,7 @@ impl Resolver {
         }
         let mut effects = Vec::new();
         if window.known {
-            effects.push(window.publish(session));
+            effects.extend(window.publish(session));
         }
         let token = self.token();
         self.listing_reads.insert(
@@ -445,7 +453,7 @@ impl Resolver {
         for (session, window) in &mut self.windows {
             window.prefetch = Prefetch::None;
             if window.busy.take().is_some() {
-                effects.push(window.publish(session));
+                effects.extend(window.publish(session));
             }
         }
         effects.extend(outcomes.into_iter().map(Effect::Outcome));
@@ -466,13 +474,21 @@ impl Resolver {
                 window.prefetch = Prefetch::None;
             }
             if window.busy.take().is_some() {
-                effects.push(window.publish(session));
+                effects.extend(window.publish(session));
             }
         }
         effects
     }
 
     // ── listings ──
+
+    /// The series that open windows play.
+    pub(super) fn series_in_use(&self) -> Vec<ImdbId> {
+        let mut series: Vec<ImdbId> = self.windows.values().map(|w| w.series.clone()).collect();
+        series.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        series.dedup();
+        series
+    }
 
     /// Canonical rows may have changed for `series`: read the listing again.
     pub(super) fn listing_changed(&mut self, series: &ImdbId) -> Vec<Effect> {
@@ -513,7 +529,31 @@ impl Resolver {
             return Vec::new();
         }
         let (Some(listing), series) = (result, window.series.clone()) else {
-            return Vec::new();
+            // Without a listing a waiting request cannot be served.
+            let mut effects = Vec::new();
+            if let Some(window) = self.windows.get_mut(&read.session)
+                && let Some((direction, _)) = window.waiting.take()
+            {
+                window.busy = None;
+                let target = PlaybackTarget::Episode {
+                    series: window.series.clone(),
+                    season: window.season,
+                    episode: window.episode,
+                };
+                effects.extend(window.publish(&read.session));
+                effects.push(Effect::Outcome(Outcome {
+                    origin: Origin::Window {
+                        session: read.session.clone(),
+                        generation: read.generation,
+                        direction,
+                    },
+                    target,
+                    decision: Decision::Unavailable {
+                        label: ChoiceReason::IndexerFailed.label(),
+                    },
+                }));
+            }
+            return effects;
         };
         self.listings.retain(|(id, _)| id != &series);
         self.listings.push((series.clone(), listing));
@@ -570,7 +610,17 @@ impl Resolver {
         window.coordinates = coordinates;
         window.known = true;
         if first || changed {
-            effects.push(window.publish(session));
+            effects.extend(window.publish(session));
+        }
+        // A request that was waiting for the listing starts now.
+        if let Some((direction, kept)) = window.waiting.take() {
+            window.busy = None;
+            let target = PlaybackTarget::Episode {
+                series: window.series.clone(),
+                season: window.season,
+                episode: window.episode,
+            };
+            effects.extend(self.request(session, &target, direction, kept));
         }
         effects
     }
@@ -603,14 +653,33 @@ impl Resolver {
         };
         // One request at a time: the dock already shows Busy for the first.
         if window.busy.is_some() {
-            effects.push(window.publish(session));
+            effects.extend(window.publish(session));
+            return effects;
+        }
+        if !window.known {
+            // The listing has not arrived: ask again, and start when it does.
+            window.busy = Some(direction);
+            window.waiting = Some((direction, kept));
+            let generation = window.generation;
+            let token = self.token();
+            self.listing_reads.insert(
+                token,
+                ListingRead {
+                    session: session.to_owned(),
+                    generation,
+                },
+            );
+            effects.push(Effect::ReadListing {
+                token,
+                series: series.clone(),
+            });
             return effects;
         }
         let Some(coordinates) = (match direction {
             NeighbourDirection::Next => window.coordinates.next,
             NeighbourDirection::Previous => window.coordinates.previous,
         }) else {
-            effects.push(window.publish(session));
+            effects.extend(window.publish(session));
             return effects;
         };
         let generation = window.generation;
@@ -629,7 +698,7 @@ impl Resolver {
                 Prefetch::Ready(cached) if cached.coordinates == coordinates => {
                     let decision = cached.decision.clone();
                     window.busy = Some(direction);
-                    effects.push(window.publish(session));
+                    effects.extend(window.publish(session));
                     effects.push(Effect::Outcome(Outcome {
                         origin,
                         target: neighbour,
@@ -643,7 +712,7 @@ impl Resolver {
                         job.purpose = Purpose::Interactive;
                         job.origin = origin;
                         window.busy = Some(direction);
-                        effects.push(window.publish(session));
+                        effects.extend(window.publish(session));
                         return effects;
                     }
                 }
@@ -651,7 +720,7 @@ impl Resolver {
             }
         }
         window.busy = Some(direction);
-        effects.push(window.publish(session));
+        effects.extend(window.publish(session));
         let played = self.played.get(session).cloned();
         effects.extend(self.start_window_job(
             origin,
@@ -686,6 +755,7 @@ impl Resolver {
                 season,
                 episode,
             },
+            interactive: purpose == Purpose::Interactive,
         }];
         if matches!(memory, Memory::Reading) {
             effects.push(Effect::ReadMemory {
@@ -892,6 +962,7 @@ impl Resolver {
             return vec![Effect::QueryIndexer {
                 token,
                 target: job.target(),
+                interactive: true,
             }];
         }
         if job.indexer.is_none() {
@@ -947,7 +1018,7 @@ impl Resolver {
         }
         if matches!(decision, Decision::Unavailable { .. }) {
             window.busy = None;
-            effects.push(window.publish(session));
+            effects.extend(window.publish(session));
         }
         effects.push(Effect::Outcome(Outcome {
             origin: job.origin,

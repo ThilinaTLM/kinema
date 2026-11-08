@@ -42,6 +42,9 @@ impl EventEmitter<DismissEvent> for PlaySession {}
 /// The user asked to prepare the same stream again after a failure.
 pub(crate) enum PlaySessionEvent {
     Retry,
+    /// The torrent's file for this episode is not unique, so nothing was
+    /// started. A caller that skipped the stream list opens it instead.
+    NeedsPicker,
 }
 impl EventEmitter<PlaySessionEvent> for PlaySession {}
 #[cfg(feature = "ui-probe")]

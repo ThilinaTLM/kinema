@@ -47,10 +47,10 @@ use std::{
 /// user keeps the episode they are watching; nothing is lost.
 const FLUSH_DEADLINE: Duration = Duration::from_secs(3);
 
-/// What Phase 2's resolution listens for. The coordinator answers through
-/// [`AppCoordinator::set_neighbours`] and [`AppCoordinator::neighbour_failed`],
-/// and acts through [`AppCoordinator::play_kept_file`] or
-/// [`AppCoordinator::swap_embedded_source`].
+/// What neighbour resolution (`neighbours.rs`) is driven by. The coordinator
+/// answers through [`AppCoordinator::set_neighbours`] and
+/// [`AppCoordinator::neighbour_failed`], and acts through
+/// [`AppCoordinator::play_kept_file`] or [`AppCoordinator::swap_embedded_source`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum NeighbourEvent {
     /// A window now plays `target` (`None` when it is not catalog-tracked). Fired
@@ -72,7 +72,6 @@ impl EventEmitter<NeighbourEvent> for AppCoordinator {}
 /// A debrid preparation that belongs to an open window: the pack's file list
 /// and provider, so another file can be unlocked and played later.
 #[derive(Clone, Debug)]
-#[allow(dead_code)] // Read by Phase 2's neighbour resolution.
 pub(crate) struct KeptPreparation {
     /// The worker's preparation id (the `Prepare` command generation).
     pub id: u64,
@@ -195,7 +194,6 @@ impl AppCoordinator {
 
 impl AppCoordinator {
     /// The pack a window keeps, for resolving its neighbours.
-    #[allow(dead_code)] // Phase 2.
     pub(crate) fn kept_preparation(&self, window: &str) -> Option<&KeptPreparation> {
         self.continuity.kept.get(window)
     }
@@ -272,7 +270,7 @@ impl AppCoordinator {
         self.cancel_preparation(kept.id, cx);
     }
 
-    fn claim_preparation(&self, id: u64) -> Option<KeptPreparation> {
+    pub(super) fn claim_preparation(&self, id: u64) -> Option<KeptPreparation> {
         self.continuity
             .prepared
             .as_ref()
@@ -319,12 +317,14 @@ impl AppCoordinator {
             } = loading;
             self.queue_embedded_release(from.clone(), cx);
             self.drop_run(&from);
+            self.flow_closed(&from, cx);
             if let Some(before) = kept_before
                 && self.continuity.kept.get(session).map(|k| k.id) != Some(before.id)
             {
                 self.release_kept(before, cx);
             }
         }
+        self.flow_closed(session, cx);
         if let Some(pending) = self.continuity.swaps.remove(session) {
             self.queue_embedded_release(pending.request.session.id, cx);
         }
@@ -395,11 +395,11 @@ impl AppCoordinator {
             session: session.to_owned(),
             direction,
         });
+        self.flow_requested(session, direction, cx);
     }
 
     /// Resolution failed or was cancelled: the control is usable again and the
     /// dock says so. The current episode keeps playing.
-    #[allow(dead_code)] // Phase 2.
     pub(crate) fn neighbour_failed(
         &mut self,
         session: &str,
@@ -412,7 +412,12 @@ impl AppCoordinator {
         }
     }
 
-    fn reset_busy(&mut self, session: &str, cx: &mut Context<Self>) {
+    pub(super) fn reset_busy(&mut self, session: &str, cx: &mut Context<Self>) {
+        // The resolver knows the real neighbours; without a window of its own
+        // the dock's last state is all there is.
+        if self.flow_settle(session, cx) {
+            return;
+        }
         let mut neighbours = self
             .continuity
             .neighbours
@@ -427,7 +432,7 @@ impl AppCoordinator {
         self.set_neighbours(session, neighbours, cx);
     }
 
-    fn swap_in_progress(&self, session: &str) -> bool {
+    pub(super) fn swap_in_progress(&self, session: &str) -> bool {
         self.continuity.swaps.contains_key(session)
             || self.continuity.loading.contains_key(session)
             || self
@@ -446,8 +451,9 @@ impl AppCoordinator {
     ) {
         cx.emit(NeighbourEvent::SubjectChanged {
             session: session.to_owned(),
-            target,
+            target: target.clone(),
         });
+        self.flow_subject_changed(session, target, cx);
     }
 }
 
@@ -457,7 +463,6 @@ impl AppCoordinator {
     /// Unlocks `file_id` of the window's kept pack and plays it into the same
     /// window: a `PlayKeptFile` whose result swaps the source instead of opening
     /// a window. Returns the command generation.
-    #[allow(dead_code)] // Phase 2.
     pub(crate) fn play_kept_file(
         &mut self,
         window: &str,
@@ -513,7 +518,6 @@ impl AppCoordinator {
     /// Makes the launch `generation` (a `PlayFile` that kept its preparation, from
     /// a stream the user picked for the next episode) swap into `window` when it
     /// starts, instead of opening a new window.
-    #[allow(dead_code)] // Phase 2.
     pub(crate) fn route_launch_to_window(
         &mut self,
         generation: u64,
@@ -835,6 +839,7 @@ impl AppCoordinator {
             // The swap left the pack.
             self.release_kept(before, cx);
         }
+        self.flow_swap_ready(&from, session, cx);
         cx.notify();
     }
 
@@ -866,6 +871,8 @@ impl AppCoordinator {
                 .neighbours
                 .insert(from.clone(), loading.neighbours_before);
             player::set_neighbours(&from, loading.neighbours_before, cx);
+            // The request that led here is over.
+            self.reset_busy(&from, cx);
             player::neighbour_failed(&from, loading.direction, cx);
         } else {
             // Nothing to restore into: close the window and give everything up.

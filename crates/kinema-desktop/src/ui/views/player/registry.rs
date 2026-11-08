@@ -576,6 +576,15 @@ pub(crate) fn neighbour_failed(session: &str, direction: Option<NeighbourDirecti
     });
 }
 
+/// Shows `text` in the window's dock status: the reason a neighbour request
+/// failed (`warning`), or how the next episode was chosen. Plain wording only.
+pub(crate) fn neighbour_note(session: &str, text: &str, warning: bool, cx: &mut App) {
+    let text = text.to_owned();
+    update_progress_window(session, cx, move |view, cx| {
+        view.show_neighbour_note(text, warning, cx)
+    });
+}
+
 pub fn progress_notice(session: &str, generation: u64, failed: bool, cx: &mut App) {
     update_progress_window(session, cx, |view, cx| {
         if view

@@ -424,6 +424,7 @@ impl AppCoordinator {
             return;
         }
         run.sequence = sample.sequence;
+        let observation = sample.observation;
         if sample.force {
             run.retry_at = None;
         }
@@ -433,6 +434,8 @@ impl AppCoordinator {
             run.retry_at = None;
         }
         self.send_latest_checkpoint(&session, cx);
+        // At 80% of the episode the next one is resolved ahead of time.
+        self.flow_progress(&session, observation, cx);
     }
     fn send_latest_checkpoint(&mut self, session: &str, cx: &mut Context<Self>) {
         let Some(run) = self.playback.runs.get_mut(session) else {

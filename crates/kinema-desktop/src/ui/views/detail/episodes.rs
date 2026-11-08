@@ -1073,7 +1073,15 @@ impl Detail {
             )
             .context_menu(("episode-menu", id), move |_, _| {
                 let mut items = vec![
-                    menu_item("Find streams", {
+                    menu_item("Play", {
+                        let find = find.clone();
+                        let ep = ep.clone();
+                        move |_, cx| {
+                            let _ = find
+                                .update(cx, |s, cx| s.play_episode(ep.season, ep.number, None, cx));
+                        }
+                    }),
+                    menu_item("Choose stream", {
                         let find = find.clone();
                         let ep = ep.clone();
                         move |_, cx| {

@@ -143,7 +143,10 @@ impl PlaySession {
                 self.preparation = Some(event.generation);
                 match after_prepare(selection, &prepared.files) {
                     AfterPrepare::Play(file_id) => self.play_file(event.generation, file_id, cx),
-                    AfterPrepare::Message(message) => self.error = Some(message),
+                    AfterPrepare::Message(message) => {
+                        self.error = Some(message);
+                        cx.emit(PlaySessionEvent::NeedsPicker);
+                    }
                 }
             }
             AppOutcome::PlaybackStarted { .. } | AppOutcome::EmbeddedPlaybackStarted { .. } => {

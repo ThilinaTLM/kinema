@@ -255,8 +255,7 @@ impl Detail {
     ) {
         match (action, episode) {
             (ProgressAction::PlayFromBeginning, Some((s, n))) => {
-                self.continue_episode(s, n, cx);
-                self.start_over_requested = true;
+                self.play_episode(s, n, Some(true), cx);
             }
             (ProgressAction::PlayFromBeginning, None) => {
                 self.open_streams(cx);

@@ -9,16 +9,15 @@
 //! owns both workers and its polling task; no blocking work runs on the UI thread.
 //! `needs_quit_confirmation` includes pending launches, not just active sessions.
 mod continuity;
+mod neighbours;
 mod personal;
 mod playback;
 mod resolver;
+pub(crate) use continuity::EpisodeLaunch;
 #[cfg(all(test, feature = "ui-probe-test"))]
-pub(crate) use continuity::{SessionProbe, SwapStep};
-// Phase 2 (neighbour resolution) is the consumer of these.
-#[allow(unused_imports)]
-pub(crate) use continuity::{
-    EpisodeLaunch, KeptPreparation, NeighbourEvent, SwapError, SwapRequest,
-};
+pub(crate) use continuity::{NeighbourEvent, SessionProbe, SwapError, SwapRequest, SwapStep};
+pub use neighbours::DirectPlay;
+use neighbours::FlowStore;
 use personal::PersonalStore;
 #[allow(
     unused_imports,
@@ -29,6 +28,7 @@ pub(crate) use personal::{
     PersonalTitle, PersonalView, SeasonSnapshot, TitleRef,
 };
 pub(crate) use playback::PlaybackIntent;
+pub use resolver::PickerSpec;
 
 use crate::{
     app::{AppAction, AppCommand, AppEvent, AppOutcome, AppWorker, CredentialState},
@@ -209,6 +209,14 @@ pub enum CoordinatorEvent {
     OpenSettings,
     OpenSettingsAt(SettingsDestination),
     About,
+    /// A player window asked for an episode whose stream needs a choice: show
+    /// [`AppCoordinator::stream_picker`] in the main window.
+    OpenStreamPicker,
+    /// The answer to [`AppCoordinator::play_episode_direct`].
+    DirectPlay {
+        ticket: u64,
+        play: DirectPlay,
+    },
 }
 impl EventEmitter<CoordinatorEvent> for AppCoordinator {}
 
@@ -345,6 +353,7 @@ pub struct AppCoordinator {
     #[cfg(feature = "ui-probe")]
     pub(crate) fixture_sources: std::collections::HashMap<(IndexerKind, PlaybackTarget), SourceSet>,
     // ── sessions: preparation and launch identity correlation ──
+    flow: FlowStore,
     session_identity: std::collections::HashMap<u64, (String, PlaybackTarget, Option<String>)>,
     playback: playback::PlaybackStore,
     /// Windows' kept preparations, swaps in progress and dock neighbour state.
@@ -387,6 +396,7 @@ impl AppCoordinator {
             session_identity: Default::default(),
             playback: Default::default(),
             continuity: Default::default(),
+            flow: Default::default(),
             player_titles: Default::default(),
             rates: Default::default(),
             rate_epoch: std::time::Instant::now(),
@@ -481,6 +491,7 @@ impl AppCoordinator {
             session_identity: Default::default(),
             playback: Default::default(),
             continuity: Default::default(),
+            flow: Default::default(),
             player_titles: Default::default(),
             rates: Default::default(),
             rate_epoch: std::time::Instant::now(),
@@ -768,7 +779,7 @@ impl AppCoordinator {
                 Outcome::Fetched(_) | Outcome::CacheHit { .. }
             )
         }) || metadata.iter().any(|event| match event {
-            Polled::Cinemeta(MetaEvent::Sources { .. }) => false,
+            Polled::Cinemeta(MetaEvent::Sources { .. }) | Polled::Continuity(_) => false,
             Polled::Cinemeta(MetaEvent::Browse { stage, .. }) => !matches!(stage, Stage::Failed(_)),
             Polled::Cinemeta(MetaEvent::Details { stage, .. }) => {
                 !matches!(stage, Stage::Failed(_))
@@ -901,6 +912,8 @@ impl AppCoordinator {
                 }
                 // ── enrichment: quiet; never a primary-view failure ──
                 Polled::Enrichment(event) => self.apply_enrichment(event),
+                // ── episode continuity: its own slot and generation space ──
+                Polled::Continuity(event) => self.flow_indexer_event(event, cx),
                 Polled::Tmdb(event)
                     if Some(&event.action)
                         == self
@@ -1011,6 +1024,7 @@ impl AppCoordinator {
         }
         self.retry_embedded_releases(cx);
         self.retry_playback_progress(cx);
+        self.flow_tick(cx);
         if changed {
             cx.notify();
         }
@@ -1029,9 +1043,12 @@ impl AppCoordinator {
         if let AppOutcome::Prepared { prepared, .. } = &event.outcome {
             self.note_prepared(event.generation, prepared);
         }
+        // A strong match prepared for a player window: play its file into it.
+        self.flow_prepare_outcome(event.generation, &event.outcome, cx);
         if let AppOutcome::EmbeddedPlaybackStarted { session, .. } = &event.outcome
             && self.closed_embedded_sessions.contains_key(&session.id)
         {
+            self.flow_plan_dropped(event.generation);
             self.session_identity.remove(&event.generation);
             self.discard_route(event.generation, keep, cx);
             self.prune_embedded_tombstones();
@@ -1055,6 +1072,17 @@ impl AppCoordinator {
                         row.error = None;
                     }
                 } else {
+                    // Record what started: an obsolete embedded start is released
+                    // unseen and remembers nothing; an external one is running.
+                    if matches!(event.outcome, AppOutcome::PlaybackStarted { .. })
+                        || resolved.as_ref().is_none_or(|r| r.current)
+                    {
+                        let embedded =
+                            matches!(event.outcome, AppOutcome::EmbeddedPlaybackStarted { .. });
+                        self.flow_started(event.generation, &session.id, embedded);
+                    } else {
+                        self.flow_plan_dropped(event.generation);
+                    }
                     self.sessions.retain(|s| s.session.id != session.id);
                     if let Some((title, target, episode_title)) =
                         self.session_identity.get(&event.generation)
@@ -1113,6 +1141,7 @@ impl AppCoordinator {
                 }
                 // The worker dropped every preparation; forget whatever is left.
                 self.invalidate_continuity();
+                self.flow_invalidated(cx);
             }
             AppOutcome::Usage(usage) => self.usage = Some(usage.clone()),
             AppOutcome::SessionUpdates(updates) => {
@@ -1167,6 +1196,7 @@ impl AppCoordinator {
                 | AppOutcome::EmbeddedPlaybackStarted { .. }
         ) {
             self.session_identity.remove(&event.generation);
+            self.flow_plan_dropped(event.generation);
         }
         self.prune_embedded_tombstones();
         self.player_titles
@@ -1456,6 +1486,14 @@ impl AppCoordinator {
                 self.playback.intents.insert(generation, intent);
             }
         }
+        let play_file = match &action {
+            AppAction::PlayFile {
+                preparation,
+                file_id,
+                keep,
+            } => Some((*preparation, file_id.clone(), *keep)),
+            _ => None,
+        };
         let release_id = if let AppAction::ReleaseSession(id) = &action {
             Some(id.clone())
         } else {
@@ -1479,6 +1517,9 @@ impl AppCoordinator {
             }
             if let Some(id) = release_id {
                 self.close_embedded_session(&id, cx);
+            }
+            if let Some((preparation, file_id, keep)) = play_file {
+                self.flow_play_file(generation, preparation, &file_id, keep);
             }
             cx.notify();
             Some(generation)
@@ -2130,6 +2171,7 @@ impl AppCoordinator {
             "UI preparation requested"
         );
         let identity = (title, target.clone(), episode_title);
+        let (seed_target, seed_candidate) = (target.clone(), candidate.clone());
         let generation = self.command(AppAction::Prepare { target, candidate }, cx)?;
         // An admitted preparation supersedes the worker's retained preparation.
         // Keep identity still needed by outstanding launches/commands.
@@ -2140,6 +2182,7 @@ impl AppCoordinator {
             .retain(|generation, _| self.session_identity.contains_key(generation));
         self.session_identity.insert(generation, identity);
         self.playback.intents.insert(generation, intent);
+        self.flow_prepared_for(generation, &seed_target, &seed_candidate);
         Some(generation)
     }
     pub fn cancel_preparation(&mut self, preparation: u64, cx: &mut Context<Self>) -> bool {

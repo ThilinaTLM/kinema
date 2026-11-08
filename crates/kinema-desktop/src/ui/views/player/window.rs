@@ -216,6 +216,7 @@ impl PlayerWindow {
             neighbour_requests: None,
             neighbours: Neighbours::default(),
             neighbour_notice: None,
+            neighbour_note: None,
             up_next: None,
             up_next_dismissed: false,
             swap: None,

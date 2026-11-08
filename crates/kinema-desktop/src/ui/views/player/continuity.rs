@@ -145,6 +145,7 @@ impl PlayerWindow {
         };
         self.cancel_up_next();
         self.neighbour_notice = None;
+        self.neighbour_note = None;
         // Busy at once, so a second press cannot queue a second request; the
         // coordinator's own state follows.
         self.neighbours.set(direction, NeighbourState::Busy);
@@ -172,8 +173,31 @@ impl PlayerWindow {
         cx: &mut Context<Self>,
     ) {
         self.neighbour_notice = Some((direction, Instant::now()));
+        self.neighbour_note = None;
         self.last_activity = Instant::now();
         cx.notify();
+    }
+
+    /// Shows `text` in the dock status: why a request failed, or how an episode
+    /// was chosen. Replaces the generic failure wording.
+    pub(super) fn show_neighbour_note(
+        &mut self,
+        text: String,
+        warning: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.neighbour_notice = Some((None, Instant::now()));
+        self.neighbour_note = Some((text, warning));
+        self.last_activity = Instant::now();
+        cx.notify();
+    }
+
+    /// The dock note and whether it is a warning, while it is showing.
+    pub(super) fn neighbour_note_text(&self) -> Option<(&str, bool)> {
+        self.neighbour_notice?;
+        self.neighbour_note
+            .as_ref()
+            .map(|(text, warning)| (text.as_str(), *warning))
     }
 
     /// Text for the dock status; `None` once it has run its course.
@@ -192,6 +216,7 @@ impl PlayerWindow {
             .is_some_and(|(_, since)| now.saturating_duration_since(since) >= timing::PLAYER_NOTICE)
         {
             self.neighbour_notice = None;
+            self.neighbour_note = None;
             return true;
         }
         false

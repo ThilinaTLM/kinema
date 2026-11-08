@@ -164,6 +164,7 @@ impl PlayerWindow {
         self.control_notice = false;
         self.neighbours = Neighbours::default();
         self.neighbour_notice = None;
+        self.neighbour_note = None;
         self.up_next = None;
         self.up_next_dismissed = false;
         self.subtitle_position = None;

@@ -1009,6 +1009,8 @@ impl AppCoordinator {
         }
     }
     pub(super) fn refresh_personal_after_catalog(&mut self, cx: &mut Context<Self>) {
+        // Episode rows may have arrived or changed: the open players' neighbours.
+        self.flow_catalog_changed(cx);
         let titles = self
             .titles
             .iter()
@@ -1039,7 +1041,7 @@ impl AppCoordinator {
         let changed = !events.is_empty();
         let mut invalidate = false;
         for event in events {
-            if self.apply_playback_event(&event, cx) {
+            if self.apply_playback_event(&event, cx) || self.apply_flow_event(&event, cx) {
                 continue;
             }
             invalidate |= self.apply_personal_event(event);
@@ -1365,7 +1367,8 @@ impl AppCoordinator {
                         }
                         self.local_details.fetched(request.generation, *detail, 0);
                     }
-                    // Stream memory is consumed by the playback start flow (Phase 2).
+                    // Stream memory requests use the continuity request-id
+                    // namespace and are consumed before reaching this handler.
                     LibraryResult::StreamMemory(_) => {}
                 }
                 mutation
