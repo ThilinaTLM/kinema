@@ -138,8 +138,9 @@ impl Detail {
         button.into_any_element()
     }
 
-    /// Compact hero: ambient backdrop behind poster, title, chips, overview and
-    /// actions, followed by a metadata-failure notice when there is one.
+    /// Compact hero: ambient backdrop behind poster, title, chips, key facts,
+    /// overview and actions, followed by the inline notices (play panel,
+    /// progress-clear confirmation) when there are any.
     pub(super) fn hero(
         &self,
         title: &BrowseTitle,
@@ -170,8 +171,8 @@ impl Detail {
         if let Some(tagline) = view.tagline.clone() {
             banner = banner.tagline(tagline);
         }
-        if let Some(glance) = self.glance_panel(&view, hero_layout.stack_glance, cx) {
-            banner = banner.aside(glance, hero_layout.glance, hero_layout.stack_glance);
+        if let Some(facts) = self.key_facts(&view, cx) {
+            banner = banner.facts(facts);
         }
         if let Some(text) = title.overview().filter(|o| !o.trim().is_empty()) {
             banner = banner.overview(text.to_owned());

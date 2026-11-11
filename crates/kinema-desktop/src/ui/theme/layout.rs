@@ -9,9 +9,8 @@ pub mod breakpoints {
     use gpui::{Pixels, px};
     /// Below this, action rows compact (`detail/layout.rs` COMPACT_ACTIONS_BELOW).
     pub const COMPACT: Pixels = px(900.);
-    /// Below this, toolbars/filters/glance panels collapse
-    /// (`browse/filters.rs` COMPACT_BELOW, `detail/layout.rs` GLANCE_STACK_BELOW,
-    /// `toolbar.rs` TRANSFER_DETAIL_MIN_WIDTH).
+    /// Below this, toolbars and filters collapse
+    /// (`browse/filters.rs` COMPACT_BELOW, `toolbar.rs` TRANSFER_DETAIL_MIN_WIDTH).
     pub const WIDE: Pixels = px(1100.);
     /// Frame width from which the Streams inspector sits beside the list.
     pub const INSPECTOR: Pixels = px(1040.);
@@ -50,20 +49,16 @@ pub mod detail {
     pub const QUALITY_TILE_WIDTH: Pixels = px(56.);
     pub const QUALITY_TILE_HEIGHT: Pixels = px(40.);
     pub const OVERVIEW_MAX_WIDTH: Pixels = px(880.);
-    pub const HERO_ASIDE_WIDTH: Pixels = px(320.);
+    /// Inline play panel under the Detail hero (Continue/Resume progress).
+    pub const PLAY_PANEL_MAX_WIDTH: Pixels = px(560.);
     /// Fraction of the hero height the backdrop fade covers.
     pub const HERO_FADE_HEIGHT: f32 = 0.7;
     /// Fraction of the hero width the side scrim reaches.
     pub const HERO_SIDE_SCRIM_REACH: f32 = 0.7;
-    /// Poster and glance panel scale with the window, within these bounds.
+    /// The poster scales with the window, within these bounds.
     pub const HERO_POSTER_FRACTION: f32 = 0.14;
     pub const HERO_POSTER_MIN: Pixels = px(160.);
     pub const HERO_POSTER_MAX: Pixels = px(240.);
-    pub const GLANCE_FRACTION: f32 = 0.24;
-    pub const GLANCE_MIN: Pixels = px(280.);
-    pub const GLANCE_MAX: Pixels = px(380.);
-    pub const GLANCE_RATINGS_WIDTH: Pixels = px(300.);
-    pub const FACT_GLANCE_LABEL_WIDTH: Pixels = px(84.);
     pub const FACT_WIDE_LABEL_WIDTH: Pixels = px(112.);
     /// Streams inspector: a fraction of the frame within bounds.
     pub const STREAMS_INSPECTOR_FRACTION: f32 = 0.27;

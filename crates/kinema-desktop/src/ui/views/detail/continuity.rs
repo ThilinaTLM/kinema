@@ -10,7 +10,8 @@
 use super::progress::intent_for;
 use super::*;
 use crate::controllers::coordinator::{CoordinatorEvent, DirectPlay, PickerSpec};
-use crate::ui::primitives::alert::{Alert, AlertTone};
+use crate::ui::primitives::progress::Progress;
+use crate::ui::theme::typography::{TextSize, TypeExt, Weight};
 use kinema_core::episode_continuity::{Similarity, preselected_count, rank_order};
 
 /// A request to play an episode directly, from asking until its play session
@@ -295,6 +296,7 @@ impl Detail {
                 intent,
                 cx,
             )
+            .inline()
         });
         let subscriptions = vec![
             cx.subscribe(&session, |this, _, _: &DismissEvent, cx| {
@@ -404,42 +406,128 @@ impl Detail {
         }
     }
 
-    /// Inline panel below the hero while an episode is being played directly.
+    /// Design-lab state: S1 E3 resuming, its stream being prepared.
+    #[cfg(feature = "ui-probe")]
+    pub(super) fn fixture_playing(&mut self, cx: &mut Context<Self>) {
+        let episode = self.episode_or_placeholder(1, 3, cx);
+        let coordinator = self.coordinator.clone();
+        let session =
+            cx.new(|cx| PlaySession::fixture(coordinator, "play-live-preparing", cx).inline());
+        let candidate = SourceCandidate {
+            name: "North.Harbor.S01E03.1080p.WEB.mkv".into(),
+            quality: Some("1080p".into()),
+            size: Some(2_100_000_000),
+            seeders: Some(120),
+            torrent: kinema_core::sources::TorrentSource {
+                hash: kinema_core::sources::InfoHash::new("b".repeat(40))
+                    .unwrap_or_else(|e| panic!("fixture hash: {e}")),
+                file_index: None,
+                filename: None,
+            },
+        };
+        self.direct = Some(Direct {
+            ticket: 0,
+            episode,
+            intent: PlaybackIntent::Resume,
+            stage: DirectStage::Playing {
+                session,
+                candidate,
+                picker: None,
+                _subscriptions: Vec::new(),
+            },
+        });
+    }
+
+    /// Inline panel below the hero while an episode is being played directly:
+    /// a bounded card titled with the episode, **Choose stream** in its header,
+    /// and the play progress (or the stream lookup) with its own Cancel.
     pub(super) fn direct_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let direct = self.direct.as_ref()?;
-        let marker = format!("S{} E{}", direct.episode.season, direct.episode.number);
+        let p = self.tinted_palette(cx);
         let (season, number) = (direct.episode.season, direct.episode.number);
+        let mut heading = format!("S{season} E{number}");
+        if let Some(name) = direct
+            .episode
+            .name
+            .as_deref()
+            .filter(|n| !n.trim().is_empty())
+        {
+            heading = format!("{heading} \u{b7} {}", name.trim());
+        }
+        let verb = match direct.intent {
+            PlaybackIntent::Resume => "Resuming",
+            _ => "Playing",
+        };
         let choose = Button::new("direct-choose-stream", "Choose stream")
             .variant(ButtonVariant::Ghost)
+            .icon(IconName::Search)
             .on_click(cx.listener(move |this, _, _, cx| this.choose_stream(season, number, cx)));
+        let header = div()
+            .w_full()
+            .flex()
+            .items_center()
+            .gap(s::S8)
+            .child(Icon::new(IconName::Play).color(p.primary_text))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text(TextSize::Base)
+                    .weight(Weight::Semibold)
+                    .text_color(p.foreground)
+                    .child(format!("{verb} {heading}")),
+            )
+            .child(choose);
         let body = match &direct.stage {
             DirectStage::Resolving => div()
                 .w_full()
                 .flex()
-                .items_center()
-                .gap(s::S8)
+                .flex_col()
+                .gap(s::S12)
                 .child(
-                    div().flex_1().min_w_0().child(
-                        Alert::new(AlertTone::Info, format!("Finding a stream for {marker}"))
-                            .body("Using the release you watched last."),
-                    ),
+                    div()
+                        .w_full()
+                        .flex()
+                        .items_center()
+                        .gap(s::S12)
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text(TextSize::Sm)
+                                .text_color(p.muted_foreground)
+                                .child(
+                                    "Finding a stream \u{2014} using the release you watched last.",
+                                ),
+                        )
+                        .child(
+                            Button::new("direct-cancel", "Cancel")
+                                .size(ButtonSize::Md)
+                                .on_click(cx.listener(|this, _, _, cx| this.end_direct(cx))),
+                        ),
                 )
-                .child(
-                    Button::new("direct-cancel", "Cancel")
-                        .variant(ButtonVariant::Ghost)
-                        .on_click(cx.listener(|this, _, _, cx| this.end_direct(cx))),
-                )
-                .child(choose)
+                .child(Progress::indeterminate("direct-resolve-progress"))
                 .into_any_element(),
-            DirectStage::Playing { session, .. } => div()
-                .w_full()
-                .flex()
-                .items_start()
-                .gap(s::S8)
-                .child(div().flex_1().min_w_0().child(session.clone()))
-                .child(choose)
-                .into_any_element(),
+            DirectStage::Playing { session, .. } => session.clone().into_any_element(),
         };
-        Some(body)
+        Some(
+            div()
+                .id("detail-play-panel")
+                .w_full()
+                .max_w(crate::ui::theme::layout::detail::PLAY_PANEL_MAX_WIDTH)
+                .p(s::S16)
+                .flex()
+                .flex_col()
+                .gap(s::S12)
+                .rounded(radius::LG)
+                .bg(p.card)
+                .border(size::HAIRLINE)
+                .border_color(p.border)
+                .shadow(theme::elevation::sm(&p))
+                .child(header)
+                .child(body)
+                .into_any_element(),
+        )
     }
 }

@@ -86,8 +86,10 @@ accessible names.
 ### Detail
 
 - A single scrolling page with a 2400 px maximum frame and the shared page inset.
-  The hero holds the poster, the story and actions, and an "At a glance" panel
-  (rating tiles, key facts). It is followed by grouped fact cards, a cast grid
+  The hero holds the poster and, in one left-aligned story column: title, meta
+  line, a key-facts row (ratings, status, network, air dates; wraps when
+  narrow), tagline, overview and actions. Nothing sits in a right-hand panel.
+  It is followed by grouped fact cards, a cast grid
   and similar titles. Carousels are not used.
 - **Series order:** hero → Episodes (wrapping season tiles with progress, a
   next-up highlight, and **Continue · SxEy** in the hero) → About → Cast →
@@ -98,8 +100,11 @@ accessible names.
   search, recommendations). Only the Back target differs.
 - **Continue and Resume play without the stream list** when Kinema remembers
   what you watched (see [playback](playback.md#choosing-the-neighbours-stream)):
-  progress and failures show in an inline play panel below the hero, which also
-  carries **Choose stream**. The hero has the same **Choose stream** button beside
+  progress and failures show in an inline play panel below the hero: a bounded
+  card (not full width) titled with the episode ("Resuming S1 E3 · Name"),
+  **Choose stream** in its header, and the steps beside a natural-width Cancel.
+  `PlaySession::inline` gives this row layout; the Streams inspector keeps the
+  stacked full-width one. The hero has the same **Choose stream** button beside
   Continue, and episode menus offer **Play** and **Choose stream**. Clicking an
   episode card still opens its stream list. A stream picked from the list is
   remembered like any other.
@@ -225,8 +230,11 @@ over it), aligned with the header's right edge, newest on top.
   never fetch a whole show to answer a query.
 - **Placement:** posters have an always-visible top-right bookmark. The movie
   hero has membership and watched toggles. The show hero has membership only.
-  Episode stills have a top-right watched toggle. Seasons and series use a
-  tri-state `WatchedToggle` that applies immediately. Tooltips and accessible
+  Episode stills have a top-right watched toggle. The series hero uses a
+  tri-state `WatchedToggle`; the season header writes its progress in the meta
+  line ("3 of 8 watched") and offers the same control in `action_form` right
+  under it: an outlined verb button ("Mark Season 1 as watched/unwatched")
+  whose glyph previews the result. Both apply immediately. Tooltips and accessible
   names describe the *next* action.
 - **Child controls never bubble** into card, Detail, Streams or playback
   navigation.

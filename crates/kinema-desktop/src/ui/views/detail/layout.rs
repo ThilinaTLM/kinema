@@ -8,19 +8,16 @@ use kinema_core::catalog::TitleFacts;
 /// Cast rows shown before "Show all N".
 pub(super) const CAST_ROWS_COLLAPSED: usize = 2;
 
-/// Poster, glance panel and story measure scale with the window.
+/// Poster and story measure scale with the window.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct HeroLayout {
     pub poster: Pixels,
     pub overview_max: Pixels,
-    pub glance: Pixels,
-    pub stack_glance: bool,
 }
 pub(super) fn compact_actions(viewport: Pixels) -> bool {
     viewport < breakpoints::COMPACT
 }
-/// Poster 160–240, glance 280–380 (both ~14 % / 24 % of the window), overview
-/// measure capped at 880.
+/// Poster 160–240 (~14 % of the window), overview measure capped at 880.
 pub(super) fn hero_layout(viewport: Pixels) -> HeroLayout {
     let w = f32::from(viewport);
     HeroLayout {
@@ -31,10 +28,6 @@ pub(super) fn hero_layout(viewport: Pixels) -> HeroLayout {
             )
             .round()),
         overview_max: detail::OVERVIEW_MAX_WIDTH,
-        glance: px((w * detail::GLANCE_FRACTION)
-            .clamp(f32::from(detail::GLANCE_MIN), f32::from(detail::GLANCE_MAX))
-            .round()),
-        stack_glance: viewport < breakpoints::WIDE,
     }
 }
 
@@ -574,18 +567,11 @@ mod tests {
         assert_eq!(language_name("xx"), "XX");
     }
     #[test]
-    fn hero_layout_scales_and_stacks() {
-        let narrow = hero_layout(px(900.));
-        assert!(narrow.stack_glance);
-        assert_eq!(narrow.poster, px(160.));
-        assert_eq!(narrow.glance, px(280.));
+    fn hero_poster_scales_within_bounds() {
+        assert_eq!(hero_layout(px(900.)).poster, px(160.));
         let wide = hero_layout(px(3000.));
-        assert!(!wide.stack_glance);
         assert_eq!(wide.poster, px(240.));
-        assert_eq!(wide.glance, px(380.));
         assert_eq!(wide.overview_max, px(880.));
-        assert!(!hero_layout(px(1100.)).stack_glance);
-        assert!(hero_layout(px(1099.)).stack_glance);
     }
     #[test]
     fn cast_shows_two_rows_until_expanded() {

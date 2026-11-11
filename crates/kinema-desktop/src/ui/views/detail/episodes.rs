@@ -665,8 +665,9 @@ impl Detail {
             .into_any_element()
     }
 
-    /// `Season N` with `years · N episodes · K watched`, a clamped overview with
-    /// More/Less, the season poster and the season's watched toggle on the right.
+    /// `Season N` with `years · N episodes · K of N watched`, the season's
+    /// "Mark Season N as watched/unwatched" action right under it, then a
+    /// clamped overview with More/Less, beside the season poster.
     fn season_header(
         &mut self,
         season: u32,
@@ -687,7 +688,7 @@ impl Detail {
             if count == 1 { "episode" } else { "episodes" }
         ));
         if let Some(t) = tally.filter(|t| t.watched > 0) {
-            meta.push(format!("{} watched", t.watched.min(t.total)));
+            meta.push(format!("{} of {} watched", t.watched.min(t.total), t.total));
         }
         let overview = self.season_overview(season, cx);
         let ready = self.title_id(cx).is_some();
@@ -706,6 +707,7 @@ impl Detail {
             }),
         )
         .subject(personal::season_label(season))
+        .action_form(true)
         .busy(pending)
         .on_change({
             let weak = cx.entity().downgrade();
@@ -759,9 +761,9 @@ impl Detail {
                         div()
                             .text(TextSize::Sm)
                             .text_color(p.subtle_foreground)
-                            .pb(s::S6)
                             .child(meta.join(" \u{b7} ")),
                     )
+                    .child(div().flex().py(s::S8).child(toggle))
                     .children(overview_el)
                     .when(long, |el| {
                         el.child(
@@ -789,7 +791,6 @@ impl Detail {
                         )
                     }),
             )
-            .child(div().flex_none().child(toggle))
             .into_any_element()
     }
 

@@ -46,7 +46,7 @@ use crate::{
 
 actions!(design_lab, [NextFocus, PreviousFocus]);
 
-const SCENES: [&str; 55] = [
+const SCENES: [&str; 56] = [
     "patterns",
     "patterns-states",
     "detail-live-tmdb-movie",
@@ -70,6 +70,8 @@ const SCENES: [&str; 55] = [
     "detail-live-local-series-resume",
     "detail-live-local-series-resume-streams",
     "detail-live-local-series-resume-clear",
+    // Inline play panel under the hero: Resume preparing S1 E3.
+    "detail-live-local-series-resume-playing",
     // Full MainWindow (floating header) on the detail route; `-scrolled`
     // wheel-scrolls the page to show the header scrim over long content.
     "detail-live-window-tmdb-movie",

@@ -3,7 +3,6 @@
 //! The view model below is filled from the fields the providers expose today;
 //! richer title facts plug into `facts_view` without changing the layout.
 use super::*;
-use crate::ui::theme::opacity;
 use crate::ui::theme::typography::{TextSize, TypeExt, Weight};
 use kinema_core::catalog::TitleFacts;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -233,110 +232,94 @@ impl Detail {
         view
     }
 
-    /// Raised "At a glance" panel: two score tiles and a short key/value list.
-    /// `stacked` lays tiles and facts side by side under the story.
-    pub(super) fn glance_panel(
-        &self,
-        view: &FactsView,
-        stacked: bool,
-        cx: &App,
-    ) -> Option<Stateful<Div>> {
+    /// Key facts in the story column, under the meta line: rating blocks
+    /// (star, score, source) then short label-over-value facts, separated by
+    /// hairlines and wrapping onto more lines when narrow.
+    pub(super) fn key_facts(&self, view: &FactsView, cx: &App) -> Option<Stateful<Div>> {
         if view.ratings.is_empty() && view.glance.is_empty() {
             return None;
         }
         let p = self.tinted_palette(cx);
-        let tiles = div()
-            .flex()
-            .gap(s::S8)
-            .when(stacked, |el| {
-                el.w(crate::ui::theme::layout::detail::GLANCE_RATINGS_WIDTH)
-                    .flex_none()
-            })
-            .children(view.ratings.iter().enumerate().map(|(i, tile)| {
-                div()
-                    .id(("detail-rating", i))
-                    .flex_1()
-                    .min_w_0()
-                    .px(s::S12)
-                    .py(s::S8)
-                    .rounded(radius::MD)
-                    .bg(p.secondary)
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(s::S4)
-                            .child(Icon::new(IconName::StarFilled).color(p.primary_text))
-                            .child(
-                                div()
-                                    .text(TextSize::Xl)
-                                    .weight(Weight::Bold)
-                                    .text_color(p.foreground)
-                                    .child(tile.value.clone()),
-                            )
-                            .child(
-                                div()
-                                    .text(TextSize::Sm)
-                                    .text_color(p.subtle_foreground)
-                                    .child("/10"),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .gap(s::S6)
-                            .pt(s::S2)
-                            .text(TextSize::Xs)
-                            .weight(Weight::Semibold)
-                            .child(div().text_color(p.muted_foreground).child(tile.label))
-                            .children(
-                                tile.detail
-                                    .clone()
-                                    .map(|d| div().text_color(p.subtle_foreground).child(d)),
-                            ),
-                    )
-            }));
-        let rows = div()
-            .flex()
-            .flex_col()
-            .gap(s::S6)
-            .when(stacked, |el| el.flex_1().min_w_0())
-            .children(view.glance.iter().map(|(label, value)| {
-                div()
-                    .flex()
-                    .gap(s::S16)
-                    .text(TextSize::Sm)
-                    .child(
-                        div()
-                            .w(crate::ui::theme::layout::detail::FACT_GLANCE_LABEL_WIDTH)
-                            .flex_none()
-                            .text_color(p.subtle_foreground)
-                            .child(*label),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .text_color(p.foreground)
-                            .child(value.clone()),
-                    )
-            }));
+        let caption = |text: SharedString| {
+            div()
+                .text(TextSize::Xs)
+                .weight(Weight::Medium)
+                .text_color(p.subtle_foreground)
+                .child(text)
+        };
+        let ratings = view.ratings.iter().enumerate().map(|(i, tile)| {
+            let source: SharedString = match &tile.detail {
+                Some(detail) => format!("{} \u{b7} {detail}", tile.label).into(),
+                None => tile.label.into(),
+            };
+            div()
+                .id(("detail-rating", i))
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(s::S4)
+                        .child(Icon::new(IconName::StarFilled).color(p.primary_text))
+                        .child(
+                            div()
+                                .text(TextSize::Lg)
+                                .weight(Weight::Bold)
+                                .text_color(p.foreground)
+                                .child(tile.value.clone()),
+                        )
+                        .child(
+                            div()
+                                .text(TextSize::Sm)
+                                .text_color(p.subtle_foreground)
+                                .child("/10"),
+                        ),
+                )
+                .child(caption(source))
+                .into_any_element()
+        });
+        let facts = view.glance.iter().map(|(label, value)| {
+            div()
+                .flex()
+                .flex_col()
+                .child(caption((*label).into()))
+                .child(
+                    div()
+                        .text(TextSize::Sm)
+                        .weight(Weight::Medium)
+                        .text_color(p.foreground)
+                        .child(value.clone()),
+                )
+                .into_any_element()
+        });
+        let divider = || {
+            div()
+                .flex_none()
+                .w(size::HAIRLINE)
+                .h(s::S24)
+                .bg(p.border)
+                .into_any_element()
+        };
+        let mut items: Vec<AnyElement> = Vec::new();
+        for (i, item) in ratings.chain(facts).enumerate() {
+            if i > 0 {
+                items.push(divider());
+            }
+            items.push(item);
+        }
         Some(
             div()
-                .id("detail-glance")
+                .id("detail-key-facts")
                 .w_full()
-                .p(s::S16)
+                .min_w_0()
                 .flex()
-                .gap(s::S16)
-                .when(!stacked, |el| el.flex_col())
-                .when(stacked, |el| el.items_start())
-                .rounded(radius::XL)
-                .bg(p.card.opacity(opacity::CARD_TRANSLUCENT))
-                .border(size::HAIRLINE)
-                .border_color(p.border)
-                .shadow(theme::elevation::sm(&p))
-                .when(!view.ratings.is_empty(), |el| el.child(tiles))
-                .when(!view.glance.is_empty(), |el| el.child(rows)),
+                .flex_wrap()
+                .items_center()
+                .gap_x(s::S16)
+                .gap_y(s::S8)
+                .py(s::S4)
+                .children(items),
         )
     }
 

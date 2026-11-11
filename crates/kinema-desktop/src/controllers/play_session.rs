@@ -1,5 +1,6 @@
 //! Non-modal explicit-file playback workflow, shown inline in the Streams
-//! inspector footer (or the narrow-window play dock). Subscribe before
+//! inspector footer (or the narrow-window play dock), and in the Detail play
+//! panel with the row layout of [`PlaySession::inline`]. Subscribe before
 //! issuing any command.
 //!
 //! The session owns one preparation/launch; dropping it (Cancel, Dismiss,
@@ -36,6 +37,8 @@ pub(crate) struct PlaySession {
     error: Option<String>,
     missing: bool,
     credential_notice: String,
+    /// Wide-host layout (see [`PlaySession::inline`]).
+    inline: bool,
     _subscription: Subscription,
 }
 impl EventEmitter<DismissEvent> for PlaySession {}
@@ -131,6 +134,21 @@ enum StepState {
     Later,
 }
 
+/// A row of session actions: equal full-width slots in a narrow host, or
+/// natural-width buttons aligned to the end in the inline layout.
+fn action_row(inline: bool, buttons: Vec<Button>) -> Div {
+    let row = div().w_full().flex().gap(s::S8);
+    if inline {
+        row.justify_end().children(buttons)
+    } else {
+        row.children(
+            buttons
+                .into_iter()
+                .map(|b| div().flex_1().child(button_slot(size::CONTROL, b))),
+        )
+    }
+}
+
 /// Full-width button in a fixed-height slot: the Button's focus-ring margins
 /// would otherwise under-measure a stacked column.
 pub(crate) fn button_slot(height: Pixels, button: impl IntoElement) -> Div {
@@ -159,39 +177,48 @@ impl Render for PlaySession {
                     Some(player) => format!("Starting playback in {player}"),
                     None => "Starting playback".to_owned(),
                 };
-                body = body
-                    .child(
+                let steps = div()
+                    .id("play-progress")
+                    .flex()
+                    .flex_col()
+                    .gap(s::S6)
+                    .child(self.step(
+                        format!("Preparing with {}…", provider_name(self.provider)),
+                        if preparing {
+                            StepState::Now
+                        } else {
+                            StepState::Done
+                        },
+                        cx,
+                    ))
+                    .child(self.step(
+                        launch,
+                        if preparing {
+                            StepState::Later
+                        } else {
+                            StepState::Now
+                        },
+                        cx,
+                    ));
+                let cancel = Button::new("play-cancel", "Cancel")
+                    .size(ButtonSize::Md)
+                    .on_click(cx.listener(|this, _, _, cx| this.dismiss(cx)));
+                body = if self.inline {
+                    body.child(
                         div()
-                            .id("play-progress")
+                            .w_full()
                             .flex()
-                            .flex_col()
-                            .gap(s::S6)
-                            .child(self.step(
-                                format!("Preparing with {}…", provider_name(self.provider)),
-                                if preparing {
-                                    StepState::Now
-                                } else {
-                                    StepState::Done
-                                },
-                                cx,
-                            ))
-                            .child(self.step(
-                                launch,
-                                if preparing {
-                                    StepState::Later
-                                } else {
-                                    StepState::Now
-                                },
-                                cx,
-                            )),
+                            .items_center()
+                            .gap(s::S12)
+                            .child(div().flex_1().min_w_0().child(steps))
+                            .child(cancel),
                     )
                     .child(Progress::indeterminate("prepare-progress"))
-                    .child(button_slot(
-                        size::CONTROL,
-                        Button::new("play-cancel", "Cancel")
-                            .size(ButtonSize::Md)
-                            .on_click(cx.listener(|this, _, _, cx| this.dismiss(cx))),
-                    ));
+                } else {
+                    body.child(steps)
+                        .child(Progress::indeterminate("prepare-progress"))
+                        .child(button_slot(size::CONTROL, cancel))
+                };
             }
             PlayPhase::Failed(message) => {
                 let mut notice =
@@ -213,32 +240,19 @@ impl Render for PlaySession {
                         ),
                     );
                 }
-                body = body.child(notice).child(
-                    div()
-                        .w_full()
-                        .flex()
-                        .gap(s::S8)
-                        .child(
-                            div().flex_1().child(button_slot(
-                                size::CONTROL,
-                                Button::new("play-retry", "Try again")
-                                    .size(ButtonSize::Md)
-                                    .icon(IconName::Refresh)
-                                    .on_click(
-                                        cx.listener(|_, _, _, cx| cx.emit(PlaySessionEvent::Retry)),
-                                    ),
-                            )),
-                        )
-                        .child(
-                            div().flex_1().child(button_slot(
-                                size::CONTROL,
-                                Button::new("play-dismiss", "Dismiss")
-                                    .size(ButtonSize::Md)
-                                    .variant(ButtonVariant::Ghost)
-                                    .on_click(cx.listener(|this, _, _, cx| this.dismiss(cx))),
-                            )),
-                        ),
-                );
+                body = body.child(notice).child(action_row(
+                    self.inline,
+                    vec![
+                        Button::new("play-retry", "Try again")
+                            .size(ButtonSize::Md)
+                            .icon(IconName::Refresh)
+                            .on_click(cx.listener(|_, _, _, cx| cx.emit(PlaySessionEvent::Retry))),
+                        Button::new("play-dismiss", "Dismiss")
+                            .size(ButtonSize::Md)
+                            .variant(ButtonVariant::Ghost)
+                            .on_click(cx.listener(|this, _, _, cx| this.dismiss(cx))),
+                    ],
+                ));
             }
             PlayPhase::Blocked(message) => {
                 let coordinator = self.coordinator.clone();
@@ -248,34 +262,22 @@ impl Render for PlaySession {
                         Alert::new(AlertTone::Warning, "This stream can’t be prepared yet")
                             .body(message),
                     )
-                    .child(
-                        div()
-                            .w_full()
-                            .flex()
-                            .gap(s::S8)
-                            .child(
-                                div().flex_1().child(button_slot(
-                                    size::CONTROL,
-                                    Button::new("play-settings", "Open Settings")
-                                        .size(ButtonSize::Md)
-                                        .icon(IconName::Settings)
-                                        .on_click(move |_, _, cx| {
-                                            coordinator.update(cx, |c, cx| {
-                                                c.open_settings_at(destination, cx)
-                                            })
-                                        }),
-                                )),
-                            )
-                            .child(
-                                div().flex_1().child(button_slot(
-                                    size::CONTROL,
-                                    Button::new("play-dismiss", "Dismiss")
-                                        .size(ButtonSize::Md)
-                                        .variant(ButtonVariant::Ghost)
-                                        .on_click(cx.listener(|this, _, _, cx| this.dismiss(cx))),
-                                )),
-                            ),
-                    );
+                    .child(action_row(
+                        self.inline,
+                        vec![
+                            Button::new("play-settings", "Open Settings")
+                                .size(ButtonSize::Md)
+                                .icon(IconName::Settings)
+                                .on_click(move |_, _, cx| {
+                                    coordinator
+                                        .update(cx, |c, cx| c.open_settings_at(destination, cx))
+                                }),
+                            Button::new("play-dismiss", "Dismiss")
+                                .size(ButtonSize::Md)
+                                .variant(ButtonVariant::Ghost)
+                                .on_click(cx.listener(|this, _, _, cx| this.dismiss(cx))),
+                        ],
+                    ));
             }
         }
         body
