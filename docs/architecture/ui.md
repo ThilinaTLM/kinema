@@ -89,8 +89,13 @@ accessible names.
   The hero holds the poster and, in one left-aligned story column: title, meta
   line, a key-facts row (ratings, status, network, air dates; wraps when
   narrow), tagline, overview and actions. Nothing sits in a right-hand panel.
-  It is followed by grouped fact cards, a cast grid
-  and similar titles. Carousels are not used.
+  It is followed by a borderless **Details** block, a cast grid and similar
+  titles. Carousels are not used.
+- **Details** are caption-over-value columns that wrap with the width (no
+  cards or group titles). They list only facts the hero does not already show:
+  movies show writers, studios and countries; series show creators, writers,
+  studios, countries, episode length and language. Empty facts are dropped,
+  and an empty block is not rendered.
 - **Series order:** hero → Episodes (wrapping season tiles with progress, a
   next-up highlight, and **Continue · SxEy** in the hero) → About → Cast →
   Similar.

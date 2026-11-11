@@ -238,15 +238,20 @@ fn facts_block_shows_ratings_votes_and_provider_facts(cx: &mut TestAppContext) {
                     Some("The signal was never meant to be answered.")
                 );
                 let series = view.is_series();
-                let titles: Vec<_> = facts.groups.iter().map(|g| g.title).collect();
-                assert_eq!(
-                    titles,
-                    [
-                        "Crew",
-                        "Production",
-                        if series { "Broadcast" } else { "Release" }
+                let details: Vec<_> = facts.details.iter().map(|r| r.0).collect();
+                let want: &[&str] = if series {
+                    &[
+                        "Created by",
+                        "Writers",
+                        "Studios",
+                        "Countries",
+                        "Episode length",
+                        "Language",
                     ]
-                );
+                } else {
+                    &["Writers", "Studios", "Countries"]
+                };
+                assert_eq!(details, want, "details skip what the hero shows");
                 let glance: Vec<_> = facts.glance.iter().map(|r| r.0).collect();
                 let want: &[&str] = if series {
                     &["Status", "Network", "First aired", "Last aired"]
@@ -254,13 +259,7 @@ fn facts_block_shows_ratings_votes_and_provider_facts(cx: &mut TestAppContext) {
                     &["Released", "Status", "Director", "Language"]
                 };
                 assert_eq!(glance, want);
-                assert!(
-                    facts
-                        .groups
-                        .iter()
-                        .flat_map(|g| &g.rows)
-                        .all(|(_, v)| v != "—" && !v.is_empty())
-                );
+                assert!(facts.details.iter().all(|(_, v)| v != "—" && !v.is_empty()));
                 assert_eq!(facts.cast.len(), 24);
                 assert_eq!(facts.cast[0].role.as_deref(), Some("Role 1"));
             })
