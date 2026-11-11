@@ -296,6 +296,7 @@ impl Detail {
     /// `scene` suffixes: `-failed` seeds nothing (the read visibly fails offline),
     /// `-unsaved` seeds not saved/unwatched, `-resume` adds unwatched checkpoints
     /// (movie 24:18 of 1:40:00; series E3 at 12:05 of 45:00), otherwise saved with some watched.
+    /// `-resume-playing` (series) also shows the inline play panel resuming E3.
     pub(crate) fn seed_personal_fixture(&mut self, scene: &str, cx: &mut Context<Self>) {
         use crate::{
             catalog::library::{PersonalEpisode, PersonalTitle},
@@ -320,6 +321,9 @@ impl Detail {
         if resume && scene.ends_with("streams") {
             let target = self.target.clone();
             self.stream_page.fixture_checking_account(target);
+        }
+        if resume && scene.ends_with("-playing") {
+            self.fixture_playing(cx);
         }
         if resume && scene.ends_with("-clear") {
             self.clear_confirm = Some(series.then_some((1, 3)));

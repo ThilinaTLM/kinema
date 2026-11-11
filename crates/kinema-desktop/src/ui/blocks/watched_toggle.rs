@@ -8,9 +8,14 @@
 //! style. `compact` collapses it to an icon-only square that keeps its
 //! tooltip and accessible name. Exposed as a checkbox-like toggle whose state
 //! is `Mixed` for partial progress.
+//!
+//! `action_form` shows the same control as a plain verb button ("Mark Season 1
+//! as watched") whose glyph previews the resulting state, for places where the
+//! progress is already written next to it and a state pill would not read as
+//! clickable.
 use crate::{
     ui::blocks::watch_mark::{WatchMark, WatchMarkState},
-    ui::primitives::button::{Button, ButtonSize},
+    ui::primitives::button::{Button, ButtonSize, ButtonVariant},
 };
 use gpui::{prelude::*, *};
 use kinema_core::watch_progress::{Tally, WatchedState};
@@ -70,6 +75,8 @@ pub struct ToggleFace {
     pub mark: WatchMarkState,
     pub on: bool,
     pub mixed: bool,
+    /// Glyph of the state a click leads to (the action form shows it).
+    pub target_mark: WatchMarkState,
     /// Why the button is inert, also its tooltip.
     pub blocked_reason: Option<String>,
     /// Tooltip and accessible action ("Mark series as watched").
@@ -115,6 +122,11 @@ pub fn face(
         mark,
         on: all,
         mixed: unavailable.is_none() && state == Some(WatchedState::Partial),
+        target_mark: if state == Some(WatchedState::All) {
+            WatchMarkState::None
+        } else {
+            WatchMarkState::All
+        },
         blocked_reason: unavailable
             .map(str::to_owned)
             .or_else(|| state.is_none().then(|| action.clone())),
@@ -138,6 +150,7 @@ pub struct WatchedToggle {
     subject: SharedString,
     show_count: bool,
     compact: bool,
+    action_form: bool,
     on_change: Option<Change>,
 }
 
@@ -152,6 +165,7 @@ impl WatchedToggle {
             subject: "season".into(),
             show_count: true,
             compact: false,
+            action_form: false,
             on_change: None,
         }
     }
@@ -184,6 +198,12 @@ impl WatchedToggle {
         self.compact = compact;
         self
     }
+    /// Plain action button labelled with the verb ("Mark Season 1 as
+    /// watched"), glyph showing the resulting state; no count or selected look.
+    pub fn action_form(mut self, action: bool) -> Self {
+        self.action_form = action;
+        self
+    }
     /// Receives the desired value (`true` = all watched).
     pub fn on_change(mut self, f: impl Fn(bool, &mut Window, &mut App) + 'static) -> Self {
         self.on_change = Some(Rc::new(f));
@@ -204,6 +224,21 @@ impl RenderOnce for WatchedToggle {
             Some(count) => format!("{}, {count}. {}", face.word, face.action),
             None => format!("{}. {}", face.word, face.action),
         };
+        if self.action_form {
+            let mut button = Button::new(self.id, face.action.clone())
+                .size(ButtonSize::Sm)
+                .variant(ButtonVariant::Outline)
+                .glyph(WatchMark::new(face.target_mark))
+                .busy(self.busy)
+                .name(name);
+            if let Some(reason) = face.blocked_reason.clone() {
+                button = button.disabled_because(reason);
+            }
+            if let (Some(change), Some(desired)) = (self.on_change, face.intent) {
+                button = button.on_click(move |_, window, cx| change(desired, window, cx));
+            }
+            return button;
+        }
         let mut button = Button::new(self.id, face.word.clone())
             .size(ButtonSize::Md)
             .square(self.compact)
@@ -293,6 +328,9 @@ mod tests {
         assert!(all.on && !all.mixed);
         assert_eq!(all.action, "Mark series as unwatched");
         assert_eq!(all.intent, Some(false));
+        assert_eq!(all.target_mark, WatchMarkState::None);
+        assert_eq!(part.target_mark, WatchMarkState::All);
+        assert_eq!(none.target_mark, WatchMarkState::All);
     }
 
     #[test]

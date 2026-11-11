@@ -72,8 +72,15 @@ impl PlaySession {
             },
             missing,
             credential_notice,
+            inline: false,
             _subscription: subscription,
         }
+    }
+    /// Row layout for a wide host (the Detail play panel): steps beside
+    /// natural-width actions instead of full-width stacked buttons.
+    pub(crate) fn inline(mut self) -> Self {
+        self.inline = true;
+        self
     }
     /// Keeps the preparation through invalidations caused by the given settings
     /// save, which makes this sheet's provider the worker's active account.

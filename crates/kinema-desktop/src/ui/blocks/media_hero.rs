@@ -7,8 +7,8 @@
 //! [`uses_over_art`]: the hero applies it to its own badges;
 //! callers pass the same value to `Button`/`Badge` slots.
 use crate::ui::theme::layout::detail::{
-    HERO_ASIDE_WIDTH, HERO_FADE_HEIGHT, HERO_MIN_HEIGHT, HERO_OVERVIEW_SKELETON_WIDTH,
-    HERO_POSTER_WIDTH, HERO_SIDE_SCRIM_REACH, HERO_TEXT_MAX_WIDTH,
+    HERO_FADE_HEIGHT, HERO_MIN_HEIGHT, HERO_OVERVIEW_SKELETON_WIDTH, HERO_POSTER_WIDTH,
+    HERO_SIDE_SCRIM_REACH, HERO_TEXT_MAX_WIDTH,
 };
 use crate::ui::theme::opacity;
 use crate::ui::theme::transparent;
@@ -62,9 +62,7 @@ pub struct MediaHero {
     meta: Vec<MetaItem>,
     overview: Option<SharedString>,
     tagline: Option<SharedString>,
-    aside: Option<AnyElement>,
-    aside_width: Pixels,
-    stack_aside: bool,
+    facts: Option<AnyElement>,
     title_action: Option<AnyElement>,
     primary: Option<AnyElement>,
     secondary: Vec<AnyElement>,
@@ -93,9 +91,7 @@ impl MediaHero {
             meta: Vec::new(),
             overview: None,
             tagline: None,
-            aside: None,
-            aside_width: HERO_ASIDE_WIDTH,
-            stack_aside: false,
+            facts: None,
             title_action: None,
             primary: None,
             secondary: Vec::new(),
@@ -216,12 +212,10 @@ impl MediaHero {
         self.tagline = Some(tagline.into());
         self
     }
-    /// Raised side panel (e.g. "At a glance") to the right of the story. With
-    /// `stacked` it sits under the story at full width instead.
-    pub fn aside(mut self, aside: impl IntoElement, width: Pixels, stacked: bool) -> Self {
-        self.aside = Some(aside.into_any_element());
-        self.aside_width = width;
-        self.stack_aside = stacked;
+    /// Key facts (ratings, status, dates) in the story column, right under
+    /// the meta line, so everything about the title reads from one edge.
+    pub fn facts(mut self, facts: impl IntoElement) -> Self {
+        self.facts = Some(facts.into_any_element());
         self
     }
     /// Small control right next to the title (e.g. an icon-only copy button).
@@ -370,12 +364,9 @@ impl RenderOnce for MediaHero {
                         .w_full()
                         .when_some(self.max_width, |el, w| el.max_w(w))
                         .flex()
-                        .gap(space::S24)
                         .px(self.gutter)
                         .pt(size::PAGE_INSET + self.top_inset)
                         .pb(space::S24)
-                        .when(self.stack_aside, |el| el.flex_col())
-                        .when(!self.stack_aside, |el| el.items_end())
                         .child(
                             div()
                                 .flex()
@@ -438,6 +429,7 @@ impl RenderOnce for MediaHero {
                                                     })),
                                             )
                                         })
+                                        .children(self.facts)
                                         .children(self.tagline.map(|text| {
                                             div()
                                                 .w_full()
@@ -462,14 +454,7 @@ impl RenderOnce for MediaHero {
                                             )
                                         }),
                                 ),
-                        )
-                        .children(self.aside.map(|aside| {
-                            div()
-                                .flex_none()
-                                .when(!self.stack_aside, |el| el.w(self.aside_width))
-                                .when(self.stack_aside, |el| el.w_full())
-                                .child(aside)
-                        })),
+                        ),
                 ),
             )
     }
