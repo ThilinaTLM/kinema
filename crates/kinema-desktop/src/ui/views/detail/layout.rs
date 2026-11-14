@@ -1,5 +1,5 @@
-//! Pure presentation policy for the detail overview: grouped facts, the "At a
-//! glance" rows, the hero meta line, and responsive layout decisions. Nothing
+//! Pure presentation policy for the detail overview: the "Details" rows, the
+//! "At a glance" rows, the hero meta line, and responsive layout decisions. Nothing
 //! here touches GPUI, so it is unit-tested directly.
 use crate::ui::theme::layout::{breakpoints, detail};
 use gpui::{Pixels, px};
@@ -45,21 +45,7 @@ pub(super) fn cast_has_toggle(total: usize, cols: usize) -> bool {
     total > cols.max(1) * CAST_ROWS_COLLAPSED
 }
 
-/// Upper bound for a fact-card width so `count` cards fill one row on wide
-/// windows (rather than leaving empty columns), never below `min`.
-pub(super) fn fact_card_max(available: Pixels, count: usize, min: Pixels, gap: Pixels) -> Pixels {
-    let (a, g, n) = (f32::from(available), f32::from(gap), count.max(1) as f32);
-    px(((a + g) / n - g).max(f32::from(min)))
-}
-
-/// One labelled card of the facts section.
-#[derive(Debug, Default, PartialEq)]
-pub(super) struct FactGroup {
-    pub title: &'static str,
-    pub rows: Vec<(&'static str, String)>,
-}
-
-/// Everything the grouping rules need, resolved by the screen from whichever
+/// Everything the details rules need, resolved by the screen from whichever
 /// provider backs the title.
 pub(super) struct FactSource<'a> {
     pub series: bool,
@@ -68,8 +54,6 @@ pub(super) struct FactSource<'a> {
     pub released: Option<String>,
     /// Movie runtime, or episode length for series.
     pub runtime: Option<u32>,
-    pub seasons: Option<u32>,
-    pub episodes: Option<u64>,
 }
 
 fn clean(value: Option<&str>) -> Option<String> {
@@ -99,91 +83,37 @@ fn push(rows: &mut Vec<(&'static str, String)>, label: &'static str, value: Opti
     }
 }
 
-/// `7 · 153 episodes`; either half may be missing.
-pub(super) fn seasons_episodes(seasons: Option<u32>, episodes: Option<u64>) -> Option<String> {
-    let episodes = episodes
-        .filter(|n| *n > 0)
-        .map(|n| format!("{n} episode{}", if n == 1 { "" } else { "s" }));
-    match (seasons.filter(|n| *n > 0), episodes) {
-        (Some(s), Some(e)) => Some(format!("{s} · {e}")),
-        (Some(s), None) => Some(s.to_string()),
-        (None, Some(e)) => Some(e),
-        (None, None) => None,
-    }
-}
-
-/// Grouped facts. Empty rows and empty groups are dropped; nothing is ever
-/// shown as a placeholder dash.
-pub(super) fn fact_groups(src: &FactSource) -> Vec<FactGroup> {
+/// Facts for the borderless "Details" block below the hero. Only facts the
+/// hero (meta line and key-facts row) does not already show are listed:
+/// movies drop director, release date, runtime, certification and language;
+/// series drop status, networks, air dates, seasons/episodes and
+/// certification. Empty values are dropped; nothing is ever a placeholder dash.
+pub(super) fn detail_rows(src: &FactSource) -> Vec<(&'static str, String)> {
     let f = src.facts;
-    let language = clean(f.original_language.as_deref()).map(|c| language_name(&c));
-    let certification = clean(f.certification.as_deref());
-    let mut groups = Vec::new();
-    let mut group = |title: &'static str, rows: Vec<(&'static str, String)>| {
-        if !rows.is_empty() {
-            groups.push(FactGroup { title, rows });
-        }
-    };
+    let mut rows = Vec::new();
     if src.series {
-        let mut crew = Vec::new();
-        push(&mut crew, "Created by", joined(&f.creators));
-        push(&mut crew, "Writers", joined(&f.writers));
-        group("Crew", crew);
-        let mut production = Vec::new();
-        push(&mut production, "Studios", joined(&f.studios));
+        push(&mut rows, "Created by", joined(&f.creators));
+    }
+    push(&mut rows, "Writers", joined(&f.writers));
+    push(&mut rows, "Studios", joined(&f.studios));
+    push(
+        &mut rows,
+        plural(&f.countries, "Country", "Countries"),
+        joined(&f.countries),
+    );
+    if src.series {
         push(
-            &mut production,
-            plural(&f.networks, "Network", "Networks"),
-            joined(&f.networks),
-        );
-        push(
-            &mut production,
-            plural(&f.countries, "Country", "Countries"),
-            joined(&f.countries),
-        );
-        group("Production", production);
-        let mut broadcast = Vec::new();
-        push(
-            &mut broadcast,
-            "Seasons",
-            seasons_episodes(src.seasons, src.episodes),
-        );
-        push(
-            &mut broadcast,
+            &mut rows,
             "Episode length",
             src.runtime.filter(|n| *n > 0).map(|n| format!("{n} min")),
         );
-        push(&mut broadcast, "Language", language);
-        group("Broadcast", broadcast);
-    } else {
-        let mut crew = Vec::new();
         push(
-            &mut crew,
-            plural(&f.directors, "Director", "Directors"),
-            joined(&f.directors),
+            &mut rows,
+            "Language",
+            clean(f.original_language.as_deref()).map(|c| language_name(&c)),
         );
-        push(&mut crew, "Writers", joined(&f.writers));
-        group("Crew", crew);
-        let mut production = Vec::new();
-        push(&mut production, "Studios", joined(&f.studios));
-        push(
-            &mut production,
-            plural(&f.countries, "Country", "Countries"),
-            joined(&f.countries),
-        );
-        group("Production", production);
-        let mut release = Vec::new();
-        push(&mut release, "Release date", src.released.clone());
-        push(
-            &mut release,
-            "Runtime",
-            src.runtime.filter(|n| *n > 0).map(|n| format!("{n} min")),
-        );
-        push(&mut release, "Certification", certification);
-        push(&mut release, "Original language", language);
-        group("Release", release);
     }
-    groups
+    rows
 }
 
 /// Short key/value list of the "At a glance" panel.
@@ -403,85 +333,69 @@ mod tests {
             facts,
             released: Some("29 Jul 2026".into()),
             runtime: Some(145),
-            seasons: Some(7),
-            episodes: Some(153),
         }
     }
 
-    #[test]
-    fn movie_groups_follow_the_spec_and_skip_empty_rows() {
-        let f = facts();
-        let groups = fact_groups(&source(false, &f));
-        let titles: Vec<_> = groups.iter().map(|g| g.title).collect();
-        assert_eq!(titles, ["Crew", "Production", "Release"]);
-        assert_eq!(groups[0].rows[0], ("Director", "Ada Marlowe".into()));
-        assert_eq!(groups[0].rows[1].0, "Writers");
-        assert_eq!(groups[1].rows[1].0, "Countries");
-        let release: Vec<_> = groups[2].rows.iter().map(|r| r.0).collect();
-        assert_eq!(
-            release,
-            [
-                "Release date",
-                "Runtime",
-                "Certification",
-                "Original language"
-            ]
-        );
-        assert_eq!(groups[2].rows[3].1, "English");
+    fn labels(rows: &[(&'static str, String)]) -> Vec<&'static str> {
+        rows.iter().map(|r| r.0).collect()
     }
     #[test]
-    fn empty_groups_and_rows_disappear_and_no_dash_is_shown() {
+    fn movie_details_skip_what_the_hero_shows() {
+        let f = facts();
+        let rows = detail_rows(&source(false, &f));
+        assert_eq!(labels(&rows), ["Writers", "Studios", "Countries"]);
+        assert_eq!(rows[0].1, "Theo, Ada Marlowe");
+        let one = TitleFacts {
+            countries: vec!["Norway".into()],
+            ..facts()
+        };
+        assert_eq!(detail_rows(&source(false, &one))[2].0, "Country");
+    }
+    #[test]
+    fn empty_details_disappear_and_no_dash_is_shown() {
         let f = TitleFacts::default();
-        let mut src = source(false, &f);
-        src.released = None;
-        src.runtime = None;
-        assert!(fact_groups(&src).is_empty());
-        let only_cert = TitleFacts {
+        assert!(detail_rows(&source(false, &f)).is_empty());
+        let blank = TitleFacts {
             certification: Some("  ".into()),
             writers: vec![" ".into()],
+            studios: vec![String::new()],
             ..TitleFacts::default()
         };
-        let mut src = source(false, &only_cert);
-        src.released = None;
-        src.runtime = None;
-        assert!(fact_groups(&src).is_empty());
+        assert!(detail_rows(&source(false, &blank)).is_empty());
         let f = facts();
-        for g in fact_groups(&source(false, &f))
+        for (_, v) in detail_rows(&source(false, &f))
             .into_iter()
-            .chain(fact_groups(&source(true, &f)))
+            .chain(detail_rows(&source(true, &f)))
         {
-            assert!(g.rows.iter().all(|(_, v)| v != "—" && !v.is_empty()));
+            assert!(v != "—" && !v.is_empty());
         }
     }
     #[test]
-    fn series_groups_use_network_and_broadcast() {
+    fn series_details_skip_network_status_and_seasons() {
         let f = TitleFacts {
             creators: vec!["Bruno Heller".into()],
+            writers: vec!["Ken Woodruff".into()],
+            studios: vec!["Primrose Hill".into()],
             networks: vec!["CBS".into()],
             countries: vec!["United States".into()],
-            runtime_minutes: Some(43),
+            status: Some("Ended".into()),
             original_language: Some("en".into()),
             ..TitleFacts::default()
         };
-        let groups = fact_groups(&source(true, &f));
-        let titles: Vec<_> = groups.iter().map(|g| g.title).collect();
-        assert_eq!(titles, ["Crew", "Production", "Broadcast"]);
-        assert_eq!(groups[0].rows, [("Created by", "Bruno Heller".to_owned())]);
+        let rows = detail_rows(&source(true, &f));
         assert_eq!(
-            groups[1].rows,
+            labels(&rows),
             [
-                ("Network", "CBS".into()),
-                ("Country", "United States".into())
+                "Created by",
+                "Writers",
+                "Studios",
+                "Country",
+                "Episode length",
+                "Language"
             ]
         );
-        assert_eq!(
-            groups[2].rows,
-            [
-                ("Seasons", "7 · 153 episodes".into()),
-                ("Episode length", "145 min".into()),
-                ("Language", "English".into())
-            ]
-        );
+        assert_eq!(rows[4].1, "145 min");
+        assert_eq!(rows[5].1, "English");
     }
     #[test]
     fn glance_rows_differ_by_kind() {
@@ -581,21 +495,5 @@ mod tests {
         assert!(cast_has_toggle(24, 8));
         assert!(!cast_has_toggle(16, 8));
         assert_eq!(cast_visible(5, 0, false), 2);
-    }
-    #[test]
-    fn fact_cards_share_the_row_and_wrap_when_narrow() {
-        let gap = px(16.);
-        assert_eq!(
-            fact_card_max(px(2300.), 3, detail::FACT_CARD_MIN, gap),
-            px(756.)
-        );
-        assert_eq!(
-            fact_card_max(px(700.), 3, detail::FACT_CARD_MIN, gap),
-            px(260.)
-        );
-        assert_eq!(
-            fact_card_max(px(700.), 0, detail::FACT_CARD_MIN, gap),
-            px(700.)
-        );
     }
 }

@@ -28,7 +28,9 @@ pub mod detail {
     pub const CAST_MIN: Pixels = px(112.);
     pub const CAST_MAX: Pixels = px(160.);
     pub const FACT_LABEL_WIDTH: Pixels = px(120.);
-    pub const FACT_CARD_MIN: Pixels = px(260.);
+    /// Column width bounds of the borderless "Details" facts below the hero.
+    pub const DETAIL_FACT_MIN: Pixels = px(200.);
+    pub const DETAIL_FACT_MAX: Pixels = px(340.);
     pub const SEASON_TILE_MIN: Pixels = px(184.);
     pub const SEASON_TILE_MAX: Pixels = px(300.);
     pub const SEASON_TILE_GAP: Pixels = px(12.);
@@ -59,7 +61,6 @@ pub mod detail {
     pub const HERO_POSTER_FRACTION: f32 = 0.14;
     pub const HERO_POSTER_MIN: Pixels = px(160.);
     pub const HERO_POSTER_MAX: Pixels = px(240.);
-    pub const FACT_WIDE_LABEL_WIDTH: Pixels = px(112.);
     /// Streams inspector: a fraction of the frame within bounds.
     pub const STREAMS_INSPECTOR_FRACTION: f32 = 0.27;
     pub const STREAMS_INSPECTOR_MIN: Pixels = px(340.);
@@ -171,6 +172,7 @@ mod tests {
         assert!(detail::EPISODE_CARD_MIN < detail::EPISODE_CARD_MAX);
         assert!(detail::SIMILAR_MIN < detail::SIMILAR_MAX);
         assert!(detail::CAST_MIN < detail::CAST_MAX);
+        assert!(detail::DETAIL_FACT_MIN < detail::DETAIL_FACT_MAX);
         assert!(detail::SEASON_TILE_MIN < detail::SEASON_TILE_MAX);
         assert!(browse::SEARCH_MIN_WIDTH < browse::SEARCH_WIDTH);
         assert!(player::VOLUME_TRACK < player::VOLUME_THUMB);

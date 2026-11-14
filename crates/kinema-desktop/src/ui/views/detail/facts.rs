@@ -1,4 +1,4 @@
-//! Facts block (ratings, facts grid, cast row) and the provenance footer.
+//! Facts block (ratings, details columns, cast grid) and the provenance footer.
 //!
 //! The view model below is filled from the fields the providers expose today;
 //! richer title facts plug into `facts_view` without changing the layout.
@@ -29,7 +29,8 @@ pub(super) struct FactsView {
     pub tagline: Option<String>,
     pub ratings: Vec<RatingTile>,
     pub glance: Vec<(&'static str, String)>,
-    pub groups: Vec<layout::FactGroup>,
+    /// Facts for the "Details" block that the hero does not already show.
+    pub details: Vec<(&'static str, String)>,
     pub cast: Vec<CastEntry>,
     /// Pieces of the hero meta line (year, runtime, certification, genres…).
     pub meta: Vec<layout::MetaPart>,
@@ -112,7 +113,7 @@ impl Detail {
 
     /// Facts model, memoized per coordinator revision: every input is coordinator
     /// state (observed by `data_rev`) or the immutable open title, so scrolling and
-    /// other repaints reuse it instead of re-deriving ratings, groups and cast.
+    /// other repaints reuse it instead of re-deriving ratings, details and cast.
     pub(super) fn facts_view(&self, title: &BrowseTitle, cx: &App) -> Rc<FactsView> {
         let mut memo = self.facts_memo.borrow_mut();
         if let Some((rev, view)) = memo.as_ref()
@@ -199,11 +200,9 @@ impl Detail {
             facts: &facts,
             released,
             runtime,
-            seasons: title.seasons(),
-            episodes,
         };
         view.glance = layout::glance_rows(&source);
-        view.groups = layout::fact_groups(&source);
+        view.details = layout::detail_rows(&source);
         view.meta = layout::meta_parts(&layout::MetaInput {
             series,
             year: title.year(),
@@ -323,48 +322,29 @@ impl Detail {
         )
     }
 
-    /// Titled raised card holding key/value rows.
-    fn fact_card(&self, group: &layout::FactGroup, width: Pixels, cx: &App) -> Div {
+    /// One borderless detail: small uppercase caption over a wrapping value.
+    fn detail_item(&self, label: &'static str, value: &str, width: Pixels, cx: &App) -> Div {
         let p = self.tinted_palette(cx);
         div()
             .w(width)
             .flex_none()
-            .px(s::S16)
-            .py(s::S12)
+            .min_w_0()
             .flex()
             .flex_col()
-            .gap(s::S8)
-            .rounded(radius::XL)
-            .bg(p.card)
-            .border(size::HAIRLINE)
-            .border_color(p.border)
+            .gap(s::S4)
             .child(
                 div()
                     .text(TextSize::Xs)
                     .weight(Weight::Semibold)
                     .text_color(p.subtle_foreground)
-                    .child(group.title.to_uppercase()),
+                    .child(label.to_uppercase()),
             )
-            .children(group.rows.iter().map(|(label, value)| {
+            .child(
                 div()
-                    .flex()
-                    .gap(s::S12)
                     .text(TextSize::Base)
-                    .child(
-                        div()
-                            .w(crate::ui::theme::layout::detail::FACT_WIDE_LABEL_WIDTH)
-                            .flex_none()
-                            .text_color(p.subtle_foreground)
-                            .child(*label),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .text_color(p.foreground)
-                            .child(value.clone()),
-                    )
-            }))
+                    .text_color(p.foreground)
+                    .child(value.to_owned()),
+            )
     }
 
     /// Portrait card: 3:4 photo (initials until/unless it loads), name, role.
@@ -480,7 +460,7 @@ impl Detail {
             })
     }
 
-    /// Grouped fact cards (and, for series, the "About the series" heading)
+    /// Borderless "Details" columns (under "About the series" for series)
     /// followed by the cast grid.
     pub(super) fn facts_section(
         &self,
@@ -498,7 +478,7 @@ impl Detail {
             .flex()
             .flex_col()
             .gap(s::S20);
-        if view.groups.is_empty()
+        if view.details.is_empty()
             && view.ratings.is_empty()
             && view.cast.is_empty()
             && status.busy
@@ -512,7 +492,7 @@ impl Detail {
                 )
                 .into_any_element();
         }
-        if self.is_series() && (!view.groups.is_empty() || !view.cast.is_empty()) {
+        if self.is_series() && (!view.details.is_empty() || !view.cast.is_empty()) {
             section = section.child(
                 div()
                     .id("detail-about")
@@ -522,32 +502,31 @@ impl Detail {
                     .child("About the series"),
             );
         }
-        if !view.groups.is_empty() {
-            let gap = s::S16;
+        if !view.details.is_empty() {
+            let gap = s::S24;
             let fit = fit_grid(
                 width,
-                crate::ui::theme::layout::detail::FACT_CARD_MIN,
-                layout::fact_card_max(
-                    width,
-                    view.groups.len(),
-                    crate::ui::theme::layout::detail::FACT_CARD_MIN,
-                    gap,
-                ),
+                crate::ui::theme::layout::detail::DETAIL_FACT_MIN,
+                crate::ui::theme::layout::detail::DETAIL_FACT_MAX,
                 gap,
             );
-            section = section.child(
-                div()
-                    .id("detail-facts-grid")
-                    .w_full()
-                    .flex()
-                    .flex_wrap()
-                    .gap(gap)
-                    .children(
-                        view.groups
-                            .iter()
-                            .map(|group| self.fact_card(group, fit.tile, cx)),
-                    ),
-            );
+            let grid = div()
+                .id("detail-facts-grid")
+                .w_full()
+                .flex()
+                .flex_wrap()
+                .gap_x(gap)
+                .gap_y(s::S16)
+                .children(
+                    view.details
+                        .iter()
+                        .map(|(label, value)| self.detail_item(label, value, fit.tile, cx)),
+                );
+            section = if self.is_series() {
+                section.child(grid)
+            } else {
+                section.child(Section::new("Details").child(grid))
+            };
         }
         if !view.cast.is_empty() {
             section = section.child(self.cast_section(&view.cast, width, cx));
