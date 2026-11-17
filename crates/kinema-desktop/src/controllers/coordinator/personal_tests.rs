@@ -717,3 +717,55 @@ fn stale_saved_card_writes_survivor_not_reused_rowid() {
     }
     std::fs::remove_file(path).unwrap();
 }
+#[test]
+fn provider_details_belong_to_a_local_title_only_by_identity_and_kind() {
+    use kinema_core::catalog::{CatalogTitle, TitleDetails};
+    let mut record = metadata(3);
+    record.identifiers.push(ExternalIdentifier {
+        namespace: "tmdb".into(),
+        external_id: "42".into(),
+    });
+    let tmdb = |id: u64, kind: MediaKind| crate::tmdb::TmdbDetails {
+        facts: Default::default(),
+        backdrop_url: None,
+        title: crate::tmdb::TmdbTitle {
+            id,
+            kind,
+            name: "Same Name".into(),
+            overview: None,
+            release_info: None,
+            poster_url: None,
+            display: Default::default(),
+            imdb: None,
+        },
+        imdb: None,
+        genres: Vec::new(),
+        seasons: Vec::new(),
+    };
+    assert!(tmdb_belongs(&record, &tmdb(42, MediaKind::Movie)));
+    assert!(!tmdb_belongs(&record, &tmdb(43, MediaKind::Movie)));
+    assert!(!tmdb_belongs(&record, &tmdb(42, MediaKind::Series)));
+    let cinemeta = |id: &str, kind: MediaKind| TitleDetails {
+        facts: Default::default(),
+        title: CatalogTitle::new(ImdbId::new(id).unwrap(), kind, "Same Name", None).unwrap(),
+        poster_url: None,
+        background_url: None,
+        release_info: None,
+        genres: Vec::new(),
+        episodes: Vec::new(),
+    };
+    assert!(cinemeta_belongs(
+        &record,
+        &cinemeta("tt1234567", MediaKind::Movie)
+    ));
+    assert!(!cinemeta_belongs(
+        &record,
+        &cinemeta("tt7654321", MediaKind::Movie)
+    ));
+    assert!(!cinemeta_belongs(
+        &record,
+        &cinemeta("tt1234567", MediaKind::Series)
+    ));
+    // Without a stored TMDB identity nothing matches, whatever the name.
+    assert!(!tmdb_belongs(&metadata(4), &tmdb(42, MediaKind::Movie)));
+}

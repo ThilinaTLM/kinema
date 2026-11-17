@@ -70,9 +70,7 @@ impl Detail {
         match &self.title {
             BrowseTitle::Cinemeta(_) => c.details.value().map(|d| d.facts.clone()),
             BrowseTitle::Tmdb(_) => c.tmdb_details.value().map(|d| d.facts.clone()),
-            BrowseTitle::Local(_) => self
-                .local_detail(cx)
-                .map(|d| local::local_facts(&d.metadata)),
+            BrowseTitle::Local(_) => self.local_title_facts(cx),
         }
         .unwrap_or_default()
     }
@@ -84,15 +82,13 @@ impl Detail {
         season: u32,
         cx: &App,
     ) -> Option<crate::tmdb::TmdbSeasonSummary> {
+        let c = self.coordinator.read(cx);
         match &self.title {
-            BrowseTitle::Tmdb(_) | BrowseTitle::Local(_) => self
-                .coordinator
-                .read(cx)
-                .tmdb_details
-                .value()
-                .and_then(|d| d.seasons.iter().find(|s| s.number == season).cloned()),
+            BrowseTitle::Tmdb(_) => c.tmdb_details.value(),
+            BrowseTitle::Local(_) => c.local_tmdb_details(&self.title),
             BrowseTitle::Cinemeta(_) => None,
         }
+        .and_then(|d| d.seasons.iter().find(|s| s.number == season).cloned())
     }
 
     /// Episodes known for the whole show (not just the open season).
