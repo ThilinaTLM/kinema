@@ -73,15 +73,19 @@ accessible names.
   `max(2, floor((W+g)/(P+g)))`.
 - The grid is **virtualized by row** with 2 rows of overscan. Stable media keys
   own focus and selection, so a resize keeps the anchor title.
-- **Infinite scroll** asks for the next page within 2 rows of the end. A failed
-  page shows one retry row and keeps the cards that already loaded.
+- **Infinite scroll** asks for the next page within 2 rows of the end. While it
+  loads, skeleton cards complete the partial last row and fill 2 more rows in
+  the same column geometry, so the scroll position and focus never jump.
+  Skeletons are never selectable and never count toward artwork or paging
+  thresholds. A failed page keeps the cards that already loaded and shows the
+  Stale toast with Retry.
 - **Keyboard:** arrows move by cell or row, Home/End go to row edges, Ctrl/Cmd
   with Home/End go to the loaded edges, PageUp/PageDown move by viewport, Enter
   opens, and Menu opens the context menu. Typing printable characters focuses
   search.
 - Each scope (Discover, Library) keeps its own search, filters, sort, scroll and
   focus. Discover and Library use a fixed brand-wash backdrop, never one derived
-  from artwork.
+  from artwork (see the [title backdrop proposal](../proposals/browse-backdrop.md)).
 
 ### Detail
 

@@ -219,6 +219,7 @@ impl PlayerWindow {
             neighbour_note: None,
             up_next: None,
             up_next_dismissed: false,
+            up_next_saw_end: false,
             swap: None,
             carry: None,
             rollback_after: None,
@@ -1115,8 +1116,9 @@ impl PlayerWindow {
                 || self.scrub.is_some()
                 || self.volume_dragging
                 || self.menu_open()
-                // The countdown card never loses its dock to the idle timer.
-                || self.up_next.is_some()
+                // The countdown card never loses its dock to the idle timer; the
+                // early card may, as it can last the whole credits.
+                || self.up_next_pins_chrome()
                 || !self.surface_focus.is_focused(window),
             self.last_activity.elapsed(),
         )
@@ -1272,7 +1274,7 @@ impl Render for PlayerWindow {
                     .child(Button::new("progress-retry-saving", "Retry saving").on_click(cx.listener(|view, _, _, cx| view.retry_progress_ready(cx))))
                     .child(Button::new("progress-untracked", "Play without saving").on_click(cx.listener(|view, _, _, cx| view.play_without_saving(cx)))))
             })
-            .children(self.up_next_card(cx))
+            .children(self.up_next_card(visible, cx))
             .when(self.help_focus.is_some(), |el| el.child(self.shortcut_help(window, cx)))
             .children(self.drop_hint())
             .children(self.search_sheet(window, cx))

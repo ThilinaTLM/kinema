@@ -182,6 +182,8 @@ pub struct PlayerWindow {
     /// Set once the user cancelled or the countdown ran; reset when the file is
     /// no longer at its end.
     up_next_dismissed: bool,
+    /// The file was at its end on the last observation; leaving it re-arms the card.
+    up_next_saw_end: bool,
     /// Media in flight after a source swap, until it is ready or has failed.
     swap: Option<WindowSwap>,
     /// Audio and subtitle choices to restore on the new file.

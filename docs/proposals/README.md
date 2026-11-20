@@ -107,7 +107,7 @@ What exists today (link the architecture page), and the constraints that apply.
 | [Player enhancements](player-enhancements.md) | playback | Draft |
 | [HDR playback](hdr-playback.md) | playback | Draft |
 | [Watch history and data portability](watch-history-and-portability.md) | data | Draft |
-| [Browse loading and backdrop](browse-loading-and-backdrop.md) | UI | Draft |
+| [Title backdrop on Browse](browse-backdrop.md) | UI | Draft |
 | [UI refinements](ui-refinements.md) | UI | Draft |
 | [Notifications](notifications.md) | UI / platform | Draft |
 | [Welcome wizard](welcome-wizard.md) | UI | Draft |
@@ -141,8 +141,8 @@ design. Remove an item once it ships and its rules are in `architecture/`.
 - [ ] Redesign Streams and Settings, and polish the player chrome:
   [UI refinements](ui-refinements.md)
 - [ ] Guided welcome wizard (tokens, debrid, cache): [welcome wizard](welcome-wizard.md)
-- [ ] Smooth scrolling, next-page skeletons and a title backdrop:
-  [browse loading and backdrop](browse-loading-and-backdrop.md)
+- [ ] A title-responsive backdrop on Browse:
+  [title backdrop](browse-backdrop.md)
 
 **Data**
 

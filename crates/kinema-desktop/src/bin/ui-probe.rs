@@ -39,6 +39,7 @@ fn parse_player_probe(args: &[String]) -> Result<Option<PlayerProbeArgs>, &'stat
         "player-dock-busy" => Some(player::SubtitleScene::DockBusy),
         "player-dock-failure" => Some(player::SubtitleScene::DockFailure),
         "player-up-next" => Some(player::SubtitleScene::UpNext),
+        "player-up-next-early" => Some(player::SubtitleScene::UpNextEarly),
         _ => None,
     };
     if !native && scene != "player" && subtitles.is_none() {

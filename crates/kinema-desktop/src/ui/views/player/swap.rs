@@ -167,6 +167,7 @@ impl PlayerWindow {
         self.neighbour_note = None;
         self.up_next = None;
         self.up_next_dismissed = false;
+        self.up_next_saw_end = false;
         self.subtitle_position = None;
         self.delay_requested = None;
         self.speed_requested = None;

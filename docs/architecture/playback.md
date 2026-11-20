@@ -160,7 +160,12 @@ kept pack and the neighbour state below.
 ### External players
 
 External mpv and VLC are explicit choices, launched with **argument lists**
-(custom paths must be absolute executables, never shell commands). Kinema never
+(custom paths must be absolute executables, never shell commands). Without a
+custom path, Kinema looks up `mpv`/`vlc` on the absolute entries of `PATH`, then
+in fixed standard install locations: `/Applications` and `~/Applications`
+bundles plus Homebrew and MacPorts `bin` directories on macOS, and
+`ProgramFiles`, `ProgramFiles(x86)` and `LOCALAPPDATA` roots on Windows. The
+first existing executable file wins; relative roots are never candidates. Kinema never
 kills them and never infers their state from traffic. Launching one counts as
 "launch requested", never as "playing". On quit, Kinema's server stops and the
 external player loses its stream.
@@ -179,7 +184,7 @@ The chrome is a **Cinema Dock** built from design-system tokens on
   vertical panel at middle-right.
 - The chrome auto-hides after `CHROME_IDLE` while playing. It never hides while
   a control has focus or hover, during a drag, while a menu is open, while the
-  **Up next** card is showing, or when paused, buffering, loading, ended or
+  **Up next** countdown is showing (the early card may hide with it), or when paused, buffering, loading, ended or
   failed. The subtitle safe zone moves
   `sub-pos` only while the chrome is visible.
 - **Show only observed capabilities.** Don't invent chapters, tracks, buffer
@@ -211,12 +216,32 @@ listens to those and answers with `set_neighbours`, `neighbour_failed`,
 `play_kept_file` or `swap_embedded_source`. A failure shows a dock notice
 ("Couldn't open the next episode") and leaves the current episode playing.
 
-At end of file, if Next is enabled, an **Up next** card appears with a 5 s
-countdown, **Play now** and **Cancel**. It is owned by the window (its timer
-task is dropped on cancel, input, swap or close) and enters with the `POPUP_IN`
-preset. Any key, click or wheel input cancels it, as does Escape (before
-leaving fullscreen); pointer movement alone only reveals the chrome. It is
-shown once per ending: replaying or seeking away re-arms it.
+When Next is enabled, an **Up next** card with **Play now** and **Cancel**
+appears in two phases. It is owned by the window (its timer task is dropped on
+cancel, input, swap or close) and enters with the `POPUP_IN` preset. Its bar
+always fills forward.
+
+- **Early phase.** The card appears at the trigger position from
+  `kinema_core::episode_continuity::up_next_trigger`: the start of the earliest
+  *closing credits* chapter in the last 25% of the file (`credits`, `end
+  titles`, `ending`, `outro`, or exactly `ED`; never openings, intros or
+  post-/mid-credits scenes), else 30 s before the end for files of at least
+  2 minutes. Shorter files and files of unknown duration have no early card.
+  Playback continues and nothing is skipped; the card reads "Next episode when
+  this one ends" and its bar follows playback from the trigger to the end.
+  Only **Cancel** or **Escape** (before leaving fullscreen) dismiss it. Seeking,
+  volume, pause and clicks leave it, and the chrome may auto-hide under it (the
+  card then sits at the bottom edge). Seeking back before the trigger hides it
+  and re-arms it.
+- **At end of file.** If the early card had been up for at least 5 s
+  (`UP_NEXT_COUNTDOWN`, wall clock), the next episode is requested at once;
+  otherwise the card finishes the rest of the 5 s countdown (at least one step).
+  With no early card (short file, seek straight to the end) it is the plain 5 s
+  countdown. During the countdown any key, click or wheel input cancels it, the
+  chrome never hides, and pointer movement alone only reveals the chrome.
+
+The card is offered once per ending: replaying, or seeking away from the end or
+back before the trigger, re-arms it; Cancel, Escape and Play now do not.
 
 ### Choosing the neighbour's stream
 
