@@ -98,9 +98,9 @@ impl Detail {
     /// show no section rather than a permanent apology. Series hide the section
     /// when TMDB has nothing or cannot be reached.
     pub(super) fn recommendations(&mut self, width: Pixels, cx: &mut Context<Self>) -> AnyElement {
-        let BrowseTitle::Tmdb(_) = &self.title else {
+        if self.similar_source(cx).is_none() {
             return div().into_any_element();
-        };
+        }
         let (busy, error) = {
             let c = self.coordinator.read(cx);
             (c.similar.busy(), c.similar.error().map(str::to_owned))

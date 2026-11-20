@@ -182,6 +182,43 @@ impl TitleFacts {
                         .is_none_or(|s| text(s, 300) && s.starts_with("https://"))
             })
     }
+
+    /// Fill facts this set lacks from `other`; values already present win.
+    /// A TMDB score and its vote count are taken together, so a count never
+    /// describes a different observation than the score shown beside it.
+    pub fn fill_missing(&mut self, other: &TitleFacts) {
+        fn opt<T: Clone>(slot: &mut Option<T>, from: &Option<T>) {
+            if slot.is_none() {
+                slot.clone_from(from);
+            }
+        }
+        fn list<T: Clone>(slot: &mut Vec<T>, from: &[T]) {
+            if slot.is_empty() {
+                slot.extend_from_slice(from);
+            }
+        }
+        if self.tmdb_rating.is_none() {
+            self.tmdb_rating = other.tmdb_rating;
+            self.tmdb_vote_count = other.tmdb_vote_count;
+        }
+        opt(&mut self.imdb_rating, &other.imdb_rating);
+        opt(&mut self.runtime_minutes, &other.runtime_minutes);
+        opt(&mut self.status, &other.status);
+        opt(&mut self.release_date, &other.release_date);
+        opt(&mut self.first_air_date, &other.first_air_date);
+        opt(&mut self.last_air_date, &other.last_air_date);
+        opt(&mut self.certification, &other.certification);
+        opt(&mut self.original_language, &other.original_language);
+        opt(&mut self.tagline, &other.tagline);
+        opt(&mut self.release_info, &other.release_info);
+        list(&mut self.directors, &other.directors);
+        list(&mut self.creators, &other.creators);
+        list(&mut self.cast, &other.cast);
+        list(&mut self.studios, &other.studios);
+        list(&mut self.networks, &other.networks);
+        list(&mut self.writers, &other.writers);
+        list(&mut self.countries, &other.countries);
+    }
 }
 
 /// Optional provider-supplied display facts; no inferred ratings or enrichment.
@@ -297,6 +334,49 @@ mod tests {
     use std::collections::HashSet;
 
     use super::*;
+
+    #[test]
+    fn fill_missing_keeps_present_values_and_adds_absent_ones() {
+        let mut local = TitleFacts {
+            runtime_minutes: Some(118),
+            tagline: Some("Saved".into()),
+            tmdb_rating: ImdbRating::new(7.0),
+            tmdb_vote_count: None,
+            ..TitleFacts::default()
+        };
+        let provider = TitleFacts {
+            runtime_minutes: Some(120),
+            tagline: Some("Fetched".into()),
+            tmdb_rating: ImdbRating::new(8.0),
+            tmdb_vote_count: Some(99),
+            imdb_rating: ImdbRating::new(8.1),
+            certification: Some("PG-13".into()),
+            directors: vec!["Director".into()],
+            cast: vec![CastMember {
+                name: "Actor".into(),
+                character: None,
+                profile_url: None,
+            }],
+            ..TitleFacts::default()
+        };
+        local.fill_missing(&provider);
+        assert_eq!(local.runtime_minutes, Some(118));
+        assert_eq!(local.tagline.as_deref(), Some("Saved"));
+        // The saved score keeps its own (unknown) vote count.
+        assert_eq!(local.tmdb_rating, ImdbRating::new(7.0));
+        assert_eq!(local.tmdb_vote_count, None);
+        assert_eq!(local.imdb_rating, ImdbRating::new(8.1));
+        assert_eq!(local.certification.as_deref(), Some("PG-13"));
+        assert_eq!(local.directors, vec!["Director".to_owned()]);
+        assert_eq!(local.cast.len(), 1);
+
+        let mut empty = TitleFacts::default();
+        empty.fill_missing(&provider);
+        assert_eq!(empty, provider);
+        let mut unchanged = provider.clone();
+        unchanged.fill_missing(&TitleFacts::default());
+        assert_eq!(unchanged, provider);
+    }
 
     #[test]
     fn title_facts_validate_optional_bounded_values() {

@@ -79,14 +79,17 @@ impl Detail {
         for e in &local.episodes {
             *counts.entry(e.season).or_default() += 1;
         }
-        if let (Some(id), Some(d)) = (
-            self.local_tmdb(cx),
-            self.coordinator.read(cx).tmdb_details.value(),
-        ) && d.title.id == id
-        {
+        let c = self.coordinator.read(cx);
+        if let Some(d) = c.local_tmdb_details(&self.title) {
             for s in d.seasons.iter().filter(|s| s.episode_count > 0) {
                 let n = counts.entry(s.number).or_default();
                 *n = (*n).max(s.episode_count);
+            }
+        }
+        if let Some(d) = c.local_cinemeta_details(&self.title) {
+            for (season, count) in episode_seasons(&d.episodes) {
+                let n = counts.entry(season).or_default();
+                *n = (*n).max(count);
             }
         }
         Some(counts.into_iter().collect())
@@ -104,19 +107,35 @@ impl Detail {
                     .collect()
             })
             .unwrap_or_default();
-        if let (Some(id), Some(s)) = (
-            self.local_tmdb(cx),
-            self.coordinator.read(cx).tmdb_season.value(),
-        ) && s.series_id == id
-            && s.season == season
-        {
-            for e in &s.episodes {
-                if !out.iter().any(|x| x.number == e.number) {
-                    out.push(e.clone());
-                }
+        let mut numbers: std::collections::HashSet<u32> = out.iter().map(|e| e.number).collect();
+        for e in self.provider_episodes(season, cx) {
+            if numbers.insert(e.number) {
+                out.push(e.clone());
             }
         }
         out
+    }
+    /// Provider episodes already fetched for this Local title's `season`: the
+    /// lazily acquired TMDB season, then the Cinemeta details list. Both are
+    /// accepted only for the title's own stored identity.
+    fn provider_episodes<'a>(
+        &self,
+        season: u32,
+        cx: &'a App,
+    ) -> impl Iterator<Item = &'a CatalogEpisode> + 'a {
+        let c = self.coordinator.read(cx);
+        let tmdb = self.local_tmdb(cx).and_then(|id| {
+            c.tmdb_season
+                .value()
+                .filter(|s| s.series_id == id && s.season == season)
+        });
+        let cinemeta = c.local_cinemeta_details(&self.title);
+        tmdb.into_iter().flat_map(|s| &s.episodes).chain(
+            cinemeta
+                .into_iter()
+                .flat_map(|d| &d.episodes)
+                .filter(move |e| e.season == season),
+        )
     }
     /// [`Self::local_season_episodes`] for every season option, in option order,
     /// from one pass over the persisted rows (not one scan per season).
@@ -130,23 +149,14 @@ impl Detail {
                     .push(local_episode(row));
             }
         }
-        let acquired = self.local_tmdb(cx).and_then(|id| {
-            self.coordinator
-                .read(cx)
-                .tmdb_season
-                .value()
-                .filter(|s| s.series_id == id)
-        });
         let mut all = Vec::new();
         for (season, _) in &self.season_options {
             let mut out = by_season.remove(season).unwrap_or_default();
-            if let Some(s) = acquired.filter(|s| s.season == *season) {
-                let mut numbers: std::collections::HashSet<u32> =
-                    out.iter().map(|e| e.number).collect();
-                for e in &s.episodes {
-                    if numbers.insert(e.number) {
-                        out.push(e.clone());
-                    }
+            let mut numbers: std::collections::HashSet<u32> =
+                out.iter().map(|e| e.number).collect();
+            for e in self.provider_episodes(*season, cx) {
+                if numbers.insert(e.number) {
+                    out.push(e.clone());
                 }
             }
             all.append(&mut out);
@@ -164,10 +174,29 @@ impl Detail {
             .value()
             .filter(|d| d.metadata.id == local.title_id.get())
     }
+    /// Saved backdrop, else one from the title's already fetched provider details.
     pub(super) fn local_backdrop(&self, cx: &App) -> Option<String> {
+        let c = self.coordinator.read(cx);
         self.local_detail(cx)
             .and_then(|d| d.metadata.text("backdrop_url"))
+            .or_else(|| {
+                c.local_tmdb_details(&self.title)
+                    .and_then(|d| d.backdrop_url.as_deref())
+            })
+            .or_else(|| {
+                c.local_cinemeta_details(&self.title)
+                    .and_then(|d| d.background_url.as_deref())
+            })
             .map(str::to_owned)
+    }
+    /// Saved canonical facts, with gaps (cast, crew, certification…) filled from
+    /// the provider details this route already fetched for the same identity.
+    pub(super) fn local_title_facts(&self, cx: &App) -> Option<TitleFacts> {
+        let mut facts = local_facts(&self.local_detail(cx)?.metadata);
+        for provider in self.coordinator.read(cx).local_provider_facts(&self.title) {
+            facts.fill_missing(provider);
+        }
+        Some(facts)
     }
 }
 

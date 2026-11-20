@@ -150,6 +150,29 @@ fn local_reference(metadata: &CanonicalTitle) -> TitleRef {
             TitleRef::Canonical(TitleId::new(metadata.id).expect("validated canonical title"))
         })
 }
+fn local_tmdb(metadata: &CanonicalTitle) -> Option<u64> {
+    metadata
+        .identifiers
+        .iter()
+        .find(|id| id.namespace == "tmdb")
+        .and_then(|id| id.external_id.parse::<u64>().ok())
+        .filter(|id| *id > 0)
+}
+/// Provider details describe a Local title only by its stored identity and kind,
+/// never by name, so a previous title's late or retained result cannot leak in.
+pub(super) fn tmdb_belongs(metadata: &CanonicalTitle, details: &crate::tmdb::TmdbDetails) -> bool {
+    details.title.kind == metadata.kind && local_tmdb(metadata) == Some(details.title.id)
+}
+pub(super) fn cinemeta_belongs(
+    metadata: &CanonicalTitle,
+    details: &kinema_core::catalog::TitleDetails,
+) -> bool {
+    details.title.kind() == metadata.kind
+        && metadata
+            .identifiers
+            .iter()
+            .any(|id| id.namespace == "imdb" && id.external_id == details.title.id().as_str())
+}
 fn subjects(operation: &LibraryOperation) -> Vec<String> {
     match operation {
         LibraryOperation::PlaybackProgress(PlaybackProgressOperation::Clear(target)) => {
@@ -868,12 +891,57 @@ impl AppCoordinator {
             .or(Some(&local.metadata))
     }
     pub(crate) fn local_tmdb_id(&self, title: &BrowseTitle) -> Option<u64> {
-        self.local_metadata(title)?
-            .identifiers
+        local_tmdb(self.local_metadata(title)?)
+    }
+    /// TMDB id for a Local title's similar-titles feed, only while TMDB is usable.
+    pub(crate) fn local_similar_id(&self, title: &BrowseTitle) -> Option<u64> {
+        self.provider_active(kinema_core::provider::ProviderId::Tmdb)
+            .then(|| self.local_tmdb_id(title))
+            .flatten()
+    }
+    /// Loaded TMDB details, only when they belong to this Local title's identity.
+    pub(crate) fn local_tmdb_details(
+        &self,
+        title: &BrowseTitle,
+    ) -> Option<&crate::tmdb::TmdbDetails> {
+        let metadata = self.local_metadata(title)?;
+        self.tmdb_details
+            .value()
+            .filter(|details| tmdb_belongs(metadata, details))
+    }
+    /// Loaded Cinemeta details, only when they belong to this Local title's identity.
+    pub(crate) fn local_cinemeta_details(
+        &self,
+        title: &BrowseTitle,
+    ) -> Option<&kinema_core::catalog::TitleDetails> {
+        let metadata = self.local_metadata(title)?;
+        self.details
+            .value()
+            .filter(|details| cinemeta_belongs(metadata, details))
+    }
+    /// Provider facts already fetched for this Local title, in metadata priority
+    /// order. Saved canonical facts stay authoritative; these only fill gaps.
+    pub(crate) fn local_provider_facts(
+        &self,
+        title: &BrowseTitle,
+    ) -> Vec<&kinema_core::catalog::TitleFacts> {
+        let priority = self
+            .settings
+            .as_ref()
+            .map(|settings| settings.metadata_priority.clone())
+            .unwrap_or_default();
+        priority
+            .order()
             .iter()
-            .find(|id| id.namespace == "tmdb")
-            .and_then(|id| id.external_id.parse::<u64>().ok())
-            .filter(|id| *id > 0)
+            .filter_map(|provider| match provider {
+                kinema_core::provider::ProviderId::Tmdb => {
+                    self.local_tmdb_details(title).map(|d| &d.facts)
+                }
+                kinema_core::provider::ProviderId::Cinemeta => {
+                    self.local_cinemeta_details(title).map(|d| &d.facts)
+                }
+            })
+            .collect()
     }
     pub(super) fn local_detail_action(
         &self,

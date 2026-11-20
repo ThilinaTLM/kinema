@@ -221,6 +221,15 @@ fn choose_season(current: Option<u32>, options: &[(u32, u32)]) -> Option<u32> {
                 .min()
         })
 }
+/// TMDB identity of the similar-titles feed: a TMDB title, or a Local title
+/// with a stored TMDB identity while TMDB is usable. Cinemeta has no such feed.
+fn similar_source(title: &BrowseTitle, c: &AppCoordinator) -> Option<(MediaKind, u64)> {
+    match title {
+        BrowseTitle::Tmdb(t) => Some((t.kind, t.id)),
+        BrowseTitle::Local(_) => c.local_similar_id(title).map(|id| (title.kind(), id)),
+        BrowseTitle::Cinemeta(_) => None,
+    }
+}
 /// Parent window subscribes before navigation; recommendations never construct a
 /// second coordinator or mutate Browse's saved collection context.
 #[derive(Clone)]
@@ -405,8 +414,7 @@ impl Detail {
         } else {
             None
         };
-        if let BrowseTitle::Tmdb(t) = &title {
-            let (kind, id) = (t.kind, t.id);
+        if let Some((kind, id)) = similar_source(&title, coordinator.read(cx)) {
             coordinator.update(cx, |c, cx| c.load_similar(kind, id, 1, false, cx));
         }
         let art_generation = artwork::begin_title_generation("v3-detail", &title.key(), cx);
@@ -593,16 +601,12 @@ impl Detail {
         }
         let c = self.coordinator.read(cx);
         let backdrop = match &self.title {
-            BrowseTitle::Cinemeta(_) => c.details.value().and_then(|d| d.background_url.as_deref()),
-            BrowseTitle::Tmdb(_) => c
-                .tmdb_details
-                .value()
-                .and_then(|d| d.backdrop_url.as_deref()),
-            BrowseTitle::Local(_) => self
-                .local_detail(cx)
-                .and_then(|d| d.metadata.text("backdrop_url")),
+            BrowseTitle::Cinemeta(_) => c.details.value().and_then(|d| d.background_url.clone()),
+            BrowseTitle::Tmdb(_) => c.tmdb_details.value().and_then(|d| d.backdrop_url.clone()),
+            BrowseTitle::Local(_) => self.local_backdrop(cx),
         };
         backdrop
+            .as_deref()
             .and_then(|url| ArtworkKey::new(ArtworkKind::Backdrop, url))
             .and_then(|key| artwork::ambient(&key, cx))
             .or_else(|| {
@@ -824,9 +828,8 @@ impl Detail {
         self.coordinator
             .update(cx, |c, cx| c.title_details(&self.title, true, cx));
         self.ensure_season(true, cx);
-        if let BrowseTitle::Tmdb(t) = &self.title {
+        if let Some((kind, id)) = self.similar_source(cx) {
             self.similar.reset();
-            let (kind, id) = (t.kind, t.id);
             self.coordinator
                 .update(cx, |c, cx| c.load_similar(kind, id, 1, true, cx));
         }
@@ -914,8 +917,9 @@ impl Detail {
     /// when the loaded ones run out.
     fn show_more_similar(&mut self, cx: &mut Context<Self>) {
         let cols = self.similar_cols;
-        if let (Some(page), BrowseTitle::Tmdb(t)) = (self.similar.show_more(cols), &self.title) {
-            let (kind, id) = (t.kind, t.id);
+        if let (Some(page), Some((kind, id))) =
+            (self.similar.show_more(cols), self.similar_source(cx))
+        {
             self.coordinator
                 .update(cx, |c, cx| c.load_similar(kind, id, page, false, cx));
         }
@@ -990,6 +994,9 @@ enum PrimaryAction {
 }
 
 impl Detail {
+    fn similar_source(&self, cx: &App) -> Option<(MediaKind, u64)> {
+        similar_source(&self.title, self.coordinator.read(cx))
+    }
     fn is_series(&self) -> bool {
         self.title.kind() == MediaKind::Series
     }
@@ -1095,8 +1102,7 @@ impl Detail {
         }
     }
     fn retry_similar(&mut self, cx: &mut Context<Self>) {
-        if let BrowseTitle::Tmdb(t) = &self.title {
-            let (kind, id) = (t.kind, t.id);
+        if let Some((kind, id)) = self.similar_source(cx) {
             let page = self.similar.next_page().unwrap_or(1);
             self.coordinator
                 .update(cx, |c, cx| c.load_similar(kind, id, page, true, cx));

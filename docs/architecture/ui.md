@@ -103,6 +103,12 @@ accessible names.
   watched and other actions are secondary buttons from the same 32 px family.
 - Detail actions are **the same from every entry point** (Discover, Library,
   search, recommendations). Only the Back target differs.
+- **Library (Local) titles show the same sections as Discover.** The saved
+  canonical record keeps no cast or crew, so Detail fills its gaps (cast, crew,
+  certification, backdrop, Cinemeta episodes) from the provider details the
+  route already fetched for the title's stored IMDb/TMDB identity and kind,
+  never by name. Saved values win; a failed fetch leaves the saved facts.
+  Similar titles use the stored TMDB id while TMDB is usable.
 - **Continue and Resume play without the stream list** when Kinema remembers
   what you watched (see [playback](playback.md#choosing-the-neighbours-stream)):
   progress and failures show in an inline play panel below the hero: a bounded
