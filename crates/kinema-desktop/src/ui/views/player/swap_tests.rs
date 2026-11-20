@@ -857,6 +857,225 @@ fn play_now_requests_at_once_and_closing_the_window_drops_the_countdown() {
     assert!(rig.requests.borrow().is_empty());
 }
 
+fn enable_next(rig: &mut Rig) {
+    rig.cx.update(|cx| {
+        set_neighbours(
+            OLD,
+            Neighbours {
+                previous: NeighbourState::Hidden,
+                next: NeighbourState::Enabled,
+            },
+            cx,
+        )
+    });
+}
+
+/// Moves playback to `position` (duration 1500 s, so the trigger is 1470 s) and
+/// runs one sample-tick observation.
+fn play_at(rig: &mut Rig, position: f64) {
+    rig.window
+        .update(&mut rig.cx, |view, _, cx| {
+            view.state.position = position;
+            view.state.ended = false;
+            view.observe_up_next(cx);
+        })
+        .unwrap_or_else(|_| panic!("window gone"));
+}
+
+fn reach_end(rig: &mut Rig) {
+    rig.window
+        .update(&mut rig.cx, |view, _, cx| {
+            view.state.position = 1500.;
+            view.state.ended = true;
+            view.observe_up_next(cx);
+        })
+        .unwrap_or_else(|_| panic!("window gone"));
+    rig.cx.run_until_parked();
+}
+
+fn early(rig: &mut Rig) -> Option<bool> {
+    rig.view(|v| v.up_next.as_ref().map(|c| c.is_early()))
+}
+
+#[test]
+fn the_early_card_appears_at_the_trigger_and_not_before() {
+    let mut rig = Rig::new();
+    enable_next(&mut rig);
+    play_at(&mut rig, 1469.);
+    assert_eq!(early(&mut rig), None);
+    play_at(&mut rig, 1470.);
+    assert_eq!(early(&mut rig), Some(true));
+    assert!(rig.requests.borrow().is_empty(), "nothing is skipped");
+    // Without a ready next episode there is no card.
+    let mut rig = Rig::new();
+    play_at(&mut rig, 1480.);
+    assert_eq!(early(&mut rig), None);
+}
+
+#[test]
+fn a_credits_chapter_moves_the_trigger() {
+    let mut rig = Rig::new();
+    enable_next(&mut rig);
+    rig.view(|v| {
+        v.state.chapters = vec![kinema_mpv::Chapter {
+            time: 1300.,
+            title: Some("Ending".to_owned()),
+        }]
+    });
+    play_at(&mut rig, 1299.);
+    assert_eq!(early(&mut rig), None);
+    play_at(&mut rig, 1300.);
+    assert_eq!(early(&mut rig), Some(true));
+}
+
+#[test]
+fn only_cancel_or_escape_dismiss_the_early_card() {
+    let mut rig = Rig::new();
+    enable_next(&mut rig);
+    play_at(&mut rig, 1480.);
+    // Click, wheel and key input go to `user_input`; seeking forward or back
+    // within the credits, pausing and the volume keep the card too.
+    rig.window
+        .update(&mut rig.cx, |view, _, cx| view.user_input(cx))
+        .unwrap_or_else(|_| panic!("window gone"));
+    play_at(&mut rig, 1475.);
+    rig.view(|v| v.state.paused = true);
+    play_at(&mut rig, 1490.);
+    assert_eq!(early(&mut rig), Some(true));
+    assert!(rig.view(|v| !v.up_next_pins_chrome()), "chrome may hide");
+
+    rig.view(|v| {
+        v.cancel_up_next();
+    });
+    assert_eq!(early(&mut rig), None);
+    play_at(&mut rig, 1495.);
+    assert_eq!(early(&mut rig), None, "stays dismissed");
+    // And the end of the file does not bring it back.
+    reach_end(&mut rig);
+    assert_eq!(early(&mut rig), None);
+
+    // Escape cancels the card before anything else.
+    let mut rig = Rig::new();
+    enable_next(&mut rig);
+    play_at(&mut rig, 1480.);
+    rig.cx
+        .update_window(rig.window.into(), |_, window, cx| {
+            window.draw(cx).clear(cx);
+            let Ok(keystroke) = Keystroke::parse("escape") else {
+                panic!("fixture key")
+            };
+            window.dispatch_event(
+                KeyDownEvent {
+                    keystroke,
+                    is_held: false,
+                    prefer_character_input: false,
+                }
+                .to_platform_input(),
+                cx,
+            );
+        })
+        .unwrap_or_else(|_| panic!("window gone"));
+    assert_eq!(early(&mut rig), None);
+}
+
+#[test]
+fn seeking_back_before_the_trigger_hides_and_rearms_the_card() {
+    let mut rig = Rig::new();
+    enable_next(&mut rig);
+    play_at(&mut rig, 1480.);
+    rig.view(|v| {
+        v.cancel_up_next();
+    });
+    play_at(&mut rig, 1200.);
+    assert_eq!(early(&mut rig), None);
+    play_at(&mut rig, 1471.);
+    assert_eq!(early(&mut rig), Some(true), "re-armed");
+    // A shown card also hides when the user seeks back.
+    play_at(&mut rig, 1000.);
+    assert_eq!(early(&mut rig), None);
+}
+
+#[test]
+fn the_end_after_five_seconds_of_early_card_advances_at_once_and_only_once() {
+    let mut rig = Rig::new();
+    enable_next(&mut rig);
+    play_at(&mut rig, 1470.);
+    rig.cx.executor().advance_clock(timing::UP_NEXT_COUNTDOWN);
+    reach_end(&mut rig);
+    assert_eq!(rig.requests.borrow().len(), 1);
+    assert_eq!(rig.requests.borrow()[0].2, NeighbourDirection::Next);
+    assert!(rig.view(|v| v.up_next.is_none()));
+    rig.cx
+        .executor()
+        .advance_clock(timing::UP_NEXT_COUNTDOWN * 2);
+    reach_end(&mut rig);
+    assert_eq!(rig.requests.borrow().len(), 1);
+}
+
+#[test]
+fn the_end_before_five_seconds_finishes_the_countdown() {
+    let mut rig = Rig::new();
+    enable_next(&mut rig);
+    play_at(&mut rig, 1470.);
+    rig.cx.executor().advance_clock(timing::UP_NEXT_TICK * 3);
+    reach_end(&mut rig);
+    assert_eq!(early(&mut rig), Some(false));
+    assert_eq!(
+        rig.view(|v| v.up_next.as_ref().map(|c| c.remaining)),
+        Some(2)
+    );
+    assert!(rig.view(|v| v.up_next_pins_chrome()));
+    rig.cx.executor().advance_clock(timing::UP_NEXT_TICK);
+    rig.cx.run_until_parked();
+    assert!(rig.requests.borrow().is_empty());
+    rig.cx.executor().advance_clock(timing::UP_NEXT_TICK);
+    rig.cx.run_until_parked();
+    assert_eq!(rig.requests.borrow().len(), 1);
+    // Input cancels the countdown phase.
+    let mut rig = Rig::new();
+    enable_next(&mut rig);
+    play_at(&mut rig, 1470.);
+    reach_end(&mut rig);
+    rig.window
+        .update(&mut rig.cx, |view, _, cx| view.user_input(cx))
+        .unwrap_or_else(|_| panic!("window gone"));
+    assert_eq!(early(&mut rig), None);
+}
+
+#[test]
+fn replaying_from_the_end_into_the_credits_rearms_the_card() {
+    let mut rig = Rig::new();
+    enable_next(&mut rig);
+    reach_end(&mut rig);
+    rig.view(|v| {
+        v.cancel_up_next();
+    });
+    play_at(&mut rig, 1480.);
+    assert_eq!(early(&mut rig), Some(true));
+}
+
+#[test]
+fn both_phases_fill_the_bar_forward() {
+    use super::continuity::countdown_fill;
+    let steps = super::continuity::countdown_steps();
+    let fills: Vec<f32> = (1..=steps)
+        .rev()
+        .map(|remaining| countdown_fill(remaining, steps))
+        .collect();
+    assert_eq!(fills[0], 0.);
+    assert!(fills.windows(2).all(|pair| pair[0] < pair[1]), "{fills:?}");
+    assert!(fills[fills.len() - 1] < 1.);
+    // A short countdown continuing a full early bar starts empty, not part-filled.
+    assert_eq!(countdown_fill(2, 2), 0.);
+    assert!(countdown_fill(1, 2) > 0.);
+
+    let early: Vec<f32> = [1470., 1485., 1500.]
+        .into_iter()
+        .map(|p| kinema_core::episode_continuity::up_next_fill(p, 1470., 1500.))
+        .collect();
+    assert_eq!(early, vec![0., 0.5, 1.]);
+}
+
 fn observe(rig: &mut Rig) {
     rig.window
         .update(&mut rig.cx, |view, _, cx| view.observe_swap(cx))

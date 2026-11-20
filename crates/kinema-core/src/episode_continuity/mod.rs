@@ -9,6 +9,7 @@
 mod listing;
 mod resolve;
 mod traits;
+mod up_next;
 
 use std::collections::BTreeSet;
 
@@ -19,6 +20,9 @@ pub use resolve::{
     preselected_count, rank_candidates, rank_order, similarity,
 };
 pub use traits::{AudioFormat, Codec, HdrFlags, ReleaseTraits, Resolution, Source};
+pub use up_next::{
+    UP_NEXT_FALLBACK_LEAD, UP_NEXT_MIN_DURATION, is_credits_title, up_next_fill, up_next_trigger,
+};
 
 /// Fraction of a finite duration, in percent, after which the next episode may
 /// be resolved ahead of time ([`prefetch_due`]).

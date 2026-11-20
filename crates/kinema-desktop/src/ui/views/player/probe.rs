@@ -255,6 +255,8 @@ pub enum SubtitleScene {
     DockFailure,
     /// `player-up-next`: the end-of-file card three seconds into its countdown.
     UpNext,
+    /// `player-up-next-early`: the card ahead of the end, halfway through the last 30 s.
+    UpNextEarly,
 }
 
 #[cfg(feature = "ui-probe")]
@@ -378,6 +380,13 @@ fn run_probe_inner(
                             view.state.ended = true;
                             view.state.paused = true;
                             view.up_next = Some(UpNext::fixture(3));
+                        }
+                        SubtitleScene::UpNextEarly => {
+                            view.neighbours = Neighbours { previous: NeighbourState::Enabled, next: NeighbourState::Enabled };
+                            view.state.duration = Some(1400.);
+                            view.state.position = 1385.;
+                            view.state.paused = true;
+                            view.up_next = Some(UpNext::fixture_early(1370.));
                         }
                         SubtitleScene::Drop => view.drop_hover = Some(true),
                         SubtitleScene::Menu => {

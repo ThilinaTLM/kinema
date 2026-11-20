@@ -96,22 +96,72 @@ pub(super) fn up_next_due(
     ended && next == NeighbourState::Enabled && !dismissed && !shown && !swapping
 }
 
-/// The countdown card. Its task is owned here: dropping the card, on input,
-/// close or swap, cancels it.
+/// Where the card is in its life.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum UpNextPhase {
+    /// Shown ahead of the end (credits chapter or the last 30 s). Playback
+    /// continues; only Cancel, Escape or Play now end it. `trigger` is the
+    /// position, in seconds, where it appeared.
+    Early { trigger: f64 },
+    /// The file ended: a 5 s countdown, and any input cancels it.
+    Countdown,
+}
+
+/// The Up next card. Its countdown task is owned here: dropping the card, on
+/// input, close or swap, cancels it. The early phase has no task; the sample tick
+/// drives it.
 pub(super) struct UpNext {
+    pub(super) phase: UpNextPhase,
     pub(super) remaining: u32,
+    /// Steps this countdown started with; its bar fills over them, so a
+    /// countdown that continues a full early bar starts empty, never part-filled.
+    steps: u32,
+    /// When the card first appeared, on the executor's clock.
+    shown_at: Instant,
     _countdown: Task<()>,
 }
 
 impl UpNext {
-    /// A card frozen at `remaining` seconds, for the design lab.
+    /// A countdown card frozen at `remaining` seconds, for the design lab.
     #[cfg(feature = "ui-probe")]
     pub(super) fn fixture(remaining: u32) -> Self {
         Self {
+            phase: UpNextPhase::Countdown,
             remaining,
+            steps: countdown_steps(),
+            shown_at: Instant::now(),
             _countdown: Task::ready(()),
         }
     }
+
+    /// An early card, for the design lab.
+    #[cfg(feature = "ui-probe")]
+    pub(super) fn fixture_early(trigger: f64) -> Self {
+        Self {
+            phase: UpNextPhase::Early { trigger },
+            remaining: countdown_steps(),
+            steps: countdown_steps(),
+            shown_at: Instant::now(),
+            _countdown: Task::ready(()),
+        }
+    }
+
+    pub(super) fn is_early(&self) -> bool {
+        matches!(self.phase, UpNextPhase::Early { .. })
+    }
+}
+
+/// Steps left for a card that has been up for `shown`, at least one.
+fn remaining_after(shown: Duration) -> u32 {
+    let left = timing::UP_NEXT_COUNTDOWN.saturating_sub(shown);
+    let tick = timing::UP_NEXT_TICK.as_millis().max(1);
+    (left.as_millis().div_ceil(tick) as u32).clamp(1, countdown_steps())
+}
+
+/// Fill of a countdown bar that started at `steps`: forward, from empty to full.
+pub(super) fn countdown_fill(remaining: u32, steps: u32) -> f32 {
+    let total = steps.max(1);
+    (total.saturating_sub(remaining) as f32 / total as f32).clamp(0., 1.)
 }
 
 /// Whole seconds in the countdown, from the token durations.
@@ -224,30 +274,97 @@ impl PlayerWindow {
 
     // ── Up next ──
 
-    /// Starts the card when the file ended and a next episode is ready. Called
-    /// from the sample tick; a no-op when it is already shown or was dismissed.
+    /// The position from which the card shows before the end, for this file.
+    pub(super) fn up_next_trigger(&self) -> Option<f64> {
+        let chapters: Vec<(f64, Option<&str>)> = self
+            .state
+            .chapters
+            .iter()
+            .map(|chapter| (chapter.time, chapter.title.as_deref()))
+            .collect();
+        kinema_core::episode_continuity::up_next_trigger(self.state.duration, &chapters)
+    }
+
+    /// Whether the card stops the chrome from auto-hiding: only the countdown.
+    pub(super) fn up_next_pins_chrome(&self) -> bool {
+        self.up_next.as_ref().is_some_and(|card| !card.is_early())
+    }
+
+    /// Drives the card from the sample tick: the early card at the trigger, the
+    /// countdown at the end of the file. A no-op when already in the right phase.
     pub(super) fn observe_up_next(&mut self, cx: &mut Context<Self>) {
-        if !self.state.ended {
-            // Replay or seek: the next ending may offer the card again.
-            self.up_next_dismissed = false;
-            if self.up_next.is_some() {
-                self.cancel_up_next();
-                cx.notify();
+        if self.state.ended {
+            self.up_next_saw_end = true;
+            match self
+                .up_next
+                .as_ref()
+                .map(|card| (card.phase, card.shown_at))
+            {
+                Some((UpNextPhase::Early { .. }, shown_at)) => {
+                    let shown = cx
+                        .background_executor()
+                        .now()
+                        .saturating_duration_since(shown_at);
+                    if shown >= timing::UP_NEXT_COUNTDOWN {
+                        self.play_up_next(cx);
+                    } else {
+                        self.start_countdown(remaining_after(shown), cx);
+                    }
+                }
+                Some((UpNextPhase::Countdown, _)) => {}
+                None => {
+                    if up_next_due(
+                        true,
+                        self.neighbours.next,
+                        self.up_next_dismissed,
+                        false,
+                        self.swap.is_some(),
+                    ) {
+                        self.start_countdown(countdown_steps(), cx);
+                    }
+                }
             }
             return;
         }
-        if up_next_due(
-            self.state.ended,
-            self.neighbours.next,
-            self.up_next_dismissed,
-            self.up_next.is_some(),
-            self.swap.is_some(),
-        ) {
-            self.start_up_next(cx);
+        if std::mem::take(&mut self.up_next_saw_end) {
+            // Replay or seek away from the end: the next ending may offer it again.
+            self.up_next_dismissed = false;
+        }
+        let trigger = self
+            .up_next_trigger()
+            .filter(|trigger| self.state.position >= *trigger);
+        let Some(trigger) = trigger else {
+            // Before the trigger (or none): seeking back re-arms the card.
+            self.up_next_dismissed = false;
+            if self.up_next.is_some() {
+                self.cancel_up_next();
+                self.up_next_dismissed = false;
+                cx.notify();
+            }
+            return;
+        };
+        if self.up_next.is_none()
+            && self.neighbours.next == NeighbourState::Enabled
+            && !self.up_next_dismissed
+            && self.swap.is_none()
+        {
+            self.show_early_up_next(trigger, cx);
         }
     }
 
-    pub(super) fn start_up_next(&mut self, cx: &mut Context<Self>) {
+    fn show_early_up_next(&mut self, trigger: f64, cx: &mut Context<Self>) {
+        self.up_next = Some(UpNext {
+            phase: UpNextPhase::Early { trigger },
+            remaining: countdown_steps(),
+            steps: countdown_steps(),
+            shown_at: cx.background_executor().now(),
+            _countdown: Task::ready(()),
+        });
+        cx.notify();
+    }
+
+    /// Starts (or continues, from the early card) the countdown at `remaining`.
+    fn start_countdown(&mut self, remaining: u32, cx: &mut Context<Self>) {
         let countdown = cx.spawn(async move |view, cx| {
             loop {
                 cx.background_executor().timer(timing::UP_NEXT_TICK).await;
@@ -257,8 +374,15 @@ impl PlayerWindow {
                 }
             }
         });
+        let shown_at = self
+            .up_next
+            .as_ref()
+            .map_or_else(|| cx.background_executor().now(), |card| card.shown_at);
         self.up_next = Some(UpNext {
-            remaining: countdown_steps(),
+            phase: UpNextPhase::Countdown,
+            remaining,
+            steps: remaining,
+            shown_at,
             _countdown: countdown,
         });
         cx.notify();
@@ -298,22 +422,45 @@ impl PlayerWindow {
 
     /// Any deliberate input (key, click, wheel) ends the countdown. Pointer
     /// movement alone does not: it only reveals the chrome.
+    /// The early card ignores it: only Cancel and Escape dismiss that one.
     pub(super) fn user_input(&mut self, cx: &mut Context<Self>) {
-        if self.cancel_up_next() {
+        if self.up_next.as_ref().is_some_and(|card| !card.is_early()) && self.cancel_up_next() {
             cx.notify();
         }
     }
 
-    pub(super) fn up_next_card(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn up_next_card(
+        &self,
+        chrome_visible: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let card = self.up_next.as_ref()?;
         let p = Palette::cinema();
-        let dock = if self.dock_height > Pixels::default() {
+        // Above the dock while it shows; at the bottom edge when it is hidden.
+        let dock = if !chrome_visible {
+            Pixels::default()
+        } else if self.dock_height > Pixels::default() {
             self.dock_height
         } else {
             DOCK_ESTIMATE
         };
-        let total = countdown_steps().max(1) as f32;
-        let remaining = card.remaining;
+        let (remaining, steps) = (card.remaining, card.steps);
+        let (label, line, fill) = match card.phase {
+            UpNextPhase::Early { trigger } => (
+                "Up next. The next episode plays when this one ends.".to_owned(),
+                "Next episode when this one ends".to_owned(),
+                kinema_core::episode_continuity::up_next_fill(
+                    self.state.position,
+                    trigger,
+                    self.state.duration.unwrap_or(0.),
+                ),
+            ),
+            UpNextPhase::Countdown => (
+                format!("Up next. Playing the next episode in {remaining} seconds."),
+                format!("Next episode in {remaining}…"),
+                countdown_fill(remaining, steps),
+            ),
+        };
         // Position on a wrapper: the entry preset offsets `top`, which on an
         // element pinned by `bottom` would stretch it to the window's top edge.
         let card = div()
@@ -328,9 +475,7 @@ impl PlayerWindow {
             .bg(p.scrim)
             .border_1()
             .border_color(p.border)
-            .aria_label(format!(
-                "Up next. Playing the next episode in {remaining} seconds."
-            ))
+            .aria_label(label)
             // A press inside the card is a choice, not "other input".
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
@@ -344,7 +489,7 @@ impl PlayerWindow {
                 div()
                     .text(TextSize::Sm)
                     .text_color(p.muted_foreground)
-                    .child(format!("Next episode in {remaining}…")),
+                    .child(line),
             )
             .child(
                 div()
@@ -355,7 +500,7 @@ impl PlayerWindow {
                     .child(
                         div()
                             .h_full()
-                            .w(relative(remaining as f32 / total))
+                            .w(relative(fill))
                             .rounded(radius::FULL)
                             .bg(p.primary),
                     ),
