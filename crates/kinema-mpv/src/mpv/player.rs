@@ -1175,6 +1175,7 @@ fn control_worker(
             }
             // Event payloads are consumed completely before the next wait_event call.
             let event = unsafe { &*(client.loaded.api.wait)(client.handle, 0.0) };
+            let mut reconfigured = None;
             if event.id == 0 {
                 break;
             }
@@ -1262,6 +1263,11 @@ fn control_worker(
                 21 => {
                     state.restart_revision += 1;
                 }
+                // MPV_EVENT_VIDEO_RECONFIG: read the output dimensions after the
+                // locks are released (see refresh_video_params).
+                17 if !state.media_stopped => {
+                    reconfigured = Some(state.media_generation);
+                }
                 8 => {
                     state.file_loaded = true;
                     shared.diagnostics.event(Lifecycle::FileLoaded);
@@ -1320,17 +1326,10 @@ fn control_worker(
                             } else {
                                 None
                             };
-                            let mut pipeline =
-                                shared.pipeline.lock().unwrap_or_else(|e| e.into_inner());
-                            pipeline.metadata[(event.userdata - 6) as usize] = value;
-                            if event.userdata == 6 {
-                                pipeline.video_absent = value.is_none_or(|v| v <= 0);
-                            }
-                            if let Err(e) = pipeline.recompute(&mut state) {
-                                state.failure_reason = Some(e.playback_failure());
-                                shared.diagnostics.failure_typed(&e, Some(&state));
-                                state.error = Some(e.to_string());
-                            }
+                            let index = (event.userdata - 6) as usize;
+                            apply_video_params(&shared, &mut state, |metadata| {
+                                metadata[index] = value;
+                            });
                         }
                         (11, _, _) => {
                             // The string and its pointer are borrowed only until wait_event.
@@ -1341,6 +1340,7 @@ fn control_worker(
                 }
                 _ => {}
             }
+            let refresh_video = reconfigured.take();
             let refresh_subtitles = state.file_loaded
                 && !state.loading
                 && !state.media_stopped
@@ -1352,6 +1352,9 @@ fn control_worker(
             // Native property calls must never hold UI-visible locks. Recheck
             // generation/readiness before publishing sampled subtitle values.
             drop(state);
+            if let Some(media_generation) = refresh_video {
+                refresh_video_params(&client, &shared, media_generation);
+            }
             if refresh_subtitles {
                 refresh_subtitle_state(&client, &shared, &generation);
             }
@@ -1379,6 +1382,61 @@ unsafe fn classify_native_message(message: &LogMessage) -> NativeMessage {
         unsafe { text(message.text) },
         message.log_level,
     )
+}
+
+/// Updates the video output dimensions (`video-out-params/{w,h,dw,dh,rotate}`)
+/// and recomputes the render size. The caller holds `state`.
+fn apply_video_params(
+    shared: &Shared,
+    state: &mut PlaybackState,
+    update: impl FnOnce(&mut [Option<i64>; 5]),
+) {
+    let mut pipeline = shared.pipeline.lock().unwrap_or_else(|e| e.into_inner());
+    update(&mut pipeline.metadata);
+    pipeline.video_absent = pipeline.metadata[0].is_none_or(|w| w <= 0);
+    if let Err(e) = pipeline.recompute(state) {
+        state.failure_reason = Some(e.playback_failure());
+        shared.diagnostics.failure_typed(&e, Some(state));
+        state.error = Some(e.to_string());
+    }
+}
+
+/// Reads the video output dimensions directly after a video reconfiguration.
+///
+/// A load clears the dimensions locally, but mpv sends a property change only
+/// when a value differs from the last one it delivered. When a playing file is
+/// replaced by one of the same size, mpv can skip the transient "no video"
+/// value, so no change event follows and every frame would be dropped (audio
+/// only). `media_generation` rejects a read that a newer file has overtaken.
+fn refresh_video_params(client: &Client, shared: &Shared, media_generation: u64) {
+    let values = [
+        c"video-out-params/w",
+        c"video-out-params/h",
+        c"video-out-params/dw",
+        c"video-out-params/dh",
+        c"video-out-params/rotate",
+    ]
+    .map(|name| {
+        let ptr = unsafe { (client.loaded.api.get_property_string)(client.handle, name.as_ptr()) };
+        if ptr.is_null() {
+            return None;
+        }
+        let value = unsafe { CStr::from_ptr(ptr) }
+            .to_str()
+            .ok()
+            .and_then(|text| text.trim().parse::<i64>().ok());
+        unsafe {
+            (client.loaded.api.free)(ptr.cast());
+        }
+        value
+    });
+    let Some(mut state) = shared.control_state() else {
+        return;
+    };
+    if state.media_generation != media_generation || state.media_stopped {
+        return;
+    }
+    apply_video_params(shared, &mut state, |metadata| *metadata = values);
 }
 
 fn refresh_decode_evidence(client: &Client, shared: &Shared) {
@@ -2769,6 +2827,51 @@ mod tests {
                 .unwrap(),
             );
         }
+    }
+    #[test]
+    #[ignore = "requires installed libmpv and ffmpeg; exercises real software rendering"]
+    fn real_mpv_mid_playback_replacement_with_same_size_keeps_rendering() {
+        // mpv only reports an observed property when its value differs from the
+        // last one delivered. Replacing a playing file with one of the same
+        // dimensions can skip the transient "no video" value, so the new file
+        // must not depend on a dimension event to render.
+        let media = TemporaryMedia::new();
+        let red = media.clip("red.mkv", "color=c=red:s=64x48:r=25", false);
+        let blue = media.clip("blue.mkv", "color=c=blue:s=64x48:r=25", false);
+        let player = Player::new(Config {
+            render_backend: RenderBackend::Cpu,
+            resolution: ResolutionPolicy::Viewport,
+            ..Config::default()
+        })
+        .unwrap();
+        player.resize(64, 48).unwrap();
+        let colour = |frame: &Frame, red: bool| {
+            frame.pixels.chunks_exact(4).any(|p| {
+                let (hi, lo) = if red { (p[0], p[2]) } else { (p[2], p[0]) };
+                hi > 200 && lo < 40 && p[1] < 40
+            })
+        };
+        let wait_colour = |red: bool| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while std::time::Instant::now() < deadline {
+                if player.take_frame().is_some_and(|frame| colour(&frame, red)) {
+                    return true;
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
+            false
+        };
+        for round in 0..8 {
+            player.load(red.to_str().unwrap()).unwrap();
+            assert!(wait_colour(true), "round {round}: no red frame");
+            player.load(blue.to_str().unwrap()).unwrap();
+            assert!(
+                wait_colour(false),
+                "round {round}: no blue frame after replacement; state: {:?}",
+                player.state()
+            );
+        }
+        player.stop().unwrap();
     }
     struct TemporaryMedia(std::path::PathBuf);
     impl TemporaryMedia {
