@@ -34,6 +34,11 @@ flowchart LR
   A requested seek, speed, volume or track is not proof that it happened.
   Unknown metadata is different from known-empty metadata (`*_available`
   flags).
+- **mpv sends a property change only when the value differs from the last one
+  it delivered.** A value cleared locally on a load may never be re-sent if the
+  new file has the same value (e.g. same-size episodes replaced mid-playback).
+  Video output dimensions are therefore re-read directly on
+  `MPV_EVENT_VIDEO_RECONFIG`, not only taken from observation events.
 - **Rendering never blocks** on I/O, decoder commands or worker shutdown. Frame
   handoff is bounded and keeps only the latest frame. Retired images use a
   bounded two-slot pipeline.
